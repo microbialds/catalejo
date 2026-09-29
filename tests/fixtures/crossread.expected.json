@@ -1,0 +1,99 @@
+{
+  "writer": {
+    "duckdb_version": "1.4.5"
+  },
+  "columns": [
+    {
+      "name": "genome_id",
+      "duckdb_type": "VARCHAR"
+    },
+    {
+      "name": "assembly_version",
+      "duckdb_type": "INTEGER"
+    },
+    {
+      "name": "genome_size",
+      "duckdb_type": "BIGINT"
+    },
+    {
+      "name": "gc_content",
+      "duckdb_type": "FLOAT"
+    },
+    {
+      "name": "species_conflict",
+      "duckdb_type": "BOOLEAN"
+    },
+    {
+      "name": "isolation_date",
+      "duckdb_type": "DATE"
+    },
+    {
+      "name": "replicon_types",
+      "duckdb_type": "VARCHAR[]"
+    },
+    {
+      "name": "attributes",
+      "duckdb_type": "JSON"
+    },
+    {
+      "name": "vector",
+      "duckdb_type": "FLOAT[]"
+    },
+    {
+      "name": "note",
+      "duckdb_type": "VARCHAR"
+    },
+    {
+      "name": "st",
+      "duckdb_type": "VARCHAR"
+    }
+  ],
+  "rows": [
+    {
+      "genome_id": "KPN0001",
+      "assembly_version": 1,
+      "genome_size": "5432109",
+      "gc_content": 0.5703125,
+      "species_conflict": true,
+      "isolation_date": "2024-03-15",
+      "replicon_types": [
+        "IncFIB(K)",
+        "IncX3"
+      ],
+      "attributes": "{\"hallmarks\":3,\"taxonomy\":\"Caudoviricetes\"}",
+      "vector": [
+        0.5,
+        -1.25,
+        3.0
+      ],
+      "note": "Catalejo Genómico",
+      "st": "ST258-1LV"
+    },
+    {
+      "genome_id": "SEN0002",
+      "assembly_version": 2,
+      "genome_size": "9007199254740993",
+      "gc_content": 0.25,
+      "species_conflict": false,
+      "isolation_date": "1999-12-31",
+      "replicon_types": [],
+      "attributes": "{}",
+      "vector": [],
+      "note": "blaKPC-2",
+      "st": "ST11"
+    },
+    {
+      "genome_id": "SAU0003",
+      "assembly_version": null,
+      "genome_size": null,
+      "gc_content": null,
+      "species_conflict": null,
+      "isolation_date": null,
+      "replicon_types": null,
+      "attributes": null,
+      "vector": null,
+      "note": null,
+      "st": null
+    }
+  ]
+}

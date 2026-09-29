@@ -1,0 +1,25 @@
+cff-version: 1.2.0
+message: "If you use Catalejo, please cite it using these metadata."
+title: "Catalejo Genómico: a platform for exploring curated collections of microbial genomes"
+type: software
+version: 0.1.0
+date-released: "2026-09-25"
+license: MIT
+repository-code: "https://github.com/[ORGANIZATION]/catalejo"
+authors:
+  - family-names: "Ugalde"
+    given-names: "Juan A."
+    orcid: "https://orcid.org/0000-0001-6638-0817"
+    affiliation: "Facultad de Ingenieria, Universidad del Desarrollo"
+keywords:
+  - microbial genomics
+  - antimicrobial resistance
+  - genome visualization
+  - pangenome
+  - bacterial genomes
+abstract: >-
+  Catalejo Genómico is a web platform for looking at a curated collection of
+  microbial genomes produced by the mgap pipeline, with their annotation,
+  resistance determinants, mobile elements, typing results, pangenomes,
+  phylogenies and embeddings. Releases are immutable and reproducible, and the
+  application reads them directly in the browser.

@@ -1,0 +1,39 @@
+# Internal development material (build plan, prompts, setup notes). Never committed.
+dev/
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# Data, catalogs and releases never enter the repository
+data/
+catalog/
+releases/
+*.duckdb
+*.duckdb.wal
+
+# Secrets and environment
+.env
+.env.*
+!.env.example
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+packages/ingest/dist/
+
+# Node
+node_modules/
+packages/web/dist/
+packages/web/.vite/
+playwright-report/
+test-results/
+
+# OS and editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json

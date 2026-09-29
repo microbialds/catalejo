@@ -1,0 +1,27 @@
+/* Global styles (requirements §7). Every value is a token from
+   ./generated/tokens.css; no color literals here. */
+@import 'tailwindcss';
+@import './generated/tokens.css';
+
+@layer base {
+  html,
+  body {
+    background: var(--color-background);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: var(--text-base);
+  }
+
+  a {
+    color: var(--color-accent);
+  }
+
+  a:hover {
+    color: var(--color-accent-hover);
+  }
+
+  :focus-visible {
+    outline: var(--shape-hairline) solid var(--color-ink);
+    outline-offset: 2px;
+  }
+}

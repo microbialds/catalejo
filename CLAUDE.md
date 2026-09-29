@@ -8,6 +8,7 @@ Catalejo Genómico is a web platform for a curated collection of microbial genom
 - `docs/requirements.md` defines every page, its behavior, its acceptance items and the non-functional constraints.
 - `docs/critic-checklist.md` is the executable form of the acceptance items.
 - If `dev/build-plan.md` exists on this machine, read it before planning any milestone. It is not part of the repository.
+- If `dev/design/` exists, its HTML files are the layout references for the Collection, Genome and Embeddings pages (see `dev/design/README.md`); the documents win where they disagree.
 
 When code and these documents disagree, the documents win. When a document appears wrong, stop, state the problem and the proposed change in prose, and wait for the maintainer to approve an edit to the document before writing code that depends on it. Never change `docs/data-contract.md` or `docs/requirements.md` on your own initiative.
 
@@ -30,7 +31,7 @@ packages/web/        TypeScript, Node 24, pnpm, Vite, React; the static applicat
 config/              platform.yaml, palette.yaml, design-tokens.yaml, typing_display.yaml,
                      summary_templates.yaml, export-presets.yaml, versions.yaml
 docs/                data-contract.md, requirements.md, critic-checklist.md, setup.md, onboarding.md
-tests/               cross-package tests (Parquet cross-read, release golden test)
+tests/fixtures/      shared fixtures (the Parquet cross-read file); package tests live inside each package
 .github/workflows/   ci.yml, release.yml, deploy.yml
 dev/                 ignored by git; build plan, prompts, internal documents (present only on the maintainer's machine)
 ```
@@ -45,14 +46,14 @@ uv run --project packages/ingest pytest                 ingest tests
 uv run --project packages/ingest catalejo --help        the command
 uv run --project packages/ingest catalejo synth --out data/synth   synthetic mgap results (data/ is ignored)
 pnpm --dir packages/web install                         install web dependencies
-pnpm --dir packages/web dev                             development server
+pnpm --dir packages/web dev                             development server, serves releases/synth at /data/ by default
 pnpm --dir packages/web test                            component tests
 pnpm --dir packages/web e2e                             Playwright tests against the synthetic release
 pnpm --dir packages/web lint && pnpm --dir packages/web typecheck
 uv run --project packages/ingest ruff check . && uv run --project packages/ingest pyright
 ```
 
-Run the relevant tests after every change. A hook runs lint and type checks after edits; treat their failures as your own.
+Run the relevant tests after every change. A hook runs the linter after edits; treat its failures as your own. Type checks run with the tests.
 
 ## Toolchain pins
 
@@ -68,11 +69,23 @@ You may create branches, stage, commit, and push to feature branches, and open p
 
 Commit messages. A subject line in the imperative of at most 72 characters, starting with the area (`ingest:`, `web:`, `docs:`, `config:`, `ci:`), then a blank line, then a body stating what changed and why, referencing the milestone (`Milestone 2`) and the requirement section when relevant. No mention of Claude or of AI assistance in commit messages; the project's AI-assisted development statement lives in the README and the Methods page.
 
-Never commit files under `data/`, `releases/`, `catalog/`, `dev/`, `.env` or `.claude/settings.local.json`.
+Never commit files under `data/`, `releases/`, `catalog/`, `dev/`, `.env` or `.claude/settings.local.json`. Never edit anything under `.claude/`; the maintainer owns that directory.
+
+## Autonomy and escalation
+
+Resolve on your own, without asking: failing tests, lint and type errors, critic failures where the requirement is clear and the page does not meet it, layout at the three checked widths, missing links, wrong or literal strings, and any other implementation defect against the documents. Fixes change the code. They never change a test's expectation, the critic checklist, or the reading of a requirement to make a failure pass; a failure you disagree with is reported, not resolved.
+
+Stop and ask the maintainer before: editing `docs/data-contract.md`, `docs/requirements.md` or `docs/critic-checklist.md` (a hook blocks these; use the contract-change procedure in `dev/build-plan.md`); adding or upgrading a dependency; changing a route, a vocabulary term, a palette color or a design token; anything the permission rules deny; and any critic failure that survives three fix rounds or that you believe reflects a wrong requirement. Put unresolved points in the pull request description under "Open points".
 
 ## Sessions
 
-Each session covers one milestone or one bounded task from `dev/build-plan.md`. Start in plan mode, read the relevant sections of the two documents, propose a plan, and wait for approval. Delegate to the subagents in `.claude/agents/` by scope: `ingest` for Python and data, `web` for the application, `docs` for documentation, `critic` for review. The critic never edits code. A milestone ends when the critic passes its items, tests pass, and the maintainer has reviewed the pull request; do not declare completion yourself.
+Each session covers one milestone or one bounded task from `dev/build-plan.md`. Start in plan mode, read the relevant sections of the two documents, propose a plan, and wait for approval. Delegate to the subagents in `.claude/agents/` by scope: `ingest` for Python and data, `web` for the application, `docs` for documentation, `critic` for review. The critic never edits code.
+
+Before stopping at the end of any session, if `dev/development-log.md` exists, append one row to its table with: the date; the session label from the build plan (0, 1a, 1b, ...); the milestone; the model the session ran on as you understand it (the alias in the session header, with "fallback?" appended if you saw a model-switch notice) and the subagents' model if different; the advisor model if one was configured; the outcome (pull request number and state, or what was completed); and notes (decisions taken, open points, anything the next session must know). Do not edit earlier rows.
+
+A milestone that touches the web application runs its own review loop: build the synthetic release if it is missing, start the development server in the background, run the critic on the pages in scope with the server's URL, fix every reported failure, run the tests, run the critic again, up to three rounds, then stop the server. Then open the pull request with the final critic report attached and stop.
+
+If you must stop before a milestone is complete (context degrading, a blocking question), write `dev/handoff.md` with what is done, what remains and where to resume, open the pull request as a draft, and stop. A milestone ends when the critic passes its items, tests pass in CI, and the maintainer has reviewed the pull request; do not declare completion yourself.
 
 When you are unsure, ask. When something in the documents is ambiguous, quote the passage and propose two readings with a recommendation.
 

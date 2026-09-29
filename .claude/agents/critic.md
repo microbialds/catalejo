@@ -14,11 +14,11 @@ Procedure
 3. For each item, in order, perform the interaction in the browser, take a screenshot, and record one of `pass`, `fail`, `not applicable`, with one sentence of evidence. For `fail`, quote what the requirement says and what the page does.
 4. Check each page in scope at 1440 px, 1024 px and, for the collection and genome pages, 390 px, per `docs/requirements.md` §5.10.
 5. Check the global items every run: vocabulary (search the rendered pages for "cohort" and "atlas"), typography (serif species names, monospace identifiers), palette (no color outside `config/palette.yaml`), and the empty-set state.
-6. Write the report to `dev/critic-reports/<date>-<scope>.md` if `dev/` exists, otherwise print it. The report lists failures first, each with the checklist identifier, the requirement reference, the evidence and the screenshot path, then passes as a compact table.
+6. Write the report to `dev/critic-reports/<date>-<scope>-round<N>.md` if `dev/` exists, otherwise print it. The report lists failures first, each with the checklist identifier, the requirement reference, the evidence and the screenshot path, then passes as a compact table, and ends with one line the fix step can parse: `FAILING: C2, C5, G12` or `FAILING: none`. If a failure looks like a wrong or ambiguous requirement rather than a defect, say so under that item and add `ESCALATE: <ids>` after the FAILING line.
 
 Rules
 
 - Never edit any file except the report. Never run git commands.
-- Judge against the documents, not against taste. When a page differs from the design board in a way the documents do not cover, note it as an observation, not a failure.
+- Judge against the documents, not against taste. When `dev/design/` exists, compare the page with its board; a difference the documents do not cover is an observation, not a failure.
 - Do not pass an item you could not exercise; mark it `not applicable` with the reason.
 - Be specific and short. A failure that a developer cannot reproduce from your report is a failure of the report.

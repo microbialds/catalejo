@@ -54,9 +54,8 @@
       "Bash(curl:*)",
       "Bash(wget:*)",
       "Read(../**)",
-      "Read(~/**)",
       "Edit(../**)",
-      "Write(../**)"
+      "Edit(.claude/**)"
     ]
   },
   "hooks": {
@@ -64,7 +63,19 @@
       {
         "matcher": "Bash",
         "hooks": [
-          { "type": "command", "command": "bash .claude/hooks/guard-git.sh" }
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/guard-git.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/guard-docs.sh"
+          }
         ]
       }
     ],
@@ -72,8 +83,14 @@
       {
         "matcher": "Edit|Write|MultiEdit",
         "hooks": [
-          { "type": "command", "command": "bash .claude/hooks/check-vocabulary.sh" },
-          { "type": "command", "command": "bash .claude/hooks/run-checks.sh" }
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/check-vocabulary.sh"
+          },
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/run-checks.sh"
+          }
         ]
       }
     ]

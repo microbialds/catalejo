@@ -5,7 +5,7 @@ input=$(cat)
 file=$(printf '%s' "$input" | python3 -c 'import json,sys; d=json.load(sys.stdin).get("tool_input",{}); print(d.get("file_path") or d.get("path") or "")' 2>/dev/null)
 [ -z "$file" ] || [ ! -f "$file" ] && exit 0
 case "$file" in
-  */docs/data-contract.md|*/docs/requirements.md|*/CLAUDE.md|*/.claude/*) exit 0 ;;
+  */docs/data-contract.md|*/docs/requirements.md|*/docs/critic-checklist.md|*/CLAUDE.md|*/.claude/*|*/dev/*|*/data/*|*/releases/*|*/catalog/*|*/tests/*|*/e2e/*|*.spec.ts|*.spec.tsx|*.test.ts|*.test.tsx|*/test_*.py) exit 0 ;;
 esac
 if grep -n -i -E '\bcohorts?\b' "$file" >/dev/null 2>&1; then
   echo "Vocabulary: '$file' contains 'cohort'. Use 'genome set' (CLAUDE.md, Vocabulary)." >&2

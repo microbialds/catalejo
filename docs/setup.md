@@ -25,10 +25,17 @@ git config user.name "[YOUR NAME]"
 git config user.email "[YOUR EMAIL]"
 ```
 
-Copy the bootstrap files into the directory (`CLAUDE.md`, `.claude/`, `docs/`, `.gitignore`, `LICENSE`, `CITATION.cff`, `.env.example`) and the internal `dev/` directory. Confirm `dev/` is ignored before the first commit.
+Copy the bootstrap files into the directory (`CLAUDE.md`, `.claude/`, `docs/`, `.gitignore`, `LICENSE`, `CITATION.cff`, `.env.example`) and the internal `dev/` directory. Make the hooks executable and confirm `dev/` is ignored before the first commit.
 
 ```
+chmod +x .claude/hooks/*.sh
 git status --ignored | grep dev/
+```
+
+Authenticate the GitHub CLI once, so that Claude Code can open pull requests under your account.
+
+```
+gh auth login
 ```
 
 Edit `LICENSE` and `CITATION.cff` to replace the placeholders. Then make the first commit yourself.
@@ -45,13 +52,31 @@ On GitHub, protect `main` (Settings, Branches, add rule for `main`): require a p
 
 The repository ships `.claude/settings.json` (shared permissions and hooks) and `.claude/agents/` (subagents). Personal overrides go in `.claude/settings.local.json`, which is ignored.
 
-Model. Start sessions with the model you intend to use for the whole session; the subagents inherit it.
+Model. Start sessions with the model you intend to use for the whole session; the subagents inherit it. The `opus` alias resolves to Opus 5.5 on Claude Code v2.1.280 or later.
 
 ```
 claude --model opus
 ```
 
-Inside a session `/model` shows and changes the current model. Confirm in the current Claude Code documentation that the model identifier for Claude Opus 5.5 is accepted in the form above; the identifier format has changed between versions.
+Inside a session `/model` shows and changes the current model, and `/status` shows the model actually in use, which is worth checking at the end of every session.
+
+Advisor. Claude Code can consult a second, stronger model at decision points (before committing to an approach, when an error recurs, before declaring a task done). Set Fable 5.1 as the advisor once; the choice is saved in your user settings, not in the repository.
+
+```
+/advisor fable
+```
+
+Flagged requests. Fable 5.1 and Opus 5.5 run safety classifiers that flag biology content, and a repository about resistance determinants can trigger them, sometimes on the first request of a session. By default Claude Code then switches the session to Opus 5 without asking. To be asked instead, run `/config` and turn off "Switch models when a message is flagged" (this writes `switchModelsOnFlag: false` to your user settings). Record the model that served each session in the development log.
+
+Both settings belong in `~/.claude/settings.json`, your user file, so that model and billing choices stay personal:
+
+```json
+{
+  "model": "opus",
+  "advisorModel": "fable",
+  "switchModelsOnFlag": false
+}
+```
 
 Browser for the critic. The critic subagent uses the Playwright MCP server. Add it once per machine.
 
@@ -78,14 +103,16 @@ pnpm --dir packages/web typecheck
 
 1. Open a terminal in the repository and start Claude Code with the model.
 2. Press Shift+Tab until plan mode is active.
-3. Paste the prompt for the milestone from `dev/build-plan.md`.
+3. Type `Run milestone <N> as specified in dev/build-plan.md.`
 4. Read the plan, correct it, approve it.
-5. When the session reports that the milestone's pull request is open, run the critic prompt from the build plan, then review the pull request on GitHub.
-6. Merge, tag if the milestone calls for it, and close the session with `/clear` before starting the next milestone.
+5. The session runs its own build, critic and fix loop and opens the pull request with the final critic report. Read the report and the "Open points" section, then review the pull request on GitHub.
+6. Merge, tag if the milestone calls for it, check `/status`, and close the session with `/clear` before starting the next milestone.
 
 Do not carry a session across milestones. The documents are the memory of the project; the conversation is not.
 
 ## 6. Local data
+
+Before milestone 0, place a small real mgap results directory (a few genomes covering the tools in the contract, including one run with MOB-suite and one without) at `data/mgap-example/`. It is ignored by git and is the reference from which the parsers and the synthetic generator take the file layout.
 
 Synthetic data and local releases live under `data/`, `catalog/` and `releases/`, all ignored by git. To produce the synthetic release used by tests and by the critic:
 
@@ -94,7 +121,7 @@ uv run --project packages/ingest catalejo synth --species 3 --genomes 60 --out d
 uv run --project packages/ingest catalejo metadata init --mgap data/synth --out data/synth-metadata.csv
 uv run --project packages/ingest catalejo ingest --mgap data/synth --metadata data/synth-metadata.csv --catalog catalog/synth.duckdb
 uv run --project packages/ingest catalejo release build --catalog catalog/synth.duckdb --out releases/synth
-pnpm --dir packages/web dev -- --release ../../releases/synth
+pnpm --dir packages/web dev
 ```
 
 The exact flags are defined by the command's help once milestone 1 is complete; the sequence above is the intended shape.

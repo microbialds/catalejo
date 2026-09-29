@@ -1,0 +1,58 @@
+# Platform parameters (contract §3, §7 and §8; requirements §5.4, §6.1, §6.7).
+#
+# Every catalejo command reads this file (contract §8). Values here are
+# parameters of the platform, and changing one changes what a release
+# contains, so a change is recorded in the release notes.
+
+version: 1
+
+platform_name: Catalejo
+
+# Pattern every genome_id must match (contract §3.1). Checked by
+# `catalejo metadata validate` and `catalejo release check`.
+genome_id_pattern: "^[A-Z]{2,5}[0-9]{3,6}$"
+
+# Order in which species sources are consulted (contract §3.3). The first
+# source that yields a name wins, and disagreement with a later source sets
+# species_conflict.
+species_precedence:
+  - metadata
+  - gtdbtk
+  - mlst
+  - kraken2
+
+thresholds:
+  # Reciprocal overlap on the same contig and strand above which an old
+  # feature maps to a new one (contract §3.4).
+  feature_mapping_overlap: 0.9
+  # Shared member fraction of the smaller cluster above which two pangenome
+  # clusters are the same across releases (contract §3.5).
+  cluster_mapping_shared: 0.5
+  # Features on each side of a focal feature in a neighborhood (contract §7.2).
+  neighborhood_window: 8
+  # Largest genome set for the cross-genome neighborhood comparison
+  # (contract §7.3, requirements §6.4).
+  neighborhood_comparison_cap: 200
+  # Largest genome set drawn in the presence and absence heatmap
+  # (requirements §6.2).
+  heatmap_genome_cap: 2000
+  # Species drawn individually in collection charts; the smallest beyond this
+  # number are grouped as Other (requirements §5.4, §6.1).
+  chart_species_max: 8
+
+# Assembly quality thresholds drawn on the collection page QC scatter and used
+# for the QC flag in summaries/qc.parquet (contract §6.2). A genome passes when
+# completeness is at least completeness_min and contamination is at most
+# contamination_max, both in percent from CheckM2.
+qc:
+  completeness_min: 95
+  contamination_max: 5
+
+# Projection of genome embeddings computed by `catalejo release build`
+# (contract §4.5, requirements §6.7). Recorded in the embedding table and the
+# manifest so the embedding map can be reproduced from the release alone.
+umap:
+  n_neighbors: 30
+  min_dist: 0.1
+  seed: 42
+  metric: cosine

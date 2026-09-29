@@ -1,0 +1,66 @@
+# Figure export presets (requirements §8).
+#
+# Every chart, map, tree and heatmap offers these presets in its export menu.
+# Journal widths are defaults and may be edited here. Labels live in the web
+# application's strings module under `label_key`. Heights follow the content
+# and are shown before download.
+
+version: 1
+
+presets:
+  - key: single_column
+    label_key: exportSingleColumn
+    width_mm: 89
+    formats: [svg, png]
+    png_dpi: 300
+  - key: one_and_half_column
+    label_key: exportOneAndHalfColumn
+    width_mm: 120
+    formats: [svg, png]
+    png_dpi: 300
+  - key: double_column
+    label_key: exportDoubleColumn
+    width_mm: 183
+    formats: [svg, png]
+    png_dpi: 300
+  - key: slide
+    label_key: exportSlide
+    width_px: 1920
+    height_px: 1080
+    formats: [png, svg]
+    png_scale: 2
+    backgrounds: [light, dark]
+  # Applies to any of the presets above and writes PNG at 600 dpi.
+  - key: high_resolution
+    label_key: exportHighResolution
+    applies_to: any
+    formats: [png]
+    png_dpi: 600
+
+rules:
+  # Enforced by the export scaling at final size.
+  min_font_pt: 7
+  min_line_pt: 0.5
+  dpi:
+    standard: 300
+    high: 600
+  slide:
+    width_px: 1920
+    height_px: 1080
+    png_scale: 2
+    backgrounds: [light, dark]
+  svg:
+    # SVG keeps text as text with the Source families declared, and offers
+    # outlining text to paths.
+    text_as_text: true
+    declare_font_families: true
+    outline_text_option: true
+  # Palette on white unless the slide dark background is chosen.
+  background: white
+  transparent_background_option: true
+  legend: included
+  title: optional
+  interface_chrome: excluded
+  # Every export is accompanied by a sidecar JSON with these fields, so a
+  # figure can be regenerated from the release.
+  sidecar_fields: [release_id, page, filters, preset, data_csv]

@@ -1,0 +1,160 @@
+# Catalejo color vocabulary (requirements §5.4 and §7).
+#
+# Every color used by the web application, the Python exports and the CGView
+# JSON comes from this file. The web package compiles it into
+# packages/web/src/generated/palette.ts; a test fails on any color literal
+# outside the generated module. Changing a color here needs the maintainer's
+# approval (CLAUDE.md, Autonomy and escalation).
+
+version: 1
+
+# Species colors, assigned once in species_registry.color in this order and
+# never changed between releases. Okabe-Ito based; the first six follow the
+# design boards. "other" groups the smallest species in charts when more than
+# eight are present.
+species:
+  sequence:
+    - "#0072B2"  # blue
+    - "#E69F00"  # orange
+    - "#009E73"  # bluish green
+    - "#CC79A7"  # reddish purple
+    - "#56B4E9"  # sky blue
+    - "#D55E00"  # vermillion
+    - "#F0E442"  # yellow (proposal, milestone 0)
+    - "#000000"  # black (proposal, milestone 0)
+  other: "#b5b3aa"
+
+# Drug classes, in their stated order. Each entry lists the AMRFinderPlus
+# class or subclass values (and CARD drug classes, lowercased) that map to it;
+# a determinant takes the first entry whose match list contains its subclass,
+# then its class. Anything unmatched, including multi-class values such as
+# "AMINOGLYCOSIDE/QUINOLONE", falls into "other". Colors are proposals from
+# milestone 0, chosen to be distinguishable on white (Paul Tol muted and light
+# schemes).
+drug_classes:
+  - key: carbapenem
+    label_key: drugClassCarbapenem
+    color: "#882255"
+    match: [CARBAPENEM, carbapenem]
+  - key: beta_lactam
+    label_key: drugClassBetaLactam
+    color: "#CC6677"
+    match: [BETA-LACTAM, CEPHALOSPORIN, penam, cephalosporin, monobactam, penem]
+  - key: aminoglycoside
+    label_key: drugClassAminoglycoside
+    color: "#117733"
+    match: [AMINOGLYCOSIDE, aminoglycoside antibiotic]
+  - key: quinolone
+    label_key: drugClassQuinolone
+    color: "#332288"
+    match: [QUINOLONE, fluoroquinolone antibiotic]
+  - key: colistin
+    label_key: drugClassColistin
+    color: "#AA4499"
+    match: [COLISTIN, peptide antibiotic]
+  - key: tetracycline
+    label_key: drugClassTetracycline
+    color: "#44AA99"
+    match: [TETRACYCLINE, tetracycline antibiotic]
+  - key: sulfonamide
+    label_key: drugClassSulfonamide
+    color: "#999933"
+    match: [SULFONAMIDE, sulfonamide antibiotic]
+  - key: trimethoprim
+    label_key: drugClassTrimethoprim
+    color: "#DDCC77"
+    match: [TRIMETHOPRIM, diaminopyrimidine antibiotic]
+  - key: phenicol
+    label_key: drugClassPhenicol
+    color: "#88CCEE"
+    match: [PHENICOL, phenicol antibiotic]
+  - key: macrolide
+    label_key: drugClassMacrolide
+    color: "#6699CC"
+    match: [MACROLIDE, LINCOSAMIDE, STREPTOGRAMIN, LINCOSAMIDE/MACROLIDE/STREPTOGRAMIN, macrolide antibiotic, lincosamide antibiotic, streptogramin antibiotic]
+  - key: fosfomycin
+    label_key: drugClassFosfomycin
+    color: "#EE8866"
+    match: [FOSFOMYCIN, phosphonic acid antibiotic]
+  - key: glycopeptide
+    label_key: drugClassGlycopeptide
+    color: "#BBCC33"
+    match: [GLYCOPEPTIDE, VANCOMYCIN, glycopeptide antibiotic]
+  - key: rifamycin
+    label_key: drugClassRifamycin
+    color: "#FFAABB"
+    match: [RIFAMYCIN, rifamycin antibiotic]
+  - key: other
+    label_key: drugClassOther
+    color: "#8c8a82"
+    match: []
+
+# Contig types (requirements §5.4). Chromosome dark gray, plasmid blue,
+# prophage light blue, unclassified light gray.
+contig_types:
+  chromosome: "#6b6a64"
+  plasmid: "#0072B2"
+  prophage: "#56B4E9"
+  unclassified: "#b5b3aa"
+
+# CGView tracks (contract §7.1), outside in.
+tracks:
+  cds_forward: "#6b6a64"
+  cds_reverse: "#b5b3aa"
+  other_features: "#3d3c37"
+  amr: "#D55E00"
+  virulence: "#CC79A7"
+  region_prophage: "#56B4E9"
+  region_plasmid: "#0072B2"
+  gc_content: "#1c1c1a"
+  gc_skew: "#0072B2"
+  track_rule: "#e3e1da"
+
+# Neighborhood strip categories (requirements §6.3).
+neighborhood_categories:
+  resistance: "#D55E00"
+  transposase_is: "#E69F00"
+  plasmid_replication_transfer: "#0072B2"
+  other: "#b5b3aa"
+
+# The embedding map (requirements §5.4, §6.7). Dark background and a lifted
+# variant of the species sequence, index for index, so the mapping from
+# species to hue is preserved.
+embedding_map:
+  species_lifted:
+    - "#4da3e0"
+    - "#f2b134"
+    - "#2fbf8f"
+    - "#e08ac2"
+    - "#7fd0f2"
+    - "#f07a3a"
+    - "#f5ec7a"  # proposal, milestone 0
+    - "#c8c6bf"  # proposal, milestone 0
+  other: "#8f8d85"
+  background: "#0f1216"
+  panel: "#1a1f26"
+  rule: "#23282f"
+  control_border: "#333942"
+  text: "#f2f0e9"
+  text_secondary: "#d9d6cc"
+  text_muted: "#8f8d85"
+
+# Interface chrome (requirements §7). No saturated color except the accent.
+chrome:
+  paper: "#f6f5f1"
+  panel: "#ffffff"
+  sidebar: "#eeede7"
+  border: "#dcdad3"
+  border_strong: "#d9d7cf"
+  rule_light: "#ecebe5"
+  control_border: "#c9c7bf"
+  bar_track: "#f1f0eb"
+  ink: "#1c1c1a"
+  ink_soft: "#2a2926"
+  nav_ink: "#3d3c37"
+  text_secondary: "#6b6a64"
+  text_label: "#8c8a82"
+  text_faint: "#b5b3aa"
+  accent: "#8a2f22"
+  accent_hover: "#6e2419"
+  on_ink: "#ffffff"

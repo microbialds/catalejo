@@ -1,0 +1,16 @@
+# Toolchain pins (CLAUDE.md, Toolchain pins). Do not change without the
+# maintainer's approval.
+#
+# DuckDB Python and @duckdb/duckdb-wasm must run the same DuckDB engine
+# major.minor, so that Parquet written by the ingest package is read by the
+# application exactly as written. The npm package is numbered independently of
+# the engine it bundles; duckdb_engine records the engine inside the pinned
+# duckdb-wasm (from SELECT version() in Node). The cross-read tests in both
+# packages check these values.
+
+python: "3.13"
+node: "24"
+duckdb_python: "1.4.5"
+duckdb_wasm_npm: "1.32.0"
+duckdb_engine: "1.4.3"
+duckdb_engine_minor: "1.4"

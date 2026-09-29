@@ -1,0 +1,110 @@
+# Continuous integration (requirements §13). Lint, type checks and tests for
+# both packages on every pull request. The web job builds the synthetic data
+# before its tests; from milestone 1a it also builds the synthetic release
+# (metadata init, ingest, release check, release build).
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches-ignore: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  ingest:
+    name: ingest (Python)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: packages/ingest/uv.lock
+
+      - name: Install
+        run: uv sync --project packages/ingest --locked
+
+      - name: Lint
+        run: uv run --project packages/ingest ruff check .
+
+      - name: Type check
+        run: uv run --project packages/ingest pyright
+
+      - name: Tests
+        run: uv run --project packages/ingest pytest
+
+      - name: Cross-read fixture is current
+        # The cross-read test regenerates tests/fixtures/crossread.parquet with
+        # the pinned DuckDB. A difference means the committed fixture is stale.
+        run: git diff --exit-code -- tests/fixtures/
+
+  web:
+    name: web (TypeScript)
+    runs-on: ubuntu-latest
+    needs: ingest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: packages/web/package.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+          cache-dependency-path: packages/web/pnpm-lock.yaml
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: packages/ingest/uv.lock
+
+      - name: Install
+        run: pnpm --dir packages/web install --frozen-lockfile
+
+      - name: Install Playwright Chromium
+        run: pnpm --dir packages/web exec playwright install --with-deps chromium
+
+      - name: Lint
+        run: pnpm --dir packages/web lint
+
+      - name: Type check
+        run: pnpm --dir packages/web typecheck
+
+      - name: Build
+        # postbuild runs scripts/check-dist.mjs (local DuckDB-WASM binaries, no CDN).
+        run: pnpm --dir packages/web build
+
+      - name: Synthetic data
+        # Milestone 1a adds: catalejo metadata init, ingest, release check and
+        # release build writing releases/synth, which the dev server serves.
+        run: |
+          uv sync --project packages/ingest --locked
+          uv run --project packages/ingest catalejo synth --out data/synth
+
+      - name: Component tests
+        run: pnpm --dir packages/web test
+
+      - name: Generated palette and tokens are current
+        # pretest regenerates src/generated from config/; a difference means the
+        # committed modules are stale against palette.yaml or design-tokens.yaml.
+        run: git diff --exit-code -- packages/web/src/generated/
+
+      - name: End-to-end tests
+        run: pnpm --dir packages/web e2e
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: packages/web/playwright-report/
+          retention-days: 7

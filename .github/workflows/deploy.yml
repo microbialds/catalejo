@@ -1,0 +1,31 @@
+# Application deployment workflow (requirements §11, contract §8.4). Skeleton
+# written in milestone 0; the steps are completed in milestone 5. Triggered by
+# a tag web-vX.Y.Z, which only the maintainer creates. No workflow writes to git.
+name: deploy
+
+on:
+  push:
+    tags:
+      - "web-v*"
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Not yet implemented
+        run: echo "deploy.yml is a skeleton until milestone 5 (tag ${{ github.ref_name }})."
+
+      # 1. Set up pnpm and Node from .node-version; pnpm install --frozen-lockfile.
+      # 2. Run lint, typecheck, test and e2e for packages/web.
+      # 3. pnpm --dir packages/web build.
+      # 4. For each Pages project (one per instance), read releases/current.json
+      #    for the instance's group and the manifest.json it points to.
+      # 5. Fail the deployment if the manifest's schema_version is outside the
+      #    application's supported schema_version range.
+      # 6. Deploy packages/web/dist to each Pages project with wrangler
+      #    (CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID from repository secrets).

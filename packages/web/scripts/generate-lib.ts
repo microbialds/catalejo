@@ -140,8 +140,8 @@ function tokensCss(loaded: Loaded): string {
     `/* ${HEADER} */`,
     '',
     '/* Tailwind v4 theme. The default namespaces are reset so that only the',
-    '   tokens below exist as utilities: no default colors, fonts, sizes, radii,',
-    '   shadows or breakpoints. */',
+    '   tokens below exist as utilities: no default colors, fonts, sizes, line',
+    '   heights, radii, shadows or breakpoints. */',
     '@theme static {',
   ];
   for (const ns of [
@@ -149,6 +149,7 @@ function tokensCss(loaded: Loaded): string {
     'font',
     'font-weight',
     'text',
+    'leading',
     'tracking',
     'radius',
     'shadow',
@@ -172,6 +173,9 @@ function tokensCss(loaded: Loaded): string {
   }
   for (const [key, value] of Object.entries(section(typography, 'sizes', tokensFile))) {
     lines.push(`  --text-${kebab(key)}: ${scalar(value, `typography.sizes.${key}`)};`);
+  }
+  for (const [key, value] of Object.entries(section(typography, 'line_heights', tokensFile))) {
+    lines.push(`  --leading-${kebab(key)}: ${scalar(value, `typography.line_heights.${key}`)};`);
   }
   for (const [key, value] of Object.entries(section(typography, 'letter_spacing', tokensFile))) {
     lines.push(`  --tracking-${kebab(key)}: ${scalar(value, `typography.letter_spacing.${key}`)};`);

@@ -17,16 +17,16 @@ The second command installs the Chromium build that the end-to-end tests use.
 
 Each script runs as `pnpm --dir packages/web <script>` from the repository root.
 
-| Script | What it does |
-|---|---|
-| `dev` | Starts the Vite development server on port 5173, after running `generate` |
-| `build` | Type checks and builds into `dist/` after running `generate`, then runs `scripts/check-dist.mjs` |
-| `test` | Runs the Vitest component tests after running `generate` |
-| `e2e` | Runs the Playwright tests in `e2e/`, starting the development server if none is running |
-| `lint` | Runs ESLint and the Prettier check |
-| `typecheck` | Runs `tsc -b` after running `generate` |
-| `generate` | Writes `src/generated/` from the palette and the design tokens |
-| `preview` | Serves the built `dist/` on port 4173 |
+| Script      | What it does                                                                                     |
+| ----------- | ------------------------------------------------------------------------------------------------ |
+| `dev`       | Starts the Vite development server on port 5173, after running `generate`                        |
+| `build`     | Type checks and builds into `dist/` after running `generate`, then runs `scripts/check-dist.mjs` |
+| `test`      | Runs the Vitest component tests after running `generate`                                         |
+| `e2e`       | Runs the Playwright tests in `e2e/`, starting the development server if none is running          |
+| `lint`      | Runs ESLint and the Prettier check                                                               |
+| `typecheck` | Runs `tsc -b` after running `generate`                                                           |
+| `generate`  | Writes `src/generated/` from the palette and the design tokens                                   |
+| `preview`   | Serves the built `dist/` on port 4173                                                            |
 
 The Playwright tests run in Chromium at widths of 1440 and 1024 pixels.
 

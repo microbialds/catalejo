@@ -26,6 +26,10 @@ export const tokens = {
       medium: 500,
       semibold: 600,
     },
+    line_heights: {
+      tight: 1.1,
+      body: 1.5,
+    },
     letter_spacing: {
       tight: '-0.01em',
       tagline: '0.04em',

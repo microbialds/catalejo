@@ -12,7 +12,7 @@ import { SetBar } from './SetBar';
 function Wordmark() {
   return (
     <div className="flex flex-col gap-0.5 px-nav-item-padding-x pb-5.5">
-      <span className="font-serif text-wordmark leading-[1.1] font-semibold tracking-tight text-ink">
+      <span className="font-serif text-wordmark leading-tight font-semibold tracking-tight text-ink">
         {strings.wordmark}
       </span>
       <span className="text-small tracking-tagline text-text-secondary">{strings.tagline}</span>

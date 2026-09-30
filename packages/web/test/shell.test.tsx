@@ -1,11 +1,14 @@
 // @vitest-environment jsdom
 // Requirements §5.1: the shell renders the wordmark, the two navigation groups
 // in order, and marks the active page with the accent left rule.
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { cleanup, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { MainPlaceholder } from '../src/components/MainPlaceholder';
 import { Shell } from '../src/components/Shell';
 import { strings } from '../src/strings';
+import { sourceFiles } from './files';
 
 afterEach(cleanup);
 
@@ -39,6 +42,19 @@ describe('Shell', () => {
     const methods = screen.getByRole('link', { name: strings.footerMethods });
     expect(methods.getAttribute('href')).toBe('/methods');
     expect(screen.getByRole('main')).toBeTruthy();
+  });
+
+  it('sets the wordmark line height from the tight token', () => {
+    renderAt('/');
+    const classes = screen.getByText(strings.wordmark).className.split(/\s+/);
+    expect(classes).toContain('leading-tight');
+  });
+
+  it('uses no arbitrary line height in the components', () => {
+    const arbitrary = sourceFiles(['.tsx'])
+      .filter((file) => file.includes(`${path.sep}components${path.sep}`))
+      .filter((file) => readFileSync(file, 'utf8').includes('leading-['));
+    expect(arbitrary).toEqual([]);
   });
 
   it('renders Explore then Analyze with their pages in order', () => {

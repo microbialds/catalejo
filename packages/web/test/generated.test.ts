@@ -25,6 +25,20 @@ describe('generated files', () => {
     }
   });
 
+  it('emit the line heights as the only leading utilities', async () => {
+    const files = await renderGenerated();
+    const css = files.find((file) => file.path === 'src/generated/tokens.css')?.content ?? '';
+    expect(css).toContain('--leading-*: initial;');
+    const leading = [...css.matchAll(/^\s*--leading-([a-z-]+):\s*([^;]+);/gm)].map((match) => [
+      match[1],
+      match[2],
+    ]);
+    expect(leading).toEqual([
+      ['tight', '1.1'],
+      ['body', '1.5'],
+    ]);
+  });
+
   it('resolve palette references', () => {
     const palette = { chrome: { paper: '#f6f5f1' }, species: { sequence: ['#0072B2'] } };
     expect(resolvePaletteRef(palette, 'palette:chrome.paper')).toBe('#f6f5f1');

@@ -41,6 +41,16 @@ def test_design_token_colors_resolve_in_palette() -> None:
         assert palette.resolve(ref).startswith("#"), name
 
 
+def test_yellow_species_marks_carry_an_ink_outline() -> None:
+    tokens = config.load_design_tokens()
+    palette = config.load_palette()
+    (rule,) = tokens.marks.species_outlines
+    assert palette.species.sequence[rule.species_index] == "#F0E442"
+    assert rule.background == "light"
+    assert rule.outline_width == "0.5px"
+    assert palette.resolve(rule.outline_color) == palette.chrome["ink"]
+
+
 def test_unresolvable_palette_reference_fails(tmp_path: Path, repo_root: Path) -> None:
     for name in config.CONFIG_FILES:
         shutil.copy(repo_root / "config" / name, tmp_path / name)

@@ -240,6 +240,19 @@ class Typography(_Model):
     line_heights: dict[str, float] = Field(default_factory=dict[str, float])
 
 
+class SpeciesOutline(_Model):
+    """An outline for marks drawn in one species color on a light background."""
+
+    species_index: int = Field(ge=0, le=7)
+    background: Literal["light"]
+    outline_width: str
+    outline_color: str
+
+
+class Marks(_Model):
+    species_outlines: list[SpeciesOutline]
+
+
 class DesignTokens(_Model):
     """``config/design-tokens.yaml`` (requirements §7)."""
 
@@ -249,12 +262,18 @@ class DesignTokens(_Model):
     spacing: dict[str, str]
     layout: dict[str, str]
     shape: dict[str, str]
+    marks: Marks
 
     @model_validator(mode="after")
     def _check(self) -> DesignTokens:
         for name, ref in self.color.items():
             if not _PALETTE_REF.match(ref):
                 raise ValueError(f"color token {name} must be a palette reference: {ref!r}")
+        for rule in self.marks.species_outlines:
+            if not _PALETTE_REF.match(rule.outline_color):
+                raise ValueError(
+                    f"marks outline_color must be a palette reference: {rule.outline_color!r}"
+                )
         if set(self.typography.families) != {"serif", "sans", "mono"}:
             raise ValueError("typography.families must be serif, sans and mono")
         return self
@@ -647,6 +666,13 @@ def load_design_tokens(directory: Path | None = None) -> DesignTokens:
             palette.resolve(ref)
         except KeyError as exc:
             raise ConfigError(f"design token color {name} does not resolve: {ref}") from exc
+    for rule in tokens.marks.species_outlines:
+        try:
+            palette.resolve(rule.outline_color)
+        except KeyError as exc:
+            raise ConfigError(
+                f"marks outline_color does not resolve: {rule.outline_color}"
+            ) from exc
     return tokens
 
 

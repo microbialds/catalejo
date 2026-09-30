@@ -1,0 +1,54 @@
+# Application deployment workflow (requirements §11, contract §8.4). Skeleton
+# written in milestone 0; the steps are completed in milestone 5. Triggered by
+# a tag web-vX.Y.Z, which only the maintainer creates. No workflow writes to git.
+name: deploy
+
+on:
+  push:
+    tags:
+      - "web-v*"
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Not yet implemented
+        run: echo "deploy.yml is a skeleton until milestone 5 (tag ${{ github.ref_name }})."
+
+      # 1. Set up pnpm and Node from .node-version; pnpm install --frozen-lockfile.
+      # 2. Run lint, typecheck, test and e2e for packages/web.
+      # 3. pnpm --dir packages/web build. The build contains no DuckDB-WASM engine
+      #    files: they exceed the Pages limit of 25 MiB per file and are served
+      #    from the bucket through functions/assets/[[path]].ts.
+      # 3a. Upload the DuckDB-WASM engine files and workers for the pinned package
+      #    version (config/versions.yaml duckdb_wasm_npm) to the bucket, before
+      #    deploying, so the new build never points at missing files. Objects
+      #    under one version never change, so an existing key is left as is.
+      #      V=$(node -p "require('./packages/web/node_modules/@duckdb/duckdb-wasm/package.json').version")
+      #      for f in duckdb-mvp.wasm duckdb-eh.wasm duckdb-browser-mvp.worker.js duckdb-browser-eh.worker.js; do
+      #        npx wrangler r2 object put "$R2_BUCKET/assets/duckdb-wasm/$V/$f" \
+      #          --file "packages/web/node_modules/@duckdb/duckdb-wasm/dist/$f" --remote \
+      #          --content-type "$(case $f in *.wasm) echo application/wasm;; *) echo text/javascript;; esac)" \
+      #          --cache-control "public, max-age=31536000, immutable"
+      #      done
+      # 3b. Download the DuckDB extensions for the pinned engine from
+      #    extensions.duckdb.org, verify them against the sha256 values in
+      #    config/versions.yaml, and upload them in the layout the extension
+      #    repository expects, assets/duckdb-extensions/v<engine>/<platform>/<name>.duckdb_extension.wasm:
+      #      node packages/web/scripts/fetch-duckdb-extensions.mjs --out staging/duckdb-extensions
+      #      for f in $(cd staging/duckdb-extensions && find . -name '*.wasm' | sed 's|^\./||'); do
+      #        npx wrangler r2 object put "$R2_BUCKET/assets/duckdb-extensions/$f" \
+      #          --file "staging/duckdb-extensions/$f" --remote \
+      #          --content-type application/wasm --cache-control "public, max-age=31536000, immutable"
+      #      done
+      # 4. For each Pages project (one per instance), read releases/current.json
+      #    for the instance's group and the manifest.json it points to.
+      # 5. Fail the deployment if the manifest's schema_version is outside the
+      #    application's supported schema_version range.
+      # 6. Deploy packages/web/dist to each Pages project with wrangler
+      #    (CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID from repository secrets).

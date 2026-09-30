@@ -1,6 +1,6 @@
 # Requirements
 
-Catalejo Genómico. Version 0.3, 2026-09-27. Status: draft for review.
+Catalejo Genómico. Version 0.4, 2026-09-29. Status: draft for review.
 
 This document states what the platform does, page by page, and the constraints it is built under. It is the companion of `docs/data-contract.md`, which defines the data the platform reads; where the two disagree, the contract wins and this document is corrected. The critic checklist (`docs/critic-checklist.md`) is derived from the acceptance items at the end of each page section, and the build plan takes its milestones from §14.
 
@@ -60,7 +60,7 @@ No instance stores user data. There are no accounts, profiles, saved objects or 
 
 ### 5.1 Shell
 
-Every page shares the shell shown on the final canvas boards. A 200 px left column holds the wordmark (Catalejo, with the tagline "microbial genome collection"), the navigation in two groups, Explore (Collection, Genome sets, Genomes, Genes) and Analyze (Phylogeny, Pangenome, Embeddings, Sequence search), and a footer with the release identifier, the genome count, the pipeline version and a link to the Methods page. The active page is marked by a left rule in the accent color.
+Every page shares the shell shown on the final canvas boards. A 200 px left column holds the wordmark (Catalejo, with the tagline "microbial genome collection"), the navigation in two groups, Explore (Collection, Genome sets, Genomes, Genes) and Analyze (Phylogeny, Pangenome, Embeddings, Sequence search), and a footer with the release identifier (a link to the Releases page), the genome count, the pipeline name and version from the manifest (contract §6.4), and a link to the Methods page. The active page is marked by a left rule in the accent color.
 
 A 56 px bar spans the top of every page and shows the current genome set (the count as a large numeral, the phrase "genomes in the current set", the active filters as chips, an "add filter" link), a search field on pages where search applies, and the actions "Share link" and "Save set".
 
@@ -90,6 +90,7 @@ Routes are stable and are part of what users cite. Query parameters encode the s
 | `/genes` | Genes page, search state |
 | `/genes/<namespace>/<name>` | Genes page for one gene; namespace is `symbol`, `element` or `cluster` |
 | `/trees` and `/trees/<tree_id>` | Phylogeny |
+| `/pangenome` | Pangenome, species chooser listing the species with a pangenome in the release, each opening `/pangenome/<species_code>` |
 | `/pangenome/<species_code>` | Pangenome |
 | `/embeddings` | Embeddings |
 | `/search` | Sequence search |
@@ -104,7 +105,7 @@ All colors come from `config/palette.yaml`, read by the Python exports and the T
 
 - Species colors are assigned once in `species_registry.color` from an Okabe-Ito based sequence of eight, with "Other" in gray, and never change between releases. When more than eight species are present, the collection page groups the smallest into "Other" for charts and keeps individual colors in tables and chips.
 - Drug classes have a fixed palette of fourteen distinguishable colors on white, listed in the palette file, with a stated order.
-- Contig types are fixed. Chromosome dark gray, plasmid blue, prophage light blue, unclassified light gray. The AMR track and determinant highlight is vermillion; virulence is purple; GC skew is dark blue.
+- Contig types are fixed. Chromosome dark gray, plasmid purple, prophage lavender, unclassified light gray, none of which appears in the species sequence. The AMR track and determinant highlight is vermillion; virulence is reddish purple; GC skew is bluish green.
 - The embedding map uses a dark background and a lifted variant of the species palette, also listed in the palette file, so the mapping from species to hue is preserved.
 - Interface chrome uses no saturated color other than the accent (dark brick red) for links and the active navigation item, so that data colors are the only saturated colors on a page.
 
@@ -309,7 +310,7 @@ Scale. Designed for 10,000 genomes at launch and 100,000 within the same design;
 
 ## 10. Hosting and deployment
 
-One Cloudflare Pages project per instance, on its `pages.dev` hostname until a custom domain is chosen. The application is static; a Pages Function bound to the R2 bucket forwards range requests for `releases/<release_id>/<group_id>/...` to the bucket, so the application and the data share one hostname and one Access policy. Cloudflare Access protects the hostname with an email allow-list per group. R2 holds the releases under `releases/<release_id>/` and `releases/<release_id>/<group_id>/`, with a pointer file `releases/current.json` per group naming the current release. Cache headers mark release files immutable (they never change under one `release_id`) and the pointer file short-lived.
+One Cloudflare Pages project per instance, on its `pages.dev` hostname until a custom domain is chosen. The application is static; a Pages Function bound to the R2 bucket forwards range requests for `releases/<release_id>/<group_id>/...` to the bucket, so the application and the data share one hostname and one Access policy. Cloudflare Access protects the hostname with an email allow-list per group. R2 holds the releases under `releases/<release_id>/` and `releases/<release_id>/<group_id>/`, with a pointer file `releases/current.json` per group naming the current release. Cache headers mark release files immutable (they never change under one `release_id`) and the pointer file short-lived. The DuckDB-WASM engine files exceed the Pages per-file limit and the Parquet extension would otherwise be fetched from the internet, so both are served from the bucket through a second Function at `/assets/`, uploaded by the deploy workflow; the application makes no request outside its origin.
 
 Tier 2 service. The sequence search service runs on a server operated by the maintaining group and is connected to Cloudflare through a tunnel on a hostname of the project's domain, protected by an Access service token. Instances reach it only through a Pages Function at `/api/search/*`, so the browser never contacts the service's hostname and the service accepts requests from the Functions alone. When the service is unreachable the Function answers 503 and the Sequence search page shows the unavailable state.
 

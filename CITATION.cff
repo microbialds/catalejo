@@ -5,7 +5,7 @@ type: software
 version: 0.1.0
 date-released: "2026-09-25"
 license: MIT
-repository-code: "https://github.com/[ORGANIZATION]/catalejo"
+repository-code: "https://github.com/microbialds/catalejo"
 authors:
   - family-names: "Ugalde"
     given-names: "Juan A."

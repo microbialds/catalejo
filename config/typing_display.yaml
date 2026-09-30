@@ -1,0 +1,112 @@
+# Typing results shown on the genome page (contract §5.9, requirements §6.3).
+#
+# For each typing tool, `chips` lists the keys shown as chips in the genome
+# page header, in display order, with the display group each belongs to.
+# `display_groups` assigns a group to further keys that are stored in the
+# typing table but not shown as chips, and every other key takes
+# `default_display_group`. Keys in `exclude` are not stored in the typing
+# table because they repeat assembly statistics held in the genome table.
+#
+# Keys are the column names the tools write. For mlst and Kleborate they were
+# checked against data/mgap-example (mgap 2.0.0, mlst 2.25.0, Kleborate
+# 3.2.4). The mlst output has no header row; its third column is the sequence
+# type, stored under the key ST, and every allele column `gene(allele)` is
+# stored under the gene name (gapA, infB and so on). A genome without the
+# output of a tool has no chips for that tool.
+#
+# Display groups are typing, virulence, resistance_score and allele.
+
+version: 1
+
+tools:
+  mlst:
+    chips:
+      - key: ST
+        display_group: typing
+    default_display_group: allele
+
+  kleborate:
+    chips:
+      - key: K_locus
+        display_group: typing
+      - key: O_locus
+        display_group: typing
+      - key: virulence_score
+        display_group: virulence
+      - key: resistance_score
+        display_group: resistance_score
+    display_groups:
+      ST: typing
+      species: typing
+      K_type: typing
+      O_type: typing
+      wzi: typing
+      gapA: allele
+      infB: allele
+      mdh: allele
+      pgi: allele
+      phoE: allele
+      rpoB: allele
+      tonB: allele
+      YbST: virulence
+      Yersiniabactin: virulence
+      CbST: virulence
+      Colibactin: virulence
+      AbST: virulence
+      Aerobactin: virulence
+      SmST: virulence
+      Salmochelin: virulence
+      RmST: virulence
+      RmpADC: virulence
+      rmpA2: virulence
+      num_resistance_classes: resistance_score
+      num_resistance_genes: resistance_score
+    default_display_group: typing
+    exclude:
+      - strain
+      - contig_count
+      - N50
+      - largest_contig
+      - total_size
+      - ambiguous_bases
+
+  # Provisional. SISTR is absent from data/mgap-example; the keys are the
+  # column names documented for sistr_cmd output (sistr_output.tab) and must
+  # be checked against the first mgap run that includes SISTR.
+  sistr:
+    chips:
+      - key: serovar
+        display_group: typing
+      - key: cgmlst_ST
+        display_group: typing
+    display_groups:
+      serogroup: typing
+      h1: typing
+      h2: typing
+      o_antigen: typing
+      serovar_antigen: typing
+      serovar_cgmlst: typing
+    default_display_group: typing
+    exclude:
+      - fasta_filepath
+      - genome
+
+  # Provisional. sccmec is absent from data/mgap-example; the keys are the
+  # column names documented for the sccmec typing tool (rpetit3/sccmec, a
+  # camlhmp schema), whose type column carries the SCCmec type. Check them
+  # against the first mgap run that includes sccmec.
+  sccmec:
+    chips:
+      - key: type
+        display_group: typing
+      - key: subtype
+        display_group: typing
+    default_display_group: typing
+    exclude:
+      - sample
+      - target_schema
+      - target_schema_version
+      - region_schema
+      - region_schema_version
+      - camlhmp_version
+      - params

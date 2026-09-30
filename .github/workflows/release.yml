@@ -1,0 +1,45 @@
+# Data release workflow (requirements §11, contract §8.4). Skeleton written in
+# milestone 0; the steps are completed in milestone 5. Manual trigger only.
+# No workflow writes to git.
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_id:
+        description: "Release identifier, YYYY-MM with an optional letter suffix (2026-09, 2026-09b)"
+        required: true
+        type: string
+      group_id:
+        description: "Access group to build a filtered release for; empty for the full release"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Not yet implemented
+        run: |
+          echo "release.yml is a skeleton until milestone 5."
+          echo "release_id=${{ inputs.release_id }} group_id=${{ inputs.group_id }}"
+
+      # 1. Set up uv and install packages/ingest (uv sync --locked).
+      # 2. Run the ingest test suite (uv run pytest) before touching data.
+      # 3. Obtain the master catalog catalog/<release_id>.duckdb as a workflow
+      #    artifact or a mounted path, per the procedure in dev/backup.md.
+      # 4. catalejo release check --catalog catalog/<release_id>.duckdb
+      #    (fails the workflow on any contract §9 failure).
+      # 5. catalejo release build --catalog ... --out releases/<release_id>/
+      #    [--group <group_id>] (deterministic; manifest.json at the root).
+      # 6. catalejo release publish --dir releases/<release_id>/ --bucket <R2 bucket>
+      #    [--group <group_id>], credentials from repository secrets
+      #    (R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, CLOUDFLARE_ACCOUNT_ID).
+      # 7. Update the pointer file releases/current.json for the group.
+      # 8. Post the release notes (NOTES.md) as the workflow summary
+      #    ($GITHUB_STEP_SUMMARY).

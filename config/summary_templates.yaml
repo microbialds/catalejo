@@ -1,0 +1,205 @@
+# Summary sentence templates (contract §7.4, requirements §6.3 and §6.9).
+#
+# `catalejo release build` writes genome.summary_sentence from these
+# templates. Templates reference facts only, and every fact below is a column
+# of the catalog or a value derived from columns by the stated rule, so no
+# free text is generated. The Methods page shows the resistance phrase rules
+# and the template list.
+#
+# Selection. Templates are tried in the order listed, and the first one whose
+# `requires` facts are all present (not null) and whose `when` conditions all
+# hold is used. The last template requires nothing, so every genome gets a
+# sentence. Clauses work the same way inside a template, and the first
+# variant whose requirements hold replaces the clause placeholder.
+#
+# Conditions are written `<fact> <operator> <value>` with the operators ==,
+# !=, >=, <=, > and <, compared as numbers when both sides are numeric.
+#
+# Articles. A sentence that begins with the article "A" takes "An" instead
+# when the word after it begins with one of `article.an_before`, so that an
+# ESBL-producing or ST-led sentence reads correctly. The comparison is on the
+# rendered text and is case sensitive.
+
+version: 1
+
+article:
+  default: "A"
+  alternative: "An"
+  an_before: ["A", "E", "I", "O", "U", "ESBL", "ST", "8", "11", "18"]
+
+# Facts available to templates and clauses, with the columns they come from.
+facts:
+  species:
+    source: species_registry.canonical_name
+    rule: the canonical name of genome.species_code, italic in the interface
+  resistance_phrase:
+    source: annotation_hit
+    rule: the phrase of the first rule in resistance_phrase that any of the genome's hits matches, else null
+  st:
+    source: genome.st
+    rule: rendered as ST followed by the value when the value is all digits, as given otherwise (ST258-1LV); null when genome.st is null or "-"
+  isolation_site:
+    source: genome.isolation_site
+  year:
+    source: genome.isolation_date
+    rule: the year, at any date precision
+  completeness:
+    source: genome.checkm2_completeness
+    rule: one decimal place
+  contamination:
+    source: genome.checkm2_contamination
+    rule: one decimal place
+  assembly_status:
+    source: genome.assembly_status
+  top_determinant:
+    source: annotation_hit.element_name
+    rule: among the genome's AMRFinderPlus hits of element_type amr that are not point mutations, the first matched by a resistance_phrase rule in rule order, then the first by drug class order in config/palette.yaml, then by element_name; null when there is none
+  top_location:
+    source: annotation_hit.location_class
+    rule: location_class of the top determinant (chromosome, plasmid or unclassified)
+  plasmid_size:
+    source: contig.length
+    rule: length of the contig carrying the top determinant, in kilobases rounded to the nearest whole number and written with the unit (43 kb)
+  replicon:
+    source: contig.replicon_types
+    rule: first replicon type of the contig carrying the top determinant; null when the list is empty or null
+  n_genes:
+    source: genome.amr_gene_count
+  n_other:
+    source: genome.amr_gene_count
+    rule: genome.amr_gene_count minus one
+  n_mutations:
+    source: genome.amr_mutation_count
+  mutation_list:
+    source: mutation.gene, mutation.variant
+    rule: gene and variant of each point mutation joined by a space (gyrA S83I), sorted by gene then variant, at most three, joined by commas with "and" before the last; null when there are none
+  plasmid_contig_count:
+    source: genome.plasmid_contig_count
+  cluster_size:
+    source: genome.st
+    rule: number of genomes in the release with the same species_code and st
+
+clauses:
+  mutation_clause:
+    - requires: [mutation_list]
+      when: ["n_mutations == 1"]
+      text: " and the point mutation {mutation_list}"
+    - requires: [mutation_list]
+      text: " and the point mutations {mutation_list}"
+    - text: ""
+  others_clause:
+    - when: ["n_other == 0"]
+      text: ""
+    - when: ["n_other == 1"]
+      text: " together with 1 other resistance determinant"
+    - text: " together with {n_other} other resistance determinants"
+  lead_clause:
+    - requires: [resistance_phrase, st]
+      text: "A {resistance_phrase} {st} isolate"
+    - requires: [resistance_phrase]
+      text: "A {resistance_phrase} isolate"
+    - requires: [st]
+      text: "A {st} isolate"
+    - text: "An isolate"
+  origin_clause:
+    - requires: [isolation_site, year]
+      text: " from {isolation_site}, collected in {year}"
+    - requires: [isolation_site]
+      text: " from {isolation_site}"
+    - requires: [year]
+      text: ", collected in {year}"
+    - text: ""
+  qc_clause:
+    - requires: [completeness, contamination]
+      text: ", with {completeness}% completeness and {contamination}% contamination"
+    - text: ""
+  group_clause:
+    - requires: [st, cluster_size]
+      text: ", and belongs to a group of {cluster_size} {st} genomes in this release"
+    - text: ""
+
+templates:
+  # The full case, verbatim from contract §7.4.
+  - id: full
+    requires: [resistance_phrase, st, isolation_site, year, completeness, contamination, top_determinant, plasmid_size, replicon, n_other, cluster_size]
+    when: ["assembly_status == complete", "top_location == plasmid", "n_other >= 2"]
+    text: "A {resistance_phrase} {st} isolate from {isolation_site}, collected in {year}, with {completeness}% completeness and {contamination}% contamination. It carries {top_determinant} on a {plasmid_size} {replicon} plasmid together with {n_other} other resistance determinants{mutation_clause}, and belongs to a group of {cluster_size} {st} genomes in this release."
+
+  # A complete assembly whose top determinant is on a plasmid, when a fact of
+  # the full case is missing.
+  - id: plasmid
+    requires: [top_determinant, plasmid_size, replicon]
+    when: ["assembly_status == complete", "top_location == plasmid"]
+    text: "{lead_clause}{origin_clause}{qc_clause}. It carries {top_determinant} on a {plasmid_size} {replicon} plasmid{others_clause}{mutation_clause}{group_clause}."
+
+  # A plasmid without a replicon type (classified by geNomad, contract §10).
+  - id: plasmid_without_replicon
+    requires: [top_determinant, plasmid_size]
+    when: ["assembly_status == complete", "top_location == plasmid"]
+    text: "{lead_clause}{origin_clause}{qc_clause}. It carries {top_determinant} on a {plasmid_size} plasmid{others_clause}{mutation_clause}{group_clause}."
+
+  # No plasmid carries the top determinant, which is on the chromosome.
+  - id: no_plasmid
+    requires: [top_determinant]
+    when: ["assembly_status == complete", "top_location == chromosome"]
+    text: "{lead_clause}{origin_clause}{qc_clause}. It carries {top_determinant} on the chromosome{others_clause}{mutation_clause}{group_clause}."
+
+  # Draft assemblies state locations as predictions (requirements §5.5).
+  - id: draft_plasmid
+    requires: [top_determinant]
+    when: ["assembly_status == draft", "top_location == plasmid"]
+    text: "{lead_clause}{origin_clause}{qc_clause}. It carries {top_determinant} on a plasmid-associated contig (predicted){others_clause}{mutation_clause}{group_clause}."
+  - id: draft_chromosome
+    requires: [top_determinant]
+    when: ["assembly_status == draft", "top_location == chromosome"]
+    text: "{lead_clause}{origin_clause}{qc_clause}. It carries {top_determinant} on the chromosome (predicted){others_clause}{mutation_clause}{group_clause}."
+
+  # The contig carrying the top determinant is unclassified.
+  - id: unclassified_location
+    requires: [top_determinant]
+    text: "{lead_clause}{origin_clause}{qc_clause}. It carries {top_determinant}{others_clause}{mutation_clause}{group_clause}."
+
+  # Point mutations are the only resistance determinants.
+  - id: mutations_only
+    requires: [mutation_list]
+    when: ["n_genes == 0"]
+    text: "{lead_clause}{origin_clause}{qc_clause}. Its resistance determinants are the point mutations {mutation_list}{group_clause}."
+
+  # No resistance determinants and no plasmid contigs.
+  - id: no_resistance_no_plasmid
+    when: ["n_genes == 0", "n_mutations == 0", "plasmid_contig_count == 0"]
+    text: "{lead_clause}{origin_clause}{qc_clause}. No resistance determinants or plasmid contigs were detected{group_clause}."
+
+  # No resistance determinants, with plasmid contigs present.
+  - id: no_resistance
+    when: ["n_genes == 0", "n_mutations == 0"]
+    text: "{lead_clause}{origin_clause}{qc_clause}. No resistance determinants were detected, and plasmid contigs are present{group_clause}."
+
+  # The minimal case, when no other template applies.
+  - id: minimal
+    text: "A genome of {species}{qc_clause}."
+
+# Resistance phrase rules, in order. A rule matches when any of its `match`
+# entries matches one of the genome's annotation hits; within an entry every
+# field must match. element_name values are shell-style patterns. Only the
+# first matching rule yields a phrase, and a genome that matches none has no
+# phrase, so the templates use the variant without it.
+resistance_phrase:
+  - phrase: carbapenem-resistant
+    match:
+      - element_name: ["blaKPC-*", "blaNDM-*", "blaVIM-*", "blaIMP-*", "blaOXA-48", "blaOXA-181", "blaOXA-232", "blaOXA-244", "blaGES-5"]
+      - source_tool: amrfinderplus
+        element_subtype: AMR
+        drug_subclass: CARBAPENEM
+  - phrase: colistin-resistant
+    match:
+      - element_name: ["mcr-*"]
+  - phrase: ESBL-producing
+    match:
+      - element_name: ["blaCTX-M-*"]
+      - element_name: ["blaSHV-*", "blaTEM-*"]
+        source_tool: amrfinderplus
+        drug_subclass: CEPHALOSPORIN
+  - phrase: methicillin-resistant
+    match:
+      - element_name: ["mecA", "mecC"]

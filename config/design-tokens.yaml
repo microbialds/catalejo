@@ -1,0 +1,98 @@
+# Catalejo design tokens (requirements §7).
+#
+# Compiled into CSS variables (packages/web/src/generated/tokens.css) and a
+# typed module (packages/web/src/generated/tokens.ts). Colors are references
+# into config/palette.yaml, written as "palette:<section>.<key>", so that every
+# color is defined once. Changing a token needs the maintainer's approval.
+
+version: 1
+
+typography:
+  families:
+    serif: "'Source Serif 4', ui-serif, Georgia, serif"
+    sans: "'Source Sans 3', ui-sans-serif, system-ui, sans-serif"
+    mono: "'Source Code Pro', ui-monospace, Menlo, monospace"
+  # Uses. Serif for the wordmark, panel titles, large numerals and species
+  # names (italic); sans for interface text; mono for identifiers,
+  # coordinates, counts in tables, and gene and allele names (italic).
+  google_fonts_url: "https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400;1,8..60,600&family=Source+Sans+3:wght@400;500;600&family=Source+Code+Pro:ital,wght@0,400;0,500;1,400&display=swap"
+  sizes:
+    micro: 10px       # navigation group labels, projection parameters
+    small: 11px       # secondary labels, footer, counter captions
+    control: 12px     # chips, buttons, facet rows
+    base: 13px        # interface text
+    facet_title: 14px
+    panel_title: 15px
+    wordmark: 19px
+    set_count: 22px
+    counter: 24px
+    headline: 28px    # genome page headline
+  weights:
+    regular: 400
+    medium: 500
+    semibold: 600
+  line_heights:
+    tight: 1.1        # wordmark and large numerals
+    body: 1.5         # summary sentence and running text
+  letter_spacing:
+    tight: -0.01em
+    tagline: 0.04em
+    label: 0.12em     # uppercase navigation group labels and table headers
+
+color:
+  background: palette:chrome.paper
+  panel: palette:chrome.panel
+  sidebar: palette:chrome.sidebar
+  border: palette:chrome.border
+  border_strong: palette:chrome.border_strong
+  rule_light: palette:chrome.rule_light
+  control_border: palette:chrome.control_border
+  bar_track: palette:chrome.bar_track
+  ink: palette:chrome.ink
+  ink_soft: palette:chrome.ink_soft
+  nav_ink: palette:chrome.nav_ink
+  text_secondary: palette:chrome.text_secondary
+  text_label: palette:chrome.text_label
+  text_faint: palette:chrome.text_faint
+  accent: palette:chrome.accent
+  accent_hover: palette:chrome.accent_hover
+  on_ink: palette:chrome.on_ink
+
+spacing:
+  grid: 4px              # vertical rhythm
+  panel_padding_y: 12px
+  panel_padding_x: 14px
+  panel_gap: 14px
+  page_padding_y: 16px
+  page_padding_x: 24px
+  nav_item_padding_y: 8px
+  nav_item_padding_x: 20px
+
+layout:
+  sidebar_width: 200px
+  set_bar_height: 56px
+  facet_rail_width: 232px
+  contig_list_width: 190px
+  board_width: 1440px
+  breakpoint_drawer: 1200px   # facet rail becomes a drawer below this width
+  breakpoint_compact: 900px   # navigation collapses below this width
+
+shape:
+  radius_control: 2px    # buttons and chips; everything else is square
+  hairline: 1px
+  rule_heavy: 1px        # counter strip and table top rule, drawn in ink
+  active_rule: 3px       # left rule on the active navigation item
+  panel_title_rule_gap: 6px
+
+# Marks drawn in a low-contrast data color on a light background (paper or
+# panel) carry a thin outline in ink, because the color alone is too faint on
+# white. It applies to bars, points, legend swatches, chips and map features
+# drawn in the species color at species_index of the palette's species
+# sequence (index 6 is the yellow). The embedding map's dark panel uses the
+# lifted color and no outline.
+marks:
+  species_outlines:
+    - species_index: 6
+      background: light
+      outline_width: 0.5px
+      outline_color: palette:chrome.ink

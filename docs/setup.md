@@ -43,10 +43,13 @@ Edit `LICENSE` and `CITATION.cff` to replace the placeholders. Then make the fir
 ```
 git add -A
 git commit -m "Bootstrap repository with specification, Claude Code configuration and license"
-gh repo create [ORGANIZATION]/catalejo --private --source . --push
+gh repo create [ORGANIZATION]/catalejo --public --source . --push
 ```
 
 On GitHub, protect `main` (Settings, Branches, add rule for `main`): require a pull request before merging, require status checks to pass once CI exists, and do not allow force pushes. Do not install the Claude GitHub App or the Claude Code GitHub Action on this repository.
+
+The repository is public. Actions minutes are unlimited on public repositories; secrets are not available to workflows triggered from forks.
+
 
 ## 3. Claude Code configuration
 

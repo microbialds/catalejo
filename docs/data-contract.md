@@ -60,6 +60,8 @@ The application declares the range of `schema_version` it supports. On load it r
 
 Within a major schema version, columns may be added but never removed or retyped. A removal or retype is a major version change and requires a migration note in `docs/schema-changes.md`.
 
+Before the first release, changes to this document do not bump schema_version; the first release carries 0.1.0.
+
 ---
 
 ## 3. Identifiers

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import Any
 
 import duckdb
 import pytest
@@ -135,6 +136,10 @@ BROKEN: list[tuple[str, Callable[[duckdb.DuckDBPyConnection], list[Issue]], str,
         "AND genome_id <> 'KPN0001'",
         v.warn_small_sets, v.W_SMALL_SET, WARNING,
     ),
+    (
+        "INSERT INTO genome_group VALUES ('GONE0001', 'core')",
+        v.warn_group_unknown_genome, v.W_GROUP_UNKNOWN, WARNING,
+    ),
 ]  # fmt: skip
 
 
@@ -151,6 +156,21 @@ def test_broken_catalog(
     after = rule(con)
     assert len(after) > len(before)
     assert _rules(after) == {(rule_id, severity)}
+
+
+def test_group_rows_of_tombstoned_genomes_are_valid(
+    con: duckdb.DuckDBPyConnection, small_manifest: dict[str, Any]
+) -> None:
+    """A tombstoned genome keeps its genome_group rows and needs no group (decision 7c)."""
+    tomb = small_manifest["plants"]["tombstone"]["genome_id"]
+    assert con.execute(
+        "SELECT group_id FROM genome_group WHERE genome_id = ?", [tomb]
+    ).fetchall() == [("core",)]
+    con.execute("INSERT INTO tombstone VALUES ('GONE0002', '2026-06', 'withdrawn', NULL)")
+    assert v.check_access_group(con) == []
+    assert v.warn_group_unknown_genome(con) == []
+    con.execute("INSERT INTO genome_group VALUES ('GONE0002', 'core')")
+    assert v.warn_group_unknown_genome(con) == []
 
 
 def test_mixed_versions_are_reported_per_species(con: duckdb.DuckDBPyConnection) -> None:

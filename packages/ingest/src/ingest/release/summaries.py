@@ -20,8 +20,9 @@
   kind and species; ``count`` is the number of genomes. Targets use the
   requirements §5.3 routes (decision 9): ``/genomes/<id>`` for genome ids and
   accessions, ``/genes/symbol/<gene>``, ``/genes/element/<name>``,
-  ``/?q=<JSON>`` for an ST, ``/genes?q=<product>`` for a product, with path
-  segments and query values percent-encoded.
+  ``/?q=<JSON>`` for an ST, ``/genes?search=<product>`` for a product
+  (milestone 1a decision 4b), with path segments and query values
+  percent-encoded.
 
 Every file is sorted by its leading keys. The pangenome presence files and
 the rarefaction curves need a pangenome and are written from milestone 4a.
@@ -108,7 +109,7 @@ def _search_index(con: duckdb.DuckDBPyConnection) -> pl.DataFrame:
         """SELECT f.product, g.species_code, count(DISTINCT f.genome_id) FROM feature f
         JOIN genome g USING (genome_id) WHERE f.product IS NOT NULL GROUP BY 1, 2"""
     ).fetchall():
-        rows.append((product, "product", f"/genes?q={quote(product, safe='')}", code, n))
+        rows.append((product, "product", f"/genes?search={quote(product, safe='')}", code, n))
     for st, code, n in con.execute(
         "SELECT st, species_code, count(*) FROM genome WHERE st IS NOT NULL GROUP BY 1, 2"
     ).fetchall():

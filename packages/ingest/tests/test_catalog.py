@@ -93,11 +93,15 @@ def test_metadata_extra(small_catalog: Path, small_synth: Path) -> None:
 
 def test_side_tables(small_catalog: Path, small_manifest: Manifest) -> None:
     groups = small_manifest["plants"]["access_groups"]
+    tomb = small_manifest["plants"]["tombstone"]
+    assert tomb["access_groups"] == ["core"]
     for group, members in groups.items():
         found = _rows(
             small_catalog, f"SELECT genome_id FROM genome_group WHERE group_id = '{group}'"
         )
-        assert sorted(g for (g,) in found) == sorted(members)
+        # The tombstoned genome keeps its group rows, which route its tombstone (decision 7c).
+        routed = [tomb["genome_id"]] if group in tomb["access_groups"] else []
+        assert sorted(g for (g,) in found) == sorted(members + routed)
     sets = dict(_rows(small_catalog, "SELECT set_id, genome_count FROM genome_set"))
     assert sets == {k: len(v) for k, v in small_manifest["plants"]["curated_sets"].items()}
     assert _rows(small_catalog, "SELECT DISTINCT kind, created_date FROM genome_set") == [
@@ -192,12 +196,17 @@ def test_tombstones_remove_genomes(small_catalog: Path, tmp_path: Path) -> None:
         "genome_id,removed_release,reason,replaced_by\nKPN0003,2026-06,duplicate,KPN0002\n",
         encoding="utf-8",
     )
+    groups = "SELECT group_id FROM genome_group WHERE genome_id = 'KPN0003' ORDER BY 1"
+    before = _rows(catalog, groups)
+    assert before
     result = ingest_tombstones(catalog, path)
     assert result.rows == {"tombstone": 1, "removed_genomes": 1}
+    # genome_group keeps the rows of a tombstoned genome to route its tombstone (decision 7c).
+    assert _rows(catalog, groups) == before
     con = duckdb.connect(str(catalog), read_only=True)
     try:
-        for name in ("genome", "contig", "feature", "annotation_hit", "genome_group",
-                     "genome_set_member", "tool_version"):  # fmt: skip
+        for name in ("genome", "contig", "feature", "annotation_hit", "genome_set_member",
+                     "tool_version", "typing", "metadata_extra"):  # fmt: skip
             found = con.execute(
                 f"SELECT count(*) FROM \"{name}\" WHERE genome_id = 'KPN0003'"
             ).fetchone()
@@ -246,4 +255,86 @@ def test_sets_leave_out_unknown_genomes(small_catalog: Path, tmp_path: Path) -> 
     assert [i.rule for i in result.warnings()] == ["side.unknown_genome"]
     assert _rows(catalog, "SELECT set_id, genome_count, description FROM genome_set") == [
         ("s1", 1, None)
+    ]
+
+
+def _side_order(
+    tmp_path: Path,
+    small_synth: Path,
+    small_results: Path,
+    order: list[str],
+    tombstones: Path | None = None,
+) -> tuple[dict[str, list[Any]], list[str]]:
+    """A fresh catalog with the side-table commands run in ``order``; its dump and warnings."""
+    metadata, catalog = _ingest_copy(tmp_path, small_synth, small_results)
+    run_ingest(small_results, metadata, catalog)
+    warnings: list[str] = []
+    for step in order:
+        if step == "groups":
+            result = ingest_groups(
+                catalog, small_synth / "groups.csv", small_synth / "genome_groups.csv"
+            )
+        else:
+            result = ingest_tombstones(catalog, tombstones or small_synth / "tombstones.csv")
+        warnings += [f"{i.rule} {i.genome_id}" for i in result.warnings()]
+    return _dump(catalog), warnings
+
+
+def test_side_table_order_does_not_change_the_catalog(
+    tmp_path: Path, small_synth: Path, small_results: Path, small_manifest: Manifest
+) -> None:
+    """tombstones then groups, and groups then tombstones then groups, give one catalog (7c).
+
+    The synthetic tombstone names a genome that was never ingested, so groups
+    ingest keeps its group rows only once the tombstone is in the catalog.
+    """
+    tomb = small_manifest["plants"]["tombstone"]["genome_id"]
+    first, warned = _side_order(
+        tmp_path / "a", small_synth, small_results, ["tombstones", "groups"]
+    )
+    assert warned == []
+    again, _ = _side_order(
+        tmp_path / "b", small_synth, small_results, ["groups", "tombstones", "groups"]
+    )
+    assert again == first
+    assert [r for r in first["genome_group"] if r[0] == tomb] == [(tomb, "core")]
+    # Without the second groups run the row is left out, with a warning; hence the CI order.
+    late, warned = _side_order(tmp_path / "c", small_synth, small_results, ["groups", "tombstones"])
+    assert warned == [f"side.unknown_genome {tomb}"]
+    assert [r for r in late["genome_group"] if r[0] == tomb] == []
+
+
+def test_side_table_order_for_an_ingested_genome(
+    tmp_path: Path, small_synth: Path, small_results: Path
+) -> None:
+    """For a genome ingested and then tombstoned, a single run of each command commutes."""
+    path = tmp_path / "tombstones.csv"
+    path.write_text(
+        "genome_id,removed_release,reason,replaced_by\nKPN0003,2026-06,duplicate,KPN0002\n",
+        encoding="utf-8",
+    )
+    a, _ = _side_order(tmp_path / "a", small_synth, small_results, ["tombstones", "groups"], path)
+    b, _ = _side_order(tmp_path / "b", small_synth, small_results, ["groups", "tombstones"], path)
+    assert a == b
+    assert [r[1] for r in a["genome_group"] if r[0] == "KPN0003"]
+    assert not [r for r in a["genome"] if r[0] == "KPN0003"]
+
+
+def test_groups_leave_out_unknown_genomes(
+    small_catalog: Path, tmp_path: Path, small_synth: Path, small_manifest: Manifest
+) -> None:
+    catalog = copy_catalog(small_catalog, tmp_path / "c")
+    tomb = small_manifest["plants"]["tombstone"]["genome_id"]
+    members = tmp_path / "genome_groups.csv"
+    members.write_text(
+        f"genome_id,group_id\nKPN0001,core\n{tomb},amr-network\nNOPE0001,core\n",
+        encoding="utf-8",
+    )
+    result = ingest_groups(catalog, small_synth / "groups.csv", members)
+    assert [(i.rule, i.genome_id) for i in result.warnings()] == [
+        ("side.unknown_genome", "NOPE0001")
+    ]
+    assert _rows(catalog, "SELECT * FROM genome_group ORDER BY 1, 2") == [
+        ("KPN0001", "core"),
+        (tomb, "amr-network"),
     ]

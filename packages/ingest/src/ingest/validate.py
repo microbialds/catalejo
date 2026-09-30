@@ -18,6 +18,14 @@ embedding (``embedding``; absent means no model, so no warning).
 The ``color_index`` rule reads ``config/species_registry.yaml`` with a
 lenient parse, since the strict loader refuses such a file before any check
 could report it.
+
+Access groups (milestone 1a decision 7c). The "genome with no access group"
+failure reads the genomes in ``genome`` only. A ``genome_group`` row of a
+tombstoned genome is valid, since it routes the tombstone to group releases.
+A ``genome_group`` row naming a genome in neither ``genome`` nor
+``tombstone`` is not among the §9 failures (the reference rule lists
+``annotation_hit``, ``mutation``, ``region`` and ``cluster_membership``), so
+it is reported by an extra warning, ``genome_group.unknown_genome``.
 """
 
 from __future__ import annotations
@@ -76,6 +84,7 @@ W_MIXED_VERSIONS = "tool_version.mixed_database"
 W_NO_PANGENOME = "species.no_pangenome_or_tree"
 W_NO_EMBEDDING = "embedding.missing"
 W_SMALL_SET = "genome_set.small"
+W_GROUP_UNKNOWN = "genome_group.unknown_genome"
 
 
 def _ids(con: duckdb.DuckDBPyConnection, sql: str, params: list[Any] | None = None) -> list[Any]:
@@ -168,6 +177,7 @@ def check_species_registered(con: duckdb.DuckDBPyConnection) -> list[Issue]:
 
 
 def check_access_group(con: duckdb.DuckDBPyConnection) -> list[Issue]:
+    """Genomes in ``genome`` without a group; tombstoned genomes are not asked for one."""
     rows = _ids(
         con,
         """SELECT genome_id FROM genome WHERE genome_id NOT IN
@@ -367,6 +377,21 @@ def warn_small_sets(con: duckdb.DuckDBPyConnection) -> list[Issue]:
     ]
 
 
+def warn_group_unknown_genome(con: duckdb.DuckDBPyConnection) -> list[Issue]:
+    """genome_group rows naming a genome in neither ``genome`` nor ``tombstone``."""
+    rows = _ids(
+        con,
+        """SELECT genome_id, list(DISTINCT group_id ORDER BY group_id) FROM genome_group
+        WHERE genome_id NOT IN (SELECT genome_id FROM genome)
+          AND genome_id NOT IN (SELECT genome_id FROM tombstone)
+        GROUP BY 1 ORDER BY 1""",
+    )
+    return [
+        Issue(W_GROUP_UNKNOWN, WARNING, f"in access groups {groups} but not in the catalog", g)
+        for g, groups in rows
+    ]
+
+
 # Entry points -----------------------------------------------------------------------------------
 
 CATALOG_RULES = (
@@ -386,6 +411,7 @@ CATALOG_RULES = (
     warn_no_pangenome,
     warn_no_embedding,
     warn_small_sets,
+    warn_group_unknown_genome,
 )
 
 

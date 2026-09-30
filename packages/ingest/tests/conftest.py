@@ -83,8 +83,8 @@ def small_catalog(
     write_metadata(metadata, init_metadata(small_results, platform(), existing).table)
     catalog = root / "catalog" / "synth.duckdb"
     run_ingest(small_results, metadata, catalog)
-    ingest_groups(catalog, small_synth / "groups.csv", small_synth / "genome_groups.csv")
     ingest_tombstones(catalog, small_synth / "tombstones.csv")
+    ingest_groups(catalog, small_synth / "groups.csv", small_synth / "genome_groups.csv")
     ingest_sets(catalog, small_synth / "sets.csv")
     return catalog
 

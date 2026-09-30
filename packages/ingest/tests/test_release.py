@@ -6,6 +6,7 @@ import hashlib
 import json
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import duckdb
 import pytest
@@ -20,10 +21,13 @@ from ingest.release.cgview import CGVIEW_VERSION, FORMAT, FORMAT_VERSION
 from ingest.release.genome_files import cgview_bytes
 from ingest.release.output import EPOCH_ENV, MARKER, ReleaseError
 from ingest.release.tables import TABLES
+from ingest.side import ingest_groups
 
 runner = CliRunner()
 EPOCH = "1790000000"
 GROUP = "amr-network"
+CORE = "core"
+GROUPS = (GROUP, CORE)
 
 
 def _digests(root: Path) -> dict[str, str]:
@@ -42,6 +46,7 @@ def release(small_catalog: Path, tmp_path_factory: pytest.TempPathFactory) -> Pa
     try:
         build_release(small_catalog, out)
         build_release(small_catalog, out, GROUP)
+        build_release(small_catalog, out, CORE)
     finally:
         mp.undo()
     return out
@@ -98,7 +103,7 @@ def test_manifest(release: Path, small_manifest: dict[str, Any]) -> None:
     assert m["pipeline"] == {"name": "gene2dis/mgap", "versions": ["2.0.0"]}
     assert m["checks"]["validated"] is True and m["checks"]["warnings"] > 0
     paths = [f["path"] for f in m["files"]]
-    assert paths == sorted(paths) and not any(p.startswith(f"{GROUP}/") for p in paths)
+    assert paths == sorted(paths) and not any(p.split("/")[0] in GROUPS for p in paths)
     bakta = next(t for t in m["tool_versions"] if t["tool"] == "bakta")
     assert bakta["database_versions"] == ["5.1", "6.0"]
     assert {s["species_code"] for s in m["species"]} == {"KPN", "SAU", "SEN"}
@@ -113,7 +118,7 @@ def test_build_is_deterministic(
     monkeypatch.setenv(EPOCH_ENV, EPOCH)
     again = tmp_path / "again"
     build_release(small_catalog, again)
-    expected = {k: v for k, v in _digests(release).items() if not k.startswith(f"{GROUP}/")}
+    expected = {k: v for k, v in _digests(release).items() if k.split("/")[0] not in GROUPS}
     assert _digests(again) == expected
     monkeypatch.delenv(EPOCH_ENV)
     clock = tmp_path / "clock"
@@ -148,13 +153,102 @@ def test_group_release(release: Path, small_manifest: dict[str, Any]) -> None:
     sets = {s["set_id"]: s["genome_count"] for s in m["curated_sets"]}
     kpc = set(small_manifest["plants"]["curated_sets"]["kpc-plasmid-carriers"])
     assert sets.get("kpc-plasmid-carriers") == len(kpc & members)
-    tomb = small_manifest["plants"]["tombstone"]
-    rows = con.execute(
-        f"SELECT genome_id FROM '{(group / 'tables/tombstone.parquet').as_posix()}'"
-    ).fetchall()
-    assert rows == ([(tomb["genome_id"],)] if tomb["replaced_by"] in members else [])
     genome_dirs = {p.name for p in (group / "genomes").glob("*/*")}
     assert genome_dirs == members
+
+
+def _column(path: Path, sql: str) -> list[Any]:
+    return duckdb.connect().execute(sql.replace("FILE", f"'{path.as_posix()}'")).fetchall()
+
+
+def test_group_releases_route_tombstones(release: Path, small_manifest: dict[str, Any]) -> None:
+    """A group release holds the tombstones with a genome_group row for it (decision 7c)."""
+    tomb = small_manifest["plants"]["tombstone"]
+    assert tomb["access_groups"] == [CORE]
+    query = "SELECT genome_id, replaced_by FROM FILE"
+    expected = [(tomb["genome_id"], tomb["replaced_by"])]
+    assert _column(release / "tables/tombstone.parquet", query) == expected
+    assert _column(release / CORE / "tables/tombstone.parquet", query) == expected
+    assert _column(release / GROUP / "tables/tombstone.parquet", query) == []
+    # The tombstoned genome is in no other table of any release.
+    for root in (release, release / CORE, release / GROUP):
+        found = _column(root / "tables/genome.parquet", "SELECT genome_id FROM FILE")
+        assert (tomb["genome_id"],) not in found
+    assert _manifest(release / CORE)["genome_count"] == len(
+        small_manifest["plants"]["access_groups"][CORE]
+    )
+
+
+def test_search_index_product_targets(release: Path) -> None:
+    rows = _column(
+        release / "summaries/search_index.parquet",
+        "SELECT term, target FROM FILE WHERE kind = 'product'",
+    )
+    assert rows
+    for term, target in rows:
+        assert target == f"/genes?search={quote(term, safe='')}"
+    assert any(" " in term and "%20" in target for term, target in rows)
+
+
+def _sentences(root: Path) -> dict[str, tuple[Any, ...]]:
+    rows = _column(
+        root / "tables/genome.parquet",
+        """SELECT genome_id, summary_sentence, amr_gene_count, amr_mutation_count,
+        plasmid_contig_count, prophage_region_count FROM FILE""",
+    )
+    return {r[0]: tuple(r[1:]) for r in rows}
+
+
+def test_group_release_counts_cluster_size_in_the_group(
+    small_catalog: Path, small_synth: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """cluster_size counts the genomes of the group release (decision 6b)."""
+    monkeypatch.setenv(EPOCH_ENV, EPOCH)
+    catalog = copy_catalog(small_catalog, tmp_path / "c")
+    con = connect(catalog, read_only=True)
+    try:
+        st11 = [
+            r[0]
+            for r in con.execute(
+                "SELECT genome_id FROM genome WHERE species_code = 'KPN' AND st = '11' ORDER BY 1"
+            ).fetchall()
+        ]
+        stored = dict(con.execute("SELECT genome_id, summary_sentence FROM genome").fetchall())
+        everyone = [r[0] for r in con.execute("SELECT genome_id FROM genome ORDER BY 1").fetchall()]
+    finally:
+        con.close()
+    assert len(st11) >= 2
+    alone, other = st11[0], st11[1]
+    assert f"group of {len(st11)} ST11 genomes" in stored[alone]
+    # A group holding one genome of the ST11 group of KPN, and one other genome.
+    groups = tmp_path / "groups.csv"
+    groups.write_text("group_id,name,description\ncore,Core,\nsplit,Split,\n", encoding="utf-8")
+    members = tmp_path / "genome_groups.csv"
+    rows = [f"{g},core" for g in everyone] + [f"{alone},split", "SAU0001,split"]
+    members.write_text("genome_id,group_id\n" + "\n".join(rows) + "\n", encoding="utf-8")
+    ingest_groups(catalog, groups, members)
+
+    out = tmp_path / "rel"
+    build_release(catalog, out)
+    build_release(catalog, out, "split")
+    full, split = _sentences(out), _sentences(out / "split")
+    assert {g: v[0] for g, v in full.items()} == stored
+    assert set(split) == {alone, "SAU0001"}
+    assert "group of" not in split[alone][0]
+    assert split[alone][0] != full[alone][0]
+    assert split[alone][1:] == full[alone][1:]
+    assert f"group of {len(st11)} ST11 genomes" in full[other][0]
+    # The catalog keeps the collection-wide sentences.
+    con = connect(catalog, read_only=True)
+    try:
+        after = dict(con.execute("SELECT genome_id, summary_sentence FROM genome").fetchall())
+    finally:
+        con.close()
+    assert after == stored
+    # A group release is deterministic too.
+    first = _digests(out / "split")
+    build_release(catalog, out, "split")
+    assert _digests(out / "split") == first
 
 
 def test_full_build_keeps_group_directories(small_catalog: Path, tmp_path: Path) -> None:
@@ -348,10 +442,10 @@ def test_command_sequence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
          "--out", str(metadata)],
         ["metadata", "validate", str(metadata), "--mgap", str(results)],
         ["ingest", "--mgap", str(results), "--metadata", str(metadata), "--catalog", str(catalog)],
-        ["groups", "ingest", "--groups", str(synth / "groups.csv"),
-         "--members", str(synth / "genome_groups.csv"), "--catalog", str(catalog)],
         ["tombstones", "ingest", "--file", str(synth / "tombstones.csv"),
          "--catalog", str(catalog)],
+        ["groups", "ingest", "--groups", str(synth / "groups.csv"),
+         "--members", str(synth / "genome_groups.csv"), "--catalog", str(catalog)],
         ["sets", "ingest", "--file", str(synth / "sets.csv"), "--catalog", str(catalog)],
         ["release", "check", "--catalog", str(catalog), "--metadata", str(metadata),
          "--mgap", str(results)],

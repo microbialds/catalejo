@@ -3,8 +3,10 @@
 Both are computed from the catalog tables by ``refresh_summaries`` and stored
 in ``genome``: ``catalejo ingest`` runs it after writing the tables and
 ``tombstones ingest`` runs it again, since removing genomes changes
-``cluster_size``. ``release build`` copies the stored values, also for a
-group release (milestone 1a plan, decision 5).
+``cluster_size``. ``release build`` copies the stored values for a full
+release (milestone 1a plan, decision 5) and runs ``refresh_summaries`` again
+on the genomes of a group release, whose ``cluster_size`` counts the genomes
+of that release (decision 6b).
 
 Counters.
 

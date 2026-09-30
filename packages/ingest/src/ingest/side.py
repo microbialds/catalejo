@@ -5,13 +5,22 @@ Each command replaces its tables in one transaction on the catalog written by
 ``catalejo ingest``.
 
 - ``groups ingest`` writes ``access_group`` and ``genome_group``. A member
-  row naming an unknown group fails; one naming a genome absent from the
-  catalog (a tombstoned genome, a genome not ingested) is left out with a
-  warning. §9 then requires every genome to belong to a group.
+  row naming an unknown group fails. A member row naming a genome in
+  ``genome`` or in ``tombstone`` is kept; the rows of a tombstoned genome
+  route its tombstone to the group releases (milestone 1a decision 7c). A
+  member row naming any other genome is left out with a warning. §9 then
+  requires every genome in ``genome`` to belong to a group.
 - ``tombstones ingest`` writes ``tombstone`` with the reason vocabulary of
-  §4.7, then removes every tombstoned genome from every other table (§4.7)
-  and recomputes the summaries, whose ``cluster_size`` depends on the genomes
-  present.
+  §4.7, then removes every tombstoned genome from every other table except
+  ``genome_group`` (§4.7, decision 7c) and recomputes the summaries, whose
+  ``cluster_size`` depends on the genomes present.
+
+Run ``tombstones ingest`` before ``groups ingest``. The two commands then
+give the same catalog in either order for a genome that was ingested and
+later tombstoned, whose ``genome_group`` rows both keep. A tombstoned genome
+that was never ingested is known to ``groups ingest`` only through
+``tombstone``, so its group rows are kept only when the tombstones are
+already in the catalog (or when ``groups ingest`` runs again after them).
 - ``sets ingest`` writes ``genome_set`` (kind ``curated``) and
   ``genome_set_member``. A set's name and description must be the same on
   all its rows. Members absent from the catalog are left out with a warning,
@@ -55,9 +64,10 @@ RULE_REASON = "tombstone.reason"
 RULE_SET_NAME = "genome_set.inconsistent"
 
 # Tables that hold a genome_id and lose the rows of a tombstoned genome (§4.7).
+# genome_group keeps them to route the tombstone to group releases (decision 7c).
 GENOME_TABLES = (
     "genome", "contig", "feature", "annotation_hit", "mutation", "region", "typing",
-    "tool_version", "genome_group", "metadata_extra", "genome_set_member",
+    "tool_version", "metadata_extra", "genome_set_member",
 )  # fmt: skip
 
 
@@ -93,13 +103,21 @@ def _genomes(con: duckdb.DuckDBPyConnection) -> set[str]:
     return {r[0] for r in con.execute("SELECT genome_id FROM genome").fetchall()}
 
 
+def _tombstoned(con: duckdb.DuckDBPyConnection) -> set[str]:
+    return {r[0] for r in con.execute("SELECT genome_id FROM tombstone").fetchall()}
+
+
 def _replace(con: duckdb.DuckDBPyConnection, name: str, rows: Sequence[Any]) -> int:
     con.execute(f'DELETE FROM "{name}"')
     return insert(con, schema.table(name), rows)
 
 
 def apply_tombstones(con: duckdb.DuckDBPyConnection) -> None:
-    """Remove every tombstoned genome from the other tables and fix set sizes (§4.7)."""
+    """Remove every tombstoned genome from the other tables and fix set sizes (§4.7).
+
+    ``genome_group`` keeps the rows of a tombstoned genome, which route its
+    tombstone to the group releases (decision 7c).
+    """
     for name in GENOME_TABLES:
         con.execute(f'DELETE FROM "{name}" WHERE genome_id IN (SELECT genome_id FROM tombstone)')
     con.execute(
@@ -121,7 +139,7 @@ def ingest_groups(catalog: Path, groups_path: Path, members_path: Path) -> SideR
         groups[gid] = AccessGroupRow(gid, r["name"] or gid, r["description"] or None)
     con = connect(catalog)
     try:
-        present = _genomes(con)
+        known = _genomes(con) | _tombstoned(con)
         members: set[tuple[str, str]] = set()
         for r in member_rows:
             genome, group = r["genome_id"], r["group_id"]
@@ -134,12 +152,12 @@ def ingest_groups(catalog: Path, groups_path: Path, members_path: Path) -> SideR
                         genome,
                     )
                 )
-            elif genome not in present:
+            elif genome not in known:
                 issues.append(
                     Issue(
                         RULE_UNKNOWN_GENOME,
                         WARNING,
-                        f"not in the catalog; left out of {group}",
+                        f"neither in the catalog nor tombstoned; left out of {group}",
                         genome,
                     )
                 )
@@ -202,7 +220,7 @@ def ingest_sets(catalog: Path, path: Path) -> SideResult:
     con = connect(catalog)
     try:
         present = _genomes(con)
-        tombstoned = {r[0] for r in con.execute("SELECT genome_id FROM tombstone").fetchall()}
+        tombstoned = _tombstoned(con)
         sets: dict[str, tuple[str, str]] = {}
         members: dict[str, set[str]] = {}
         for r in records:

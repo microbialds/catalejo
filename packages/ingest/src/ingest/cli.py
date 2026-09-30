@@ -13,13 +13,18 @@ The Tier 0 sequence, as CI runs it on the synthetic data:
         --existing data/synth/metadata.csv --out data/synth/metadata.csv
     catalejo ingest --mgap data/synth/results --metadata data/synth/metadata.csv \
         --catalog data/catalog/synth.duckdb
+    catalejo tombstones ingest --file data/synth/tombstones.csv \
+        --catalog data/catalog/synth.duckdb
     catalejo groups ingest --groups data/synth/groups.csv \
-        --members data/synth/genome_groups.csv --catalog data/catalog/synth.duckdb
-    catalejo tombstones ingest --file data/synth/tombstones.csv --catalog ...
+        --members data/synth/genome_groups.csv --catalog ...
     catalejo sets ingest --file data/synth/sets.csv --catalog ...
     catalejo release check --catalog ... --metadata ... --mgap ...
     catalejo release build --catalog ... --out releases/synth
     catalejo release check --catalog ... --release releases/synth
+
+``tombstones ingest`` runs before ``groups ingest`` so that the group rows of
+a tombstoned genome that was never ingested are kept, and route its tombstone
+to the group releases (``ingest.side``, milestone 1a decision 7c).
 
 The other commands print "not implemented until milestone <N>" to standard
 error and exit with code 2, so a script that calls them fails loudly.

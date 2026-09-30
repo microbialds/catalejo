@@ -3,8 +3,10 @@
 ``metadata.csv`` is a seed of manual entries (some species, dates at mixed
 precision, two unrecognized columns for ``metadata_extra``); ``groups.csv``
 and ``genome_groups.csv`` define two overlapping access groups covering every
-genome; ``sets.csv`` holds two curated sets, one with a single member so the
-§9 warning fires; ``tombstones.csv`` holds one removed genome with a
+genome, and put the tombstoned genome in the core group so that group
+releases route its tombstone (milestone 1a decision 7c); ``sets.csv`` holds
+two curated sets, one with a single member so the §9 warning fires;
+``tombstones.csv`` holds one removed genome, never in the results, with a
 replacement.
 """
 
@@ -54,6 +56,7 @@ class SideTables:
     group_members: dict[str, list[str]]
     set_members: dict[str, list[str]]
     tombstone: tuple[str, str]  # (removed genome_id, replaced_by)
+    tombstone_groups: list[str]  # access groups of the removed genome
 
     def files(self) -> list[tuple[str, str]]:
         return [
@@ -99,17 +102,19 @@ def side_tables(run: RunPlan) -> SideTables:
             core.append(g.genome_id)
         if position % 2 == 1 or "pKPC" in g.plasmids:
             network.append(g.genome_id)
+    first = run.genomes[0]
+    code = first.species.code
+    removed = f"{code}{len(run.by_species(code)) + 1:0{GENOME_NUMBER_WIDTH}d}"
+    removed_groups = [GROUP_CORE[0]]
     members = sorted(
-        [(gid, GROUP_CORE[0]) for gid in core] + [(gid, GROUP_NETWORK[0]) for gid in network]
+        [(gid, GROUP_CORE[0]) for gid in core]
+        + [(gid, GROUP_NETWORK[0]) for gid in network]
+        + [(removed, group) for group in removed_groups]
     )
 
-    first = run.genomes[0]
     kpc = [g.genome_id for g in run.genomes if "pKPC" in g.plasmids]
     index = [run.genomes[1].genome_id] if len(run.genomes) > 1 else [first.genome_id]
     set_rows = [[*SET_KPC, gid] for gid in kpc] + [[*SET_INDEX, gid] for gid in index]
-
-    code = first.species.code
-    removed = f"{code}{len(run.by_species(code)) + 1:0{GENOME_NUMBER_WIDTH}d}"
     replaced_by = index[0]
 
     return SideTables(
@@ -123,4 +128,5 @@ def side_tables(run: RunPlan) -> SideTables:
         group_members={GROUP_CORE[0]: core, GROUP_NETWORK[0]: network},
         set_members={SET_KPC[0]: kpc, SET_INDEX[0]: index},
         tombstone=(removed, replaced_by),
+        tombstone_groups=removed_groups,
     )

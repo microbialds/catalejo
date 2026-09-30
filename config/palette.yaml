@@ -29,9 +29,8 @@ species:
 # A determinant's subclass, then its class, is split on "/" and the parts are
 # tried in order ("AMINOGLYCOSIDE/QUINOLONE" tries AMINOGLYCOSIDE, then
 # QUINOLONE); the first part found in an entry's match list decides, and only
-# a value with no matching part falls into "other". Colors are proposals from
-# milestone 0, chosen to be distinguishable on white (Paul Tol muted and light
-# schemes).
+# a value with no matching part falls into "other". Colors are chosen to be
+# distinguishable on white (Paul Tol muted and light schemes).
 drug_classes:
   - key: beta_lactam
     label_key: drugClassBetaLactam

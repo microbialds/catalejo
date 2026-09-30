@@ -1,7 +1,8 @@
 """AMRFinderPlus parser (contract §4.1, feeding §5.5 ``annotation_hit`` and §5.6 ``mutation``).
 
 Rows of the main report whose subtype is a mutation subtype
-(``AmrFinderLayout.mutation_subtypes``, POINT per contract §5.6) are point
+(``AmrFinderLayout.mutation_subtypes``: POINT per contract §5.6, and
+POINT_DISRUPT by maintainer decision, pending contract edit) are point
 mutations; every other row is an annotation hit. The mutations report
 (``-mutations.tsv``, ``--mutation_all``) is read the same way for its
 mutation rows, and a mutation already in the main report (same contig,

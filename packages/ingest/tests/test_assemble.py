@@ -16,7 +16,6 @@ from ingest.assemble import (
     DRAFT,
     PIPELINE_TOOL,
     PLASMID,
-    RULE_UNMAPPED_HIT,
     UNCLASSIFIED,
     AssembledGenome,
     assemble_genome,
@@ -38,8 +37,8 @@ Assembled = dict[str, AssembledGenome]
 
 def test_every_synthetic_hit_maps_to_a_feature(small_assembled: Assembled) -> None:
     for gid, a in small_assembled.items():
-        assert a.unmapped_hits == (), gid
-        assert failures(a.issues) == [], gid
+        assert a.unmapped_hit_count == 0, gid
+        assert a.issues == (), gid
 
 
 def test_features(small_assembled: Assembled, small_manifest: Manifest) -> None:
@@ -112,7 +111,13 @@ def test_hits(small_assembled: Assembled, small_manifest: Manifest) -> None:
         hits = [h for h in a.hits if h.element_name == kpc["element"]]
         amr = [h for h in hits if h.source_tool == L.AMRFINDERPLUS.tool]
         assert len(amr) == 1
+        assert amr[0].feature_id is not None
         assert features[amr[0].feature_id].locus_tag == site["locus_tag"]
+        assert (amr[0].start, amr[0].end, amr[0].strand) == (
+            site["start"],
+            site["end"],
+            site["strand"],
+        )
         assert amr[0].location_class == PLASMID
         assert amr[0].element_type == "amr"
         info = small_manifest["genomes"][gid]
@@ -264,9 +269,15 @@ def test_real_examples(
 ) -> None:
     a = _assemble(real_example(repo_root, name), sample, gid)
     assert a.facts.assembly_status == status
-    found = [(u.element_name, u.contig_id, u.start, u.end) for u in a.unmapped_hits]
+    found = [(h.element_name, h.contig_id, h.start, h.end) for h in a.hits if h.feature_id is None]
     assert found == unmapped
-    assert [i.rule for i in failures(a.issues)] == [RULE_UNMAPPED_HIT] * len(unmapped)
+    assert a.unmapped_hit_count == len(unmapped)
+    for h in a.hits:
+        if h.feature_id is None:
+            assert h.hit_id == ids.unmapped_hit_id(
+                gid, h.contig_id, h.start, h.end, h.source_tool, h.element_name
+            )
+    assert failures(a.issues) == []
     assert all(m.feature_id is not None for m in a.mutations)
 
 
@@ -274,8 +285,11 @@ def test_real_nanopore_classification(repo_root: Path) -> None:
     a = _assemble(real_example(repo_root, "ont_example"), "ont_SCL30014", "SCL30014")
     assert [c.classification for c in a.contigs] == [CHROMOSOME] + [PLASMID] * 4
     assert {c.classification_source for c in a.contigs} == {L.GENOMAD.tool}
-    disrupt = [h for h in a.hits if h.element_subtype == "POINT_DISRUPT"]
-    assert [h.element_name for h in disrupt] == ["ompK35_E24insTer26"]
+    # POINT_DISRUPT rows are mutations (maintainer decision, pending contract edit).
+    assert not [h for h in a.hits if h.element_subtype == "POINT_DISRUPT"]
+    (disrupt,) = [m for m in a.mutations if m.gene == "ompK35"]
+    assert (disrupt.variant, disrupt.variant_type) == ("E24insTer26", "insertion")
+    assert disrupt.feature_id is not None
     versions = {t.tool: t.version for t in a.tool_versions}
     assert versions[PIPELINE_TOOL] is None and versions[L.BAKTA.tool] == "1.11.4"
 

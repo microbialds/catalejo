@@ -283,7 +283,7 @@ def test_rule_country(config: PlatformConfig, registry: SpeciesRegistry) -> None
 
 def test_rule_species_in_registry(config: PlatformConfig, registry: SpeciesRegistry) -> None:
     table = _table(
-        {"genome_id": "G1", "species": "Streptococcus pyogenes"},
+        {"genome_id": "G1", "species": "Streptococcus mitis"},
         {"genome_id": "G2", "species": "klebsiella pneumoniae"},
     )
     issues = validate_metadata(table, config, registry)

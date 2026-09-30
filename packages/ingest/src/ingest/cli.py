@@ -1,21 +1,43 @@
 """The ``catalejo`` command (contract §8).
 
-Every subcommand of contract §8 exists. Those that later milestones implement
-print "not implemented until milestone <N>" to standard error and exit with
-code 2, so a script that calls them fails loudly. ``synth`` (contract §8.5)
-and ``metadata init`` and ``metadata validate`` (§8.1) are implemented; they
-exit with code 1 on any validation failure.
+Every subcommand of contract §8 exists. Implemented as of milestone 1a:
+``synth`` (§8.5), ``metadata init`` and ``metadata validate`` (§8.1),
+``ingest``, ``groups ingest``, ``tombstones ingest`` and ``sets ingest``
+(§8.2), ``release check`` and ``release build`` (§8.3). Each prints what it
+did and exits with code 1 on any validation failure or unreadable input.
+
+The Tier 0 sequence, as CI runs it on the synthetic data:
+
+    catalejo synth --out data/synth
+    catalejo metadata init --mgap data/synth/results \
+        --existing data/synth/metadata.csv --out data/synth/metadata.csv
+    catalejo ingest --mgap data/synth/results --metadata data/synth/metadata.csv \
+        --catalog data/catalog/synth.duckdb
+    catalejo groups ingest --groups data/synth/groups.csv \
+        --members data/synth/genome_groups.csv --catalog data/catalog/synth.duckdb
+    catalejo tombstones ingest --file data/synth/tombstones.csv --catalog ...
+    catalejo sets ingest --file data/synth/sets.csv --catalog ...
+    catalejo release check --catalog ... --metadata ... --mgap ...
+    catalejo release build --catalog ... --out releases/synth
+    catalejo release check --catalog ... --release releases/synth
+
+The other commands print "not implemented until milestone <N>" to standard
+error and exit with code 2, so a script that calls them fails loudly.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
-from typing import Annotated, NoReturn
+from typing import TYPE_CHECKING, Annotated, NoReturn
 
 import typer
 
 from ingest import __version__
 from ingest.synth import DEFAULT_GENOMES, DEFAULT_SEED, DEFAULT_SPECIES
+
+if TYPE_CHECKING:
+    from ingest.side import SideResult
 
 app = typer.Typer(
     name="catalejo",
@@ -43,7 +65,6 @@ app.add_typer(tombstones_app, name="tombstones", no_args_is_help=True)
 app.add_typer(release_app, name="release", no_args_is_help=True)
 
 # Milestones that implement each stub (dev/build-plan.md).
-MILESTONE_INGEST = "1a"
 MILESTONE_PANGENOME_TREE = "4a"
 MILESTONE_RELEASE_NOTES_PUBLISH = "5"
 MILESTONE_EMBEDDINGS = "6"
@@ -56,6 +77,27 @@ VALIDATION_EXIT = 1
 def _not_implemented(command: str, milestone: str) -> NoReturn:
     typer.echo(f"catalejo {command}: not implemented until milestone {milestone}", err=True)
     raise typer.Exit(code=NOT_IMPLEMENTED_EXIT)
+
+
+def _report_failure(command: str, exc: Exception) -> NoReturn:
+    """Print a refusal with its issues and exit with the validation code."""
+    typer.echo(f"catalejo {command}: {exc}", err=True)
+    for issue in getattr(exc, "issues", []):
+        typer.echo(issue.line(), err=True)
+    raise typer.Exit(code=VALIDATION_EXIT) from exc
+
+
+def _side(command: str, run: Callable[[], SideResult]) -> None:
+    from ingest.catalog import IngestError
+
+    try:
+        result = run()
+    except IngestError as exc:
+        _report_failure(command, exc)
+    counts = ", ".join(f"{name} {n}" for name, n in result.rows.items())
+    typer.echo(f"catalejo {command}: {counts}; {len(result.warnings())} warnings")
+    for issue in result.issues:
+        typer.echo(issue.line(), err=True)
 
 
 def _version_callback(value: bool) -> None:
@@ -156,8 +198,19 @@ def ingest(
     metadata: Annotated[Path, typer.Option("--metadata", help="metadata.csv.")],
     catalog: Catalog,
 ) -> None:
-    """Build the master catalog from mgap results. Not implemented until milestone 1a."""
-    _not_implemented("ingest", MILESTONE_INGEST)
+    """Build the master catalog from mgap results and metadata (contract §5, §8.2)."""
+    from ingest.catalog import IngestError, run_ingest
+    from ingest.config import ConfigError
+    from ingest.metadata import MetadataError
+
+    try:
+        result = run_ingest(mgap, metadata, catalog)
+    except (IngestError, MetadataError, ConfigError) as exc:
+        _report_failure("ingest", exc)
+    for line in result.lines():
+        typer.echo(line)
+    for issue in result.issues:
+        typer.echo(issue.line(), err=True)
 
 
 @pangenome_app.command("ingest")
@@ -201,8 +254,10 @@ def sets_ingest(
     file: Annotated[Path, typer.Option("--file", help="sets.csv (§4.6).")],
     catalog: Catalog,
 ) -> None:
-    """Ingest curated genome sets. Not implemented until milestone 1a."""
-    _not_implemented("sets ingest", MILESTONE_INGEST)
+    """Ingest curated genome sets into the catalog (contract §4.6, §5.14)."""
+    from ingest.side import ingest_sets
+
+    _side("sets ingest", lambda: ingest_sets(catalog, file))
 
 
 @groups_app.command("ingest")
@@ -211,8 +266,10 @@ def groups_ingest(
     members: Annotated[Path, typer.Option("--members", help="genome_groups.csv (§4.8).")],
     catalog: Catalog,
 ) -> None:
-    """Ingest access groups and their members. Not implemented until milestone 1a."""
-    _not_implemented("groups ingest", MILESTONE_INGEST)
+    """Ingest access groups and their members into the catalog (contract §4.8, §5.17)."""
+    from ingest.side import ingest_groups
+
+    _side("groups ingest", lambda: ingest_groups(catalog, groups, members))
 
 
 @tombstones_app.command("ingest")
@@ -220,17 +277,62 @@ def tombstones_ingest(
     file: Annotated[Path, typer.Option("--file", help="tombstones.csv (§4.7).")],
     catalog: Catalog,
 ) -> None:
-    """Ingest tombstones. Not implemented until milestone 1a."""
-    _not_implemented("tombstones ingest", MILESTONE_INGEST)
+    """Ingest tombstones and remove those genomes from the catalog (contract §4.7, §5.16)."""
+    from ingest.side import ingest_tombstones
+
+    _side("tombstones ingest", lambda: ingest_tombstones(catalog, file))
 
 
 # §8.3 Release ---------------------------------------------------------------------------
 
 
 @release_app.command("check")
-def release_check(catalog: Catalog) -> None:
-    """Validate the catalog against contract §9. Not implemented until milestone 1a."""
-    _not_implemented("release check", MILESTONE_INGEST)
+def release_check(
+    catalog: Catalog,
+    metadata: Annotated[
+        Path | None, typer.Option("--metadata", help="metadata.csv, for the input rules.")
+    ] = None,
+    mgap: Annotated[
+        Path | None, typer.Option("--mgap", help="mgap results, for the input rules.")
+    ] = None,
+    release: Annotated[
+        Path | None, typer.Option("--release", help="Built release, for the checksum rule.")
+    ] = None,
+) -> None:
+    """Validate the catalog against contract §9; exit 1 on any failure."""
+    from ingest.catalog import IngestError, connect
+    from ingest.config import ConfigError
+    from ingest.issues import failures, warnings
+    from ingest.metadata import MetadataError
+    from ingest.validate import check_manifest_checksums, validate_catalog, validate_inputs
+
+    if (metadata is None) != (mgap is None):
+        typer.echo("catalejo release check: --metadata and --mgap go together", err=True)
+        raise typer.Exit(code=VALIDATION_EXIT)
+    try:
+        con = connect(catalog, read_only=True)
+        try:
+            issues = validate_catalog(con)
+        finally:
+            con.close()
+        if metadata is not None and mgap is not None:
+            issues += validate_inputs(metadata, mgap)
+        if release is not None:
+            issues += check_manifest_checksums(release)
+    except (IngestError, MetadataError, ConfigError) as exc:
+        _report_failure("release check", exc)
+    for issue in issues:
+        typer.echo(issue.line(), err=True)
+    scope = ["catalog"]
+    scope += ["metadata and mgap results"] if metadata is not None else []
+    scope += [f"release {release}"] if release is not None else []
+    failed = failures(issues)
+    typer.echo(
+        f"catalejo release check: checked {', '.join(scope)}: {len(failed)} failures, "
+        f"{len(warnings(issues))} warnings"
+    )
+    if failed:
+        raise typer.Exit(code=VALIDATION_EXIT)
 
 
 @release_app.command("build")
@@ -241,8 +343,17 @@ def release_build(
         str | None, typer.Option("--group", help="Build the release of one access group.")
     ] = None,
 ) -> None:
-    """Build the release layout of contract §6. Not implemented until milestone 1a."""
-    _not_implemented("release build", MILESTONE_INGEST)
+    """Build the release layout of contract §6 from the catalog."""
+    from ingest.config import ConfigError
+    from ingest.release.build import build_release
+    from ingest.release.output import ReleaseError
+
+    try:
+        result = build_release(catalog, out, group)
+    except (ReleaseError, ConfigError) as exc:
+        _report_failure("release build", exc)
+    for line in result.lines():
+        typer.echo(line)
 
 
 @release_app.command("notes")

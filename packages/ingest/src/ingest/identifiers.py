@@ -7,7 +7,9 @@ of the fields the contract names, each written as text without padding:
 - ``feature_id`` (§3.4, §5.4): ``genome_id|contig_id|start|end|strand``, with
   1-based inclusive coordinates and the strand as Bakta writes it (``+``,
   ``-``, ``?``, ``.``), entered unchanged.
-- ``hit_id`` (§5.5): ``feature_id|source_tool|element_name``.
+- ``hit_id`` (§5.5): ``feature_id|source_tool|element_name``; for a hit that
+  overlaps no feature, ``genome_id|contig_id|start|end|source_tool|element_name``
+  (maintainer decision, milestone 1a; pending contract edit of §5.5).
 - ``mutation_id`` (§5.6): ``genome_id|source_tool|gene|variant``.
 - ``region_id`` (§5.8): ``genome_id|contig_id|start|end|source_tool|type``.
 - ``protein_hash`` (§5.4): the amino acid sequence itself. The sequence is
@@ -49,6 +51,14 @@ def feature_id(genome_id: str, contig_id: str, start: int, end: int, strand: str
 def hit_id(feature: str, source_tool: str, element_name: str) -> str:
     """Hash of ``feature_id|source_tool|element_name`` (contract §5.5)."""
     return sha1_16(_join(feature, source_tool, element_name))
+
+
+def unmapped_hit_id(
+    genome_id: str, contig_id: str, start: int, end: int, source_tool: str, element_name: str
+) -> str:
+    """Hash of ``genome_id|contig_id|start|end|source_tool|element_name``, for a hit
+    without a feature (pending contract edit of §5.5)."""
+    return sha1_16(_join(genome_id, contig_id, start, end, source_tool, element_name))
 
 
 def mutation_id(genome_id: str, source_tool: str, gene: str, variant: str) -> str:

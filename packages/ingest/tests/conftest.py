@@ -62,3 +62,41 @@ def real_example(repo_root: Path, name: str) -> Path:
     if not root.is_dir():
         pytest.skip(f"data/{name} is absent; tests against this real mgap run are skipped")
     return root
+
+
+@pytest.fixture(scope="session")
+def small_catalog(
+    tmp_path_factory: pytest.TempPathFactory, small_synth: Path, small_results: Path
+) -> Path:
+    """The small synthetic run ingested with its side tables: ``<tmp>/catalog/synth.duckdb``.
+
+    Tests must not modify it; ``copy_catalog`` gives a private copy.
+    """
+    from ingest.catalog import run_ingest
+    from ingest.config import platform
+    from ingest.metadata import init_metadata, read_metadata, write_metadata
+    from ingest.side import ingest_groups, ingest_sets, ingest_tombstones
+
+    root = tmp_path_factory.mktemp("catalog")
+    metadata = root / "metadata.csv"
+    existing = read_metadata(small_synth / "metadata.csv")
+    write_metadata(metadata, init_metadata(small_results, platform(), existing).table)
+    catalog = root / "catalog" / "synth.duckdb"
+    run_ingest(small_results, metadata, catalog)
+    ingest_groups(catalog, small_synth / "groups.csv", small_synth / "genome_groups.csv")
+    ingest_tombstones(catalog, small_synth / "tombstones.csv")
+    ingest_sets(catalog, small_synth / "sets.csv")
+    return catalog
+
+
+def copy_catalog(catalog: Path, target_dir: Path) -> Path:
+    """A private copy of a catalog and its per-genome files under ``target_dir``."""
+    import shutil
+
+    from ingest.catalog import files_dir
+
+    target_dir.mkdir(parents=True, exist_ok=True)
+    copy = target_dir / catalog.name
+    shutil.copyfile(catalog, copy)
+    shutil.copytree(files_dir(catalog), files_dir(copy))
+    return copy

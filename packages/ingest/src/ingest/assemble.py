@@ -19,9 +19,11 @@ Rules applied here, with their sources.
   ``Protein id`` as locus tag; otherwise, like RGI hits, to the feature on the
   same contig with the largest coordinate overlap, preferring coding features
   (CDS, sORF) and falling back to any feature type, ties broken by the
-  smallest start, end, strand and type. ``annotation_hit.feature_id`` is a
-  required foreign key, so a hit that overlaps no feature is not a row: it is
-  returned in ``unmapped_hits`` with an issue, never dropped silently.
+  smallest start, end, strand and type. A hit that overlaps no feature is a
+  row with a null ``feature_id`` and its ``hit_id`` hashed over its
+  coordinates (maintainer decision, milestone 1a; pending contract edit of
+  §5.5). A hit on a contig Bakta does not have (an RGI hit on an assembler
+  contig under 200 bp) cannot be placed and is left out with an issue.
 - RGI contigs (§3.2). RGI reports assembler names; each is mapped to the Bakta
   contig with the identical sequence (Bakta drops contigs under 200 bp and
   renames the rest), and the hit keeps its coordinates, since the sequences
@@ -114,7 +116,7 @@ DEFAULT_DISPLAY_GROUP = "typing"
 PLASMID_COVER_FRACTION = 0.5
 
 # Rule identifiers of the issues raised here.
-RULE_UNMAPPED_HIT = "annotation_hit.unmapped_feature"
+RULE_HIT_UNKNOWN_CONTIG = "annotation_hit.unknown_contig"
 RULE_DUPLICATE_FEATURE = "feature.duplicate_id"
 RULE_DUPLICATE_HIT = "annotation_hit.duplicate_id"
 RULE_DUPLICATE_MUTATION = "mutation.duplicate_id"
@@ -258,21 +260,6 @@ class GenomeFacts:
 
 
 @dataclass(frozen=True)
-class UnmappedHit:
-    """An annotation hit with no feature to attach to (§5.5 requires one)."""
-
-    source_tool: str
-    element_name: str
-    contig_id: str | None  # Bakta contig, None when the assembler contig has none
-    reported_contig: str  # as the tool wrote it
-    start: int
-    end: int
-    strand: str
-    method: str | None
-    reason: str
-
-
-@dataclass(frozen=True)
 class AssembledGenome:
     genome_id: str
     sample: str
@@ -284,8 +271,12 @@ class AssembledGenome:
     regions: tuple[RegionRow, ...]
     typing: tuple[TypingRow, ...]
     tool_versions: tuple[ToolVersionRow, ...]
-    unmapped_hits: tuple[UnmappedHit, ...] = ()
     issues: tuple[Issue, ...] = field(default=())
+
+    @property
+    def unmapped_hit_count(self) -> int:
+        """Hits that overlap no feature (null ``feature_id``)."""
+        return sum(1 for h in self.hits if h.feature_id is None)
 
 
 # Versions -------------------------------------------------------------------------------------
@@ -537,15 +528,38 @@ def _contig_rows(
 # Hits, mutations, regions ---------------------------------------------------------------------
 
 
+def _hit_id(
+    genome_id: str,
+    feature: FeatureRow | None,
+    contig: str,
+    start: int,
+    end: int,
+    tool: str,
+    element: str,
+) -> str:
+    if feature is not None:
+        return ids.hit_id(feature.feature_id, tool, element)
+    return ids.unmapped_hit_id(genome_id, contig, start, end, tool, element)
+
+
 def _amr_hit_row(
-    genome_id: str, hit: AmrFinderHit, feature: FeatureRow, location: str, db_version: str | None
+    genome_id: str,
+    hit: AmrFinderHit,
+    feature: FeatureRow | None,
+    location: str,
+    db_version: str | None,
 ) -> AnnotationHitRow:
     a = L.AMRFINDERPLUS
     return AnnotationHitRow(
-        hit_id=ids.hit_id(feature.feature_id, a.tool, hit.element_symbol),
-        feature_id=feature.feature_id,
+        hit_id=_hit_id(
+            genome_id, feature, hit.contig_id, hit.start, hit.end, a.tool, hit.element_symbol
+        ),
+        feature_id=feature.feature_id if feature else None,
         genome_id=genome_id,
         contig_id=hit.contig_id,
+        start=hit.start,
+        end=hit.end,
+        strand=hit.strand,
         source_tool=a.tool,
         source_db=a.database_name,
         source_db_version=db_version,
@@ -563,14 +577,17 @@ def _amr_hit_row(
 
 
 def _rgi_hit_row(
-    genome_id: str, hit: RgiHit, contig: str, feature: FeatureRow, location: str
+    genome_id: str, hit: RgiHit, contig: str, feature: FeatureRow | None, location: str
 ) -> AnnotationHitRow:
     r = L.RGI
     return AnnotationHitRow(
-        hit_id=ids.hit_id(feature.feature_id, r.tool, hit.best_hit_aro),
-        feature_id=feature.feature_id,
+        hit_id=_hit_id(genome_id, feature, contig, hit.start, hit.end, r.tool, hit.best_hit_aro),
+        feature_id=feature.feature_id if feature else None,
         genome_id=genome_id,
         contig_id=contig,
+        start=hit.start,
+        end=hit.end,
+        strand=hit.strand,
         source_tool=r.tool,
         source_db=r.database_name,
         source_db_version=None,
@@ -711,7 +728,6 @@ def assemble_genome(
     contig_rows = _contig_rows(genome_id, contigs, classes, parsed.mobsuite, features)
 
     hits: dict[str, AnnotationHitRow] = {}
-    unmapped: list[UnmappedHit] = []
 
     def keep(row: AnnotationHitRow) -> None:
         if row.hit_id in hits:
@@ -719,26 +735,13 @@ def assemble_genome(
                 Issue(
                     RULE_DUPLICATE_HIT,
                     WARNING,
-                    f"{row.source_tool} {row.element_name} twice on feature {row.feature_id}; "
-                    "the first is kept",
+                    f"{row.source_tool} {row.element_name} twice at {row.contig_id}:"
+                    f"{row.start}-{row.end}; the first is kept",
                     genome_id,
                 )
             )
             return
         hits[row.hit_id] = row
-
-    def lost(item: UnmappedHit) -> None:
-        unmapped.append(item)
-        issues.append(
-            Issue(
-                RULE_UNMAPPED_HIT,
-                FAILURE,
-                f"{item.source_tool} {item.element_name} at {item.reported_contig}:"
-                f"{item.start}-{item.end} ({item.strand}, {item.method}) maps to no feature: "
-                f"{item.reason}",
-                genome_id,
-            )
-        )
 
     amr = parsed.amrfinder
     amr_db = versions.get(L.AMRFINDERPLUS.tool)
@@ -746,22 +749,17 @@ def assemble_genome(
     if amr is not None:
         for hit in amr.hits:
             if hit.contig_id not in known:
-                lost(
-                    UnmappedHit(
-                        L.AMRFINDERPLUS.tool, hit.element_symbol, None, hit.contig_id,
-                        hit.start, hit.end, hit.strand, hit.method, "contig absent from Bakta",
+                issues.append(
+                    Issue(
+                        RULE_HIT_UNKNOWN_CONTIG,
+                        FAILURE,
+                        f"{L.AMRFINDERPLUS.tool} {hit.element_symbol} on {hit.contig_id}, "
+                        "a contig absent from the Bakta .fna",
+                        genome_id,
                     )
-                )  # fmt: skip
+                )
                 continue
             feature = index.resolve(hit.protein_id, hit.contig_id, hit.start, hit.end)
-            if feature is None:
-                lost(
-                    UnmappedHit(
-                        L.AMRFINDERPLUS.tool, hit.element_symbol, hit.contig_id, hit.contig_id,
-                        hit.start, hit.end, hit.strand, hit.method, "no Bakta feature overlaps it",
-                    )
-                )  # fmt: skip
-                continue
             keep(_amr_hit_row(genome_id, hit, feature, classes[hit.contig_id][0], amr_db_version))
 
     if parsed.rgi:
@@ -770,22 +768,17 @@ def assemble_genome(
         for hit in parsed.rgi:
             contig = names.get(hit.assembler_contig)
             if contig is None:
-                lost(
-                    UnmappedHit(
-                        L.RGI.tool, hit.best_hit_aro, None, hit.assembler_contig, hit.start,
-                        hit.end, hit.strand, hit.cut_off, "assembler contig has no Bakta contig",
+                issues.append(
+                    Issue(
+                        RULE_HIT_UNKNOWN_CONTIG,
+                        WARNING,
+                        f"{L.RGI.tool} {hit.best_hit_aro} on {hit.assembler_contig}, which has "
+                        "no Bakta contig (shorter than 200 bp); not ingested",
+                        genome_id,
                     )
-                )  # fmt: skip
+                )
                 continue
             feature = index.best_overlap(contig, hit.start, hit.end)
-            if feature is None:
-                lost(
-                    UnmappedHit(
-                        L.RGI.tool, hit.best_hit_aro, contig, hit.assembler_contig, hit.start,
-                        hit.end, hit.strand, hit.cut_off, "no Bakta feature overlaps it",
-                    )
-                )  # fmt: skip
-                continue
             keep(_rgi_hit_row(genome_id, hit, contig, feature, classes[contig][0]))
 
     mutations: dict[str, MutationRow] = {}
@@ -882,7 +875,7 @@ def assemble_genome(
         hits=tuple(
             sorted(
                 hits.values(),
-                key=lambda h: (h.contig_id, h.feature_id, h.source_tool, h.element_name),
+                key=lambda h: (h.contig_id, h.start, h.end, h.source_tool, h.element_name),
             )
         ),
         mutations=tuple(
@@ -891,6 +884,5 @@ def assemble_genome(
         regions=tuple(regions),
         typing=tuple(_typing_rows(genome_id, parsed, typing_display, versions)),
         tool_versions=tool_versions,
-        unmapped_hits=tuple(unmapped),
         issues=tuple(issues),
     )

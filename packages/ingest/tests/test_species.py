@@ -67,13 +67,13 @@ def test_mlst_scheme_through_registry(registry: SpeciesRegistry) -> None:
 
 def test_unmapped_scheme_yields_no_name(registry: SpeciesRegistry) -> None:
     a = assign_species(
-        SpeciesEvidence(mlst_scheme="spyogenes", kraken2="Streptococcus pyogenes"),
+        SpeciesEvidence(mlst_scheme="hinfluenzae", kraken2="Haemophilus influenzae"),
         registry,
         PRECEDENCE,
     )
     assert a.species_source == KRAKEN2
     assert a.species_code is None  # not in the registry: validation fails with the name
-    assert a.name == "Streptococcus pyogenes"
+    assert a.name == "Haemophilus influenzae"
     assert MLST not in a.names
 
 
@@ -105,6 +105,15 @@ def test_precedence_comes_from_the_argument(registry: SpeciesRegistry) -> None:
     evidence = SpeciesEvidence(gtdbtk="Escherichia coli", kraken2="Klebsiella pneumoniae")
     a = assign_species(evidence, registry, [KRAKEN2, GTDBTK, MLST, METADATA])
     assert (a.species_code, a.species_source) == ("KPN", KRAKEN2)
+
+
+def test_streptococcus_pyogenes_is_registered(registry: SpeciesRegistry) -> None:
+    a = assign_species(
+        SpeciesEvidence(mlst_scheme="spyogenes", kraken2="Streptococcus pyogenes"),
+        registry,
+        PRECEDENCE,
+    )
+    assert (a.species_code, a.species_source, a.species_conflict) == ("SPY", MLST, False)
 
 
 def test_no_source(registry: SpeciesRegistry) -> None:

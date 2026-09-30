@@ -122,3 +122,13 @@ species:
       - ecloacae
     pangenome_eligible: true
     color_index: null
+
+  - species_code: SPY
+    canonical_name: Streptococcus pyogenes
+    gtdb_name: null
+    ncbi_taxid: 1314
+    aliases: []
+    mlst_schemes:
+      - spyogenes
+    pangenome_eligible: true
+    color_index: null

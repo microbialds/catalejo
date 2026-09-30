@@ -981,10 +981,9 @@ class AmrFinderLayout:
     # AMRFinderPlus 4 reports gene disruptions (a premature stop, an
     # insertion) as POINT_DISRUPT (ompK35_E24insTer26 in data/ont_example).
     subtype_point_disrupt: str = "POINT_DISRUPT"
-    # Subtypes ingested as point mutations. Contract 0.7 §4.1 and §5.6 name
-    # only POINT, so POINT_DISRUPT rows are annotation hits until the contract
-    # says otherwise (open point, milestone 1a).
-    mutation_subtypes: tuple[str, ...] = ("POINT",)
+    # Subtypes ingested as point mutations: POINT and POINT_DISRUPT
+    # (maintainer decision, milestone 1a; pending contract edit of §4.1, §5.6).
+    mutation_subtypes: tuple[str, ...] = ("POINT", "POINT_DISRUPT")
     subtype_metal: str = "METAL"
     subtype_biocide: str = "BIOCIDE"
     subtype_virulence: str = "VIRULENCE"

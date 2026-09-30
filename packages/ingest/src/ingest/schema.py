@@ -12,6 +12,11 @@ the contract lists a dangling reference as a validation failure (§9), which
 ``release check`` reports by rule, and a declared constraint would abort the
 load instead of producing that report.
 
+``annotation_hit`` carries ``start``, ``end`` and ``strand`` after
+``contig_id``, the hit coordinates as reported, and its ``feature_id`` is null
+when no feature overlaps the hit (maintainer decision, milestone 1a; pending
+contract edit of §5.5).
+
 Readings where the contract gives no type:
 
 - ``genome.isolation_date`` is ``DATE``, the first day of the period for dates
@@ -183,6 +188,9 @@ ANNOTATION_HIT = TableSpec(
         ("feature_id", V),
         ("genome_id", V),
         ("contig_id", V),
+        ("start", B),
+        ("end", B),
+        ("strand", V),
         ("source_tool", V),
         ("source_db", V),
         ("source_db_version", V),

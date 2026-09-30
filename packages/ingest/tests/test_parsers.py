@@ -388,8 +388,8 @@ def test_real_nanopore_example(repo_root: Path) -> None:
     assert [c.digest for c in b.contigs] == [s.digest for s in a.sequences]
     amr = amrfinder.parse_amrfinder(root, sample, prefix)
     assert amr is not None
-    disrupt = [h for h in amr.hits if h.subtype == L.AMRFINDERPLUS.subtype_point_disrupt]
-    assert [h.element_symbol for h in disrupt] == ["ompK35_E24insTer26"]
+    assert not [h for h in amr.hits if h.subtype == L.AMRFINDERPLUS.subtype_point_disrupt]
+    assert "ompK35_E24insTer26" in {m.element_symbol for m in amr.mutations}
     k = kraken2.parse_kraken2(root, sample, prefix)
     assert k is not None and k.source == L.KRAKEN2.tool
     assert mobsuite.parse_mobsuite(root, sample, prefix) is None

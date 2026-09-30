@@ -118,12 +118,16 @@ class FeatureRow:
 
 @dataclass(frozen=True)
 class AnnotationHitRow:
-    """§5.5. ``feature_id`` is required; hits that map to no feature are reported apart."""
+    """§5.5, with the hit coordinates and a null ``feature_id`` when no feature overlaps
+    the hit (pending contract edit)."""
 
     hit_id: str
-    feature_id: str
+    feature_id: str | None
     genome_id: str
     contig_id: str
+    start: int
+    end: int
+    strand: str
     source_tool: str
     source_db: str | None
     source_db_version: str | None

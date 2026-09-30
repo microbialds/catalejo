@@ -20,8 +20,10 @@ The sentence follows ``config/summary_templates.yaml``: templates in order,
 the first whose ``requires`` facts are not null and whose ``when``
 conditions hold; clauses the same way; conditions compared as numbers when
 both sides are numeric, and false when the fact is null; resistance phrase
-rules with shell-style patterns (``fnmatchcase``); the article rule on the
-rendered text. Every fact follows the rule written beside it in that file.
+rules with shell-style patterns (``fnmatchcase``); the article rule on
+every standalone article of the rendered text, with the number rule of that
+file for words that begin with a digit. Every fact follows the rule written
+beside it in that file.
 """
 
 from __future__ import annotations
@@ -268,14 +270,42 @@ def _fill(text: str, values: Mapping[str, FactValue]) -> str:
     return _PLACEHOLDER.sub(value, text)
 
 
+# Numbers read with a vowel sound: integer part 11 or 18, or a leading 8 (8, 80, 800 ...).
+AN_NUMBERS = ("11", "18")
+AN_LEADING_DIGIT = "8"
+_INTEGER = re.compile(r"\d+")
+
+
+def takes_an(word: str, an_before: Sequence[str]) -> bool:
+    """Whether ``word`` is read with a vowel sound, by the article rule of contract §7.4.
+
+    A word beginning with a number follows the number rule in
+    ``config/summary_templates.yaml``; any other word takes "an" when it
+    begins with one of ``an_before`` (case sensitive).
+    """
+    number = _INTEGER.match(word)
+    if number is not None:
+        digits = number.group(0)
+        return digits in AN_NUMBERS or digits.startswith(AN_LEADING_DIGIT)
+    return any(word.startswith(x) for x in an_before)
+
+
 def apply_article(sentence: str, templates: SummaryTemplatesConfig) -> str:
+    """Every standalone article "A" or "a" before a vowel sound becomes "An" or "an".
+
+    The article keeps its case, and the rule reads the rendered text
+    (contract §7.4, the Articles paragraph of ``config/summary_templates.yaml``).
+    """
     a = templates.article
-    prefix = a.default + " "
-    if sentence.startswith(prefix):
-        rest = sentence[len(prefix) :]
-        if any(rest.startswith(x) for x in a.an_before):
-            return a.alternative + " " + rest
-    return sentence
+    forms = {a.default: a.alternative, a.default.lower(): a.alternative.lower()}
+    article = re.compile(r"(?<!\S)(" + "|".join(re.escape(f) for f in forms) + r") (?=(\S+))")
+
+    def replace(m: re.Match[str]) -> str:
+        if takes_an(m.group(2), a.an_before):
+            return forms[m.group(1)] + " "
+        return m.group(0)
+
+    return article.sub(replace, sentence)
 
 
 def render(values: Mapping[str, FactValue], templates: SummaryTemplatesConfig) -> tuple[str, str]:

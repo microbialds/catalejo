@@ -131,9 +131,22 @@ def test_plasmid_without_replicon(
     assert template_id == "plasmid_without_replicon"
     assert text == (
         "A carbapenem-resistant ST258 isolate, collected in 2024, with 99.5% completeness and "
-        "0.3% contamination. It carries blaKPC-2 on a 8 kb plasmid, and belongs to a group of 14 "
+        "0.3% contamination. It carries blaKPC-2 on an 8 kb plasmid, and belongs to a group of 14 "
         "ST258 genomes in this release."
     )
+
+
+def test_singleton_st_falls_through_full_to_plasmid(
+    templates: SummaryTemplatesConfig, palette: PaletteConfig
+) -> None:
+    template_id, text = sentence(replace(FULL, cluster_size=1), templates, palette)
+    assert template_id == "plasmid"
+    assert text.endswith(
+        "together with 2 other resistance determinants and the point mutation gyrA S83I, "
+        "and is the only ST258 genome in this release."
+    )
+    assert "group" not in text
+    assert sentence(replace(FULL, cluster_size=2), templates, palette)[0] == "full"
 
 
 def test_no_plasmid(templates: SummaryTemplatesConfig, palette: PaletteConfig) -> None:
@@ -200,7 +213,11 @@ def test_mutations_only(templates: SummaryTemplatesConfig, palette: PaletteConfi
     template_id, text = sentence(g, templates, palette)
     assert template_id == "mutations_only"
     assert "Its resistance determinants are the point mutations acrR R45C, gyrA D87N and " in text
-    assert text.endswith("gyrA S83I, and belongs to a group of 14 ST258 genomes in this release.")
+    assert text.endswith("gyrA S83I. It belongs to a group of 14 ST258 genomes in this release.")
+    _, alone = sentence(replace(g, cluster_size=1), templates, palette)
+    assert alone.endswith("gyrA S83I. It is the only ST258 genome in this release.")
+    _, no_st = sentence(replace(g, st=None), templates, palette)
+    assert no_st.endswith("acrR R45C, gyrA D87N and gyrA S83I.")
 
 
 def test_no_resistance_no_plasmid(
@@ -211,14 +228,30 @@ def test_no_resistance_no_plasmid(
     template_id, text = sentence(g, templates, palette)
     assert template_id == "no_resistance_no_plasmid"
     assert text.startswith("An ST258-1LV isolate from blood")
-    assert "No resistance determinants or plasmid contigs were detected" in text
+    assert text.endswith(
+        "No resistance determinants or plasmid contigs were detected. It belongs to a group of 2 "
+        "ST258-1LV genomes in this release."
+    )
+    _, alone = sentence(replace(g, cluster_size=1), templates, palette)
+    assert alone.endswith("were detected. It is the only ST258-1LV genome in this release.")
+    _, no_st = sentence(replace(g, st="-"), templates, palette)
+    assert no_st.endswith("No resistance determinants or plasmid contigs were detected.")
 
 
 def test_no_resistance(templates: SummaryTemplatesConfig, palette: PaletteConfig) -> None:
     g = replace(FULL, hits=(), mutations=())
     template_id, text = sentence(g, templates, palette)
     assert template_id == "no_resistance"
-    assert "No resistance determinants were detected, and plasmid contigs are present" in text
+    assert text.endswith(
+        "No resistance determinants were detected, and plasmid contigs are present. It belongs to "
+        "a group of 14 ST258 genomes in this release."
+    )
+    _, alone = sentence(replace(g, cluster_size=1), templates, palette)
+    assert alone.endswith("are present. It is the only ST258 genome in this release.")
+    _, no_st = sentence(replace(g, st=None), templates, palette)
+    assert no_st.endswith(
+        "No resistance determinants were detected, and plasmid contigs are present."
+    )
 
 
 def test_minimal(templates: SummaryTemplatesConfig) -> None:
@@ -267,6 +300,63 @@ def test_article(templates: SummaryTemplatesConfig) -> None:
     assert apply_article("A ST11 isolate.", templates) == "An ST11 isolate."
     assert apply_article("A carbapenem-resistant isolate.", templates).startswith("A carb")
     assert apply_article("An isolate.", templates) == "An isolate."
+    for kept in (
+        "It belongs to a group of 3 ST11 genomes.",
+        "It carries sul1 on a plasmid-associated contig (predicted).",
+        "It carries sul1 on a plasmid.",
+    ):
+        assert apply_article(kept, templates) == kept
+
+
+@pytest.mark.parametrize(
+    ("size", "article"),
+    [
+        ("8", "an"),
+        ("11", "an"),
+        ("18", "an"),
+        ("80", "an"),
+        ("110", "a"),
+        ("180", "a"),
+        ("32", "a"),
+        ("1", "a"),
+        ("800", "an"),
+        ("8.5", "an"),
+    ],
+)
+def test_article_inside_a_sentence_before_a_number(
+    size: str, article: str, templates: SummaryTemplatesConfig
+) -> None:
+    text = f"A ST11 isolate. It carries blaKPC-2 on a {size} kb IncFIB(pQil) plasmid."
+    assert apply_article(text, templates) == (
+        f"An ST11 isolate. It carries blaKPC-2 on {article} {size} kb IncFIB(pQil) plasmid."
+    )
+
+
+def test_article_keeps_case_and_ignores_letters_inside_words(
+    templates: SummaryTemplatesConfig,
+) -> None:
+    assert apply_article("A 8 kb plasmid, a 8 kb plasmid.", templates) == (
+        "An 8 kb plasmid, an 8 kb plasmid."
+    )
+    assert apply_article("a ESBL-producing isolate", templates) == "an ESBL-producing isolate"
+    # "A" inside gyrA or after a hyphen is not an article.
+    assert apply_article("gyrA E83I and plasmid-A 8 kb", templates) == (
+        "gyrA E83I and plasmid-A 8 kb"
+    )
+
+
+def test_article_rendered_in_the_plasmid_templates(
+    templates: SummaryTemplatesConfig, palette: PaletteConfig
+) -> None:
+    contigs = {"c1": CONTIGS["c1"]} | {
+        f"p{kb}": ContigFact(kb * 1000, "plasmid", ("IncX3",))
+        for kb in (8, 11, 18, 80, 110, 180, 32)
+    }
+    for kb, article in ((8, "an"), (11, "an"), (18, "an"), (80, "an"), (110, "a"), (180, "a"),
+                        (32, "a")):  # fmt: skip
+        g = replace(FULL, hits=(hit("blaNDM-1", f"p{kb}"),), mutations=(), contigs=contigs)
+        _, text = sentence(g, templates, palette)
+        assert f"It carries blaNDM-1 on {article} {kb} kb IncX3 plasmid" in text, text
 
 
 def test_facts_follow_the_written_rules(

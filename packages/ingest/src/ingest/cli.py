@@ -139,6 +139,12 @@ def metadata_init(
     from ingest.config import ConfigError, platform
     from ingest.metadata import MetadataError, init_metadata, read_metadata, write_metadata
 
+    if existing is not None and not existing.exists():
+        typer.echo(
+            f"warning: --existing {existing} does not exist; "
+            "writing the table from the mgap results alone",
+            err=True,
+        )
     try:
         previous = read_metadata(existing) if existing is not None and existing.exists() else None
         result = init_metadata(mgap, platform(), previous)

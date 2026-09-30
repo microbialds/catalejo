@@ -15,17 +15,30 @@
 # Conditions are written `<fact> <operator> <value>` with the operators ==,
 # !=, >=, <=, > and <, compared as numbers when both sides are numeric.
 #
-# Articles. A sentence that begins with the article "A" takes "An" instead
-# when the word after it begins with one of `article.an_before`, so that an
-# ESBL-producing or ST-led sentence reads correctly. The comparison is on the
-# rendered text and is case sensitive.
+# Articles. Every standalone article "A" or "a" in the rendered sentence,
+# whether it opens the sentence or stands inside it, takes "An" or "an" (the
+# case of the article is kept) when the next word is read with a vowel sound.
+# A word that begins with a letter is read with a vowel sound when it begins
+# with one of `article.an_before`, so that an ESBL-producing or ST-led
+# sentence reads correctly; this comparison is case sensitive. A word that
+# begins with a number is read with a vowel sound when the integer part of
+# that number is 11 or 18 or starts with the digit 8 (8, 80 to 89, 800 to
+# 899), so that the sentence reads "an 8 kb", "an 11 kb" and "an 18 kb" but
+# "a 110 kb" and "a 32 kb".
+#
+# Group. A genome whose ST is shared by no other genome of its species in the
+# release is described as the only genome of its ST, and the full case, whose
+# text speaks of a group of genomes, applies from two genomes up. Templates
+# whose last sentence has another subject state the group in a sentence of
+# its own ({group_sentence}); the other templates that state the group end
+# with {group_clause}.
 
 version: 1
 
 article:
   default: "A"
   alternative: "An"
-  an_before: ["A", "E", "I", "O", "U", "ESBL", "ST", "8", "11", "18"]
+  an_before: ["A", "E", "I", "O", "U", "ESBL", "ST"]
 
 # Facts available to templates and clauses, with the columns they come from.
 facts:
@@ -115,14 +128,25 @@ clauses:
     - text: ""
   group_clause:
     - requires: [st, cluster_size]
+      when: ["cluster_size == 1"]
+      text: ", and is the only {st} genome in this release"
+    - requires: [st, cluster_size]
       text: ", and belongs to a group of {cluster_size} {st} genomes in this release"
+    - text: ""
+  group_sentence:
+    - requires: [st, cluster_size]
+      when: ["cluster_size == 1"]
+      text: " It is the only {st} genome in this release."
+    - requires: [st, cluster_size]
+      text: " It belongs to a group of {cluster_size} {st} genomes in this release."
     - text: ""
 
 templates:
-  # The full case, verbatim from contract §7.4.
+  # The full case, verbatim from contract §7.4. Its text speaks of a group of
+  # genomes, so a genome alone in its ST falls through to `plasmid`.
   - id: full
     requires: [resistance_phrase, st, isolation_site, year, completeness, contamination, top_determinant, plasmid_size, replicon, n_other, cluster_size]
-    when: ["assembly_status == complete", "top_location == plasmid", "n_other >= 2"]
+    when: ["assembly_status == complete", "top_location == plasmid", "n_other >= 2", "cluster_size >= 2"]
     text: "A {resistance_phrase} {st} isolate from {isolation_site}, collected in {year}, with {completeness}% completeness and {contamination}% contamination. It carries {top_determinant} on a {plasmid_size} {replicon} plasmid together with {n_other} other resistance determinants{mutation_clause}, and belongs to a group of {cluster_size} {st} genomes in this release."
 
   # A complete assembly whose top determinant is on a plasmid, when a fact of
@@ -163,17 +187,17 @@ templates:
   - id: mutations_only
     requires: [mutation_list]
     when: ["n_genes == 0"]
-    text: "{lead_clause}{origin_clause}{qc_clause}. Its resistance determinants are the point mutations {mutation_list}{group_clause}."
+    text: "{lead_clause}{origin_clause}{qc_clause}. Its resistance determinants are the point mutations {mutation_list}.{group_sentence}"
 
   # No resistance determinants and no plasmid contigs.
   - id: no_resistance_no_plasmid
     when: ["n_genes == 0", "n_mutations == 0", "plasmid_contig_count == 0"]
-    text: "{lead_clause}{origin_clause}{qc_clause}. No resistance determinants or plasmid contigs were detected{group_clause}."
+    text: "{lead_clause}{origin_clause}{qc_clause}. No resistance determinants or plasmid contigs were detected.{group_sentence}"
 
   # No resistance determinants, with plasmid contigs present.
   - id: no_resistance
     when: ["n_genes == 0", "n_mutations == 0"]
-    text: "{lead_clause}{origin_clause}{qc_clause}. No resistance determinants were detected, and plasmid contigs are present{group_clause}."
+    text: "{lead_clause}{origin_clause}{qc_clause}. No resistance determinants were detected, and plasmid contigs are present.{group_sentence}"
 
   # The minimal case, when no other template applies.
   - id: minimal

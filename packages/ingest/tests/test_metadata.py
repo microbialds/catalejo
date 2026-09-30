@@ -130,6 +130,25 @@ def test_manual_edit_survives_a_second_init(
     assert third.read_bytes() == second.read_bytes()
 
 
+def test_missing_existing_file_warns_and_starts_fresh(
+    tmp_path: Path, small_results: Path, config: PlatformConfig
+) -> None:
+    missing = tmp_path / "missing.csv"
+    out = tmp_path / "metadata.csv"
+    result = runner.invoke(
+        app,
+        ["metadata", "init", "--mgap", str(small_results), "--out", str(out),
+         "--existing", str(missing)],
+    )  # fmt: skip
+    assert result.exit_code == 0, result.stderr
+    assert f"warning: --existing {missing} does not exist" in result.stderr
+    assert "0 kept from the existing file, 12 new" in result.stdout
+    assert not missing.exists()
+    fresh = tmp_path / "fresh.csv"
+    runner.invoke(app, ["metadata", "init", "--mgap", str(small_results), "--out", str(fresh)])
+    assert out.read_bytes() == fresh.read_bytes()
+
+
 def test_renamed_genome_id_is_kept(small_results: Path, config: PlatformConfig) -> None:
     table = init_metadata(small_results, config).table
     for row in table.rows:

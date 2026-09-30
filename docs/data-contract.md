@@ -635,10 +635,10 @@ Data releases and application deployments are separate GitHub Actions workflows.
 ### 8.5 Synthetic release
 
 ```
-catalejo synth --species 3 --genomes 60 --out data/synth
+catalejo synth --species 10 --genomes 100 --out data/synth
 ```
 
-Produces an mgap-shaped results directory with planted resistance determinants, plasmids, prophages and mutations, the side tables of §4.6 to §4.8 beside it, and, once the corresponding milestones exist, a pangenome directory and a tree per species and an embedding file. It replaces an existing output directory. The application's tests and the critic agent run against a release built from it.
+Produces an mgap-shaped results directory with planted resistance determinants, plasmids, prophages and mutations, at least one species without an MLST scheme, the side tables of §4.6 to §4.8 beside it, and, once the corresponding milestones exist, a pangenome directory and a tree per species and an embedding file. It replaces an existing output directory. The application's tests and the critic agent run against a release built from it.
 
 ---
 

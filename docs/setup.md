@@ -117,7 +117,7 @@ Before milestone 0, place a small real mgap results directory (a few genomes cov
 Synthetic data and local releases live under `data/`, `catalog/` and `releases/`, all ignored by git. To produce the synthetic release used by tests and by the critic:
 
 ```
-uv run --project packages/ingest catalejo synth --species 3 --genomes 60 --out data/synth
+uv run --project packages/ingest catalejo synth --species 10 --genomes 100 --out data/synth
 uv run --project packages/ingest catalejo metadata init --mgap data/synth --out data/synth-metadata.csv
 uv run --project packages/ingest catalejo ingest --mgap data/synth --metadata data/synth-metadata.csv --catalog catalog/synth.duckdb
 uv run --project packages/ingest catalejo release build --catalog catalog/synth.duckdb --out releases/synth

@@ -13,9 +13,6 @@ from ingest.cli import NOT_IMPLEMENTED_EXIT, app
 runner = CliRunner()
 
 STUBS: list[tuple[list[str], str]] = [
-    (["metadata", "init", "--mgap", "results", "--out", "metadata.csv"], "1a"),
-    (["metadata", "init", "--mgap", "r", "--out", "m.csv", "--existing", "old.csv"], "1a"),
-    (["metadata", "validate", "metadata.csv"], "1a"),
     (["ingest", "--mgap", "results", "--metadata", "m.csv", "--catalog", "c.duckdb"], "1a"),
     (["pangenome", "ingest", "--dir", "pangenomes/KPN", "--catalog", "c.duckdb"], "4a"),
     (["pangenome", "map", "--previous", "p.duckdb", "--catalog", "c.duckdb"], "4a"),

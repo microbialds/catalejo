@@ -596,6 +596,8 @@ class SistrLayout:
         "{sample}/annotation/sistr/{prefix}.tab", provisional=True, optional=True
     )
     columns: SistrColumns = SistrColumns()
+    # Placeholder for an absent value (provisional, as the synthetic output writes it).
+    missing: str = "-"
 
     @property
     def table(self) -> Table:
@@ -632,6 +634,8 @@ class SccmecLayout:
         "{sample}/annotation/sccmec/{prefix}.tsv", provisional=True, optional=True
     )
     columns: SccmecColumns = SccmecColumns()
+    # Placeholder for an absent value (provisional, as the synthetic output writes it).
+    missing: str = "-"
 
     @property
     def table(self) -> Table:
@@ -717,6 +721,11 @@ class BaktaFeatureTypes:
     ncrna: str = "ncRNA"
     ncrna_region: str = "ncRNA-region"
     crispr: str = "crispr"
+    # Repeats and spacers of a CRISPR array, one row each after the array's
+    # own row, strand "?" and no locus tag (seen in data/mgap-example SP10;
+    # not in the contract 0.7 §5.4 list, which names examples).
+    crispr_repeat: str = "crispr-repeat"
+    crispr_spacer: str = "crispr-spacer"
     gap: str = "assembly_gap"
     oric: str = "oriC"
     oriv: str = "oriV"
@@ -764,6 +773,9 @@ class BaktaLayout:
 
     tool: str = "bakta"
     process: str = "GENE2DIS_MGAP:MGAP:BAKTA"
+    # Name recorded in tool_version.database, followed by the database type
+    # Bakta reports ("full" or "light").
+    database_name: str = "Bakta database"
     directory: MgapPath = MgapPath("{sample}/annotation/bakta")
     tsv: MgapPath = MgapPath("{sample}/annotation/bakta/{prefix}.tsv")
     gff3: MgapPath = MgapPath("{sample}/annotation/bakta/{prefix}.gff3")
@@ -946,6 +958,9 @@ class AmrFinderLayout:
     tool: str = "amrfinderplus"
     process: str = "GENE2DIS_MGAP:MGAP:AMRFINDERPLUS_RUN"
     database_key: str = "amrfinderplus-database"
+    # Name recorded in annotation_hit.source_db, mutation.source_db and
+    # tool_version.database.
+    database_name: str = "AMRFinderPlus database"
     report: MgapPath = MgapPath("{sample}/annotation/amrfinder/{prefix}.tsv")
     mutations: MgapPath = MgapPath("{sample}/annotation/amrfinder/{prefix}-mutations.tsv")
     # Provisional. mgap records the AMRFinderPlus database version only in the
@@ -963,6 +978,13 @@ class AmrFinderLayout:
     type_virulence: str = "VIRULENCE"
     subtype_amr: str = "AMR"
     subtype_point: str = "POINT"
+    # AMRFinderPlus 4 reports gene disruptions (a premature stop, an
+    # insertion) as POINT_DISRUPT (ompK35_E24insTer26 in data/ont_example).
+    subtype_point_disrupt: str = "POINT_DISRUPT"
+    # Subtypes ingested as point mutations. Contract 0.7 §4.1 and §5.6 name
+    # only POINT, so POINT_DISRUPT rows are annotation hits until the contract
+    # says otherwise (open point, milestone 1a).
+    mutation_subtypes: tuple[str, ...] = ("POINT",)
     subtype_metal: str = "METAL"
     subtype_biocide: str = "BIOCIDE"
     subtype_virulence: str = "VIRULENCE"
@@ -1032,6 +1054,12 @@ class RgiLayout:
 
     tool: str = "rgi"
     process: str = "GENE2DIS_MGAP:MGAP:RGI_MAIN"
+    # Name recorded in annotation_hit.source_db, and the prefix of CARD
+    # ontology terms (the ARO column holds the bare number).
+    database_name: str = "CARD"
+    aro_prefix: str = "ARO:"
+    # The Contig column is <assembler contig>_<orf number>.
+    orf_suffix_re: re.Pattern[str] = re.compile(r"_\d+$")
     report: MgapPath = MgapPath("{sample}/annotation/rgi/{prefix}.txt", optional=True)
     json: MgapPath = MgapPath("{sample}/annotation/rgi/{prefix}.json", optional=True)
     columns: RgiColumns = RgiColumns()
@@ -1353,13 +1381,22 @@ def all_tables() -> dict[str, Table]:
 
 
 def software_version_keys() -> dict[str, str]:
-    """Process name to tool key for every module that records a version."""
+    """Process name to tool key for every module that records a version.
+
+    A module attribute ``<x>process`` pairs with ``<x>tool`` when the module
+    has one, else with ``tool``: ``process`` and ``ont_process`` of Kraken2
+    both give ``kraken2``, and ``autocycler_process`` gives
+    ``autocycler_tool``.
+    """
     out: dict[str, str] = {}
     for module in MODULES:
-        process = getattr(module, "process", None)
-        tool = getattr(module, "tool", None)
-        if isinstance(process, str) and isinstance(tool, str):
-            out[process] = tool
+        for name, process in vars(module).items():
+            if not name.endswith("process") or not isinstance(process, str):
+                continue
+            stem = name[: -len("process")]
+            tool = getattr(module, f"{stem}tool", None) or getattr(module, "tool", None)
+            if isinstance(tool, str):
+                out[process] = tool
     return out
 
 

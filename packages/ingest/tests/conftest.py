@@ -36,3 +36,29 @@ def small_results(small_synth: Path) -> Path:
 @pytest.fixture(scope="session")
 def small_manifest(small_synth: Path) -> dict[str, Any]:
     return json.loads((small_synth / MANIFEST).read_text(encoding="utf-8"))
+
+
+@pytest.fixture(scope="session")
+def small_assembled(small_results: Path, small_manifest: dict[str, Any]) -> dict[str, Any]:
+    """Every genome of the small synthetic run, parsed and assembled, by genome_id."""
+    from ingest.assemble import assemble_genome, parse_sample
+    from ingest.config import load_typing_display
+    from ingest.parsers.gtdbtk import parse_gtdbtk_summary
+    from ingest.parsers.pipeline_info import parse_pipeline_info
+
+    display = load_typing_display()
+    pipeline = parse_pipeline_info(small_results)
+    gtdbtk = parse_gtdbtk_summary(small_results)
+    out: dict[str, Any] = {}
+    for gid, info in small_manifest["genomes"].items():
+        parsed = parse_sample(small_results, info["mgap_sample"], gid, gtdbtk)
+        out[gid] = assemble_genome(gid, parsed, display, pipeline)
+    return out
+
+
+def real_example(repo_root: Path, name: str) -> Path:
+    """A real mgap run under data/, skipping the test when it is absent (it is git-ignored)."""
+    root = repo_root / "data" / name
+    if not root.is_dir():
+        pytest.skip(f"data/{name} is absent; tests against this real mgap run are skipped")
+    return root

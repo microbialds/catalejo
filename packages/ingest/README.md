@@ -18,8 +18,8 @@ Every command of contract §8 exists. Only `synth` is implemented at milestone 0
 | Command | Help text | Milestone |
 |---|---|---|
 | `catalejo synth` | Write a synthetic mgap results directory and its side tables (contract §8.5). | implemented |
-| `catalejo metadata init` | Write metadata.csv from mgap results. | 1a |
-| `catalejo metadata validate` | Validate metadata.csv against contract §4.2. | 1a |
+| `catalejo metadata init` | Write metadata.csv from mgap results, keeping manual entries (contract §4.2, §8.1). | implemented |
+| `catalejo metadata validate` | Validate metadata.csv against contract §4.2 and the input rules of §9. | implemented |
 | `catalejo ingest` | Build the master catalog from mgap results. | 1a |
 | `catalejo sets ingest` | Ingest curated genome sets. | 1a |
 | `catalejo groups ingest` | Ingest access groups and their members. | 1a |

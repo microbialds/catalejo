@@ -3,7 +3,8 @@
 Every subcommand of contract §8 exists. Those that later milestones implement
 print "not implemented until milestone <N>" to standard error and exit with
 code 2, so a script that calls them fails loudly. ``synth`` (contract §8.5)
-is implemented.
+and ``metadata init`` and ``metadata validate`` (§8.1) are implemented; they
+exit with code 1 on any validation failure.
 """
 
 from __future__ import annotations
@@ -48,6 +49,8 @@ MILESTONE_RELEASE_NOTES_PUBLISH = "5"
 MILESTONE_EMBEDDINGS = "6"
 
 NOT_IMPLEMENTED_EXIT = 2
+# Exit code of any validation failure or unreadable input.
+VALIDATION_EXIT = 1
 
 
 def _not_implemented(command: str, milestone: str) -> NoReturn:
@@ -90,16 +93,58 @@ def metadata_init(
         Path | None, typer.Option("--existing", help="Existing metadata.csv to preserve.")
     ] = None,
 ) -> None:
-    """Write metadata.csv from mgap results. Not implemented until milestone 1a."""
-    _not_implemented("metadata init", MILESTONE_INGEST)
+    """Write metadata.csv from mgap results, keeping manual entries (contract §4.2, §8.1)."""
+    from ingest.config import ConfigError, platform
+    from ingest.metadata import MetadataError, init_metadata, read_metadata, write_metadata
+
+    try:
+        previous = read_metadata(existing) if existing is not None and existing.exists() else None
+        result = init_metadata(mgap, platform(), previous)
+    except (MetadataError, ConfigError) as exc:
+        typer.echo(f"catalejo metadata init: {exc}", err=True)
+        raise typer.Exit(code=VALIDATION_EXIT) from exc
+    if result.samples == 0:
+        typer.echo(f"catalejo metadata init: no mgap samples found in {mgap}", err=True)
+        raise typer.Exit(code=VALIDATION_EXIT)
+    write_metadata(out, result.table)
+    for warning in result.warnings():
+        typer.echo(f"warning: {warning}", err=True)
+    typer.echo(
+        f"catalejo metadata init: wrote {len(result.table.rows)} rows to {out} "
+        f"({result.samples} samples: {result.matched} kept from the existing file, "
+        f"{result.new} new; {len(result.orphans)} rows without a sample)"
+    )
 
 
 @metadata_app.command("validate")
 def metadata_validate(
     metadata: Annotated[Path, typer.Argument(help="metadata.csv to validate.")],
+    mgap: Annotated[
+        Path | None,
+        typer.Option("--mgap", help="mgap results directory, to check mgap_sample."),
+    ] = None,
 ) -> None:
-    """Validate metadata.csv against contract §4.2. Not implemented until milestone 1a."""
-    _not_implemented("metadata validate", MILESTONE_INGEST)
+    """Validate metadata.csv against contract §4.2 and the input rules of §9."""
+    from ingest.config import ConfigError, load_species_registry, platform
+    from ingest.issues import failures, warnings
+    from ingest.metadata import MetadataError, read_metadata, validate_metadata
+
+    try:
+        table = read_metadata(metadata)
+        issues = validate_metadata(table, platform(), load_species_registry(), mgap)
+    except (MetadataError, ConfigError) as exc:
+        typer.echo(f"catalejo metadata validate: {exc}", err=True)
+        raise typer.Exit(code=VALIDATION_EXIT) from exc
+    for issue in issues:
+        typer.echo(issue.line(), err=True)
+    failed = failures(issues)
+    checked = "with" if mgap is not None else "without"
+    typer.echo(
+        f"catalejo metadata validate: {len(table.rows)} rows in {metadata}, checked {checked} "
+        f"the mgap results; {len(failed)} failures, {len(warnings(issues))} warnings"
+    )
+    if failed:
+        raise typer.Exit(code=VALIDATION_EXIT)
 
 
 # §8.2 Ingestion and external products ----------------------------------------------------

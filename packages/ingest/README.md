@@ -71,7 +71,7 @@ The stubs already accept the options of contract §8, as the help of `release bu
 uv run --project packages/ingest catalejo synth --out data/synth
 ```
 
-With the defaults (3 species, 60 genomes, seed 42) the command writes 60 genomes of *Klebsiella pneumoniae* (KPN, 28 genomes), *Salmonella enterica* (SEN, 18) and *Staphylococcus aureus* (SAU, 14), in about 2,500 files and 65 MB. The first genome of each species is complete and follows the nanopore layout, and the other 57 are Illumina drafts. The output directory holds the following.
+With the defaults (10 species, 100 genomes, seed 42) the command writes 100 genomes in about 4,100 files and 101 MB, in about 15 seconds. The counts are deliberately uneven, so that the collection page has small species to group as Other: *Klebsiella pneumoniae* (KPN, 28 genomes), *Salmonella enterica* (SEN, 19), *Staphylococcus aureus* (SAU, 14), *Serratia marcescens* (SMA, 9), *Escherichia coli* (ECO, 8), *Pseudomonas aeruginosa* (PAE, 6), *Acinetobacter baumannii* (ABA, 5), *Enterococcus faecium* (EFM, 4), *Streptococcus pneumoniae* (SPN, 4) and *Enterobacter hormaechei* (EHO, 3). More than eight species and one species without an MLST scheme (*Serratia marcescens*) let checklist items C7 and C8 run on the default data. The first genome of each species is complete and follows the nanopore layout, and the other 90 are Illumina drafts. A smaller run such as `--species 3 --genomes 12` is enough for quick checks. The output directory holds the following.
 
 ```
 data/synth/

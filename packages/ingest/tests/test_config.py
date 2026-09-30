@@ -198,3 +198,67 @@ def test_species_registry_rejects(tmp_path: Path, repo_root: Path, edit: object)
     directory = _registry_dir(tmp_path, repo_root, edit)
     with pytest.raises((ValueError, config.ConfigError)):
         config.load_species_registry(directory)
+
+
+# versions.yaml duckdb_extensions -------------------------------------------------------
+
+
+def test_duckdb_extensions_load() -> None:
+    versions = config.load_versions()
+    ext = versions.duckdb_extensions
+    assert ext.engine == f"v{versions.duckdb_engine}"
+    assert len(ext.sha256) == len(ext.platforms) * len(ext.names)
+    for platform in ext.platforms:
+        for name in ext.names:
+            assert len(ext.sha256_of(platform, name)) == 64
+
+
+def _versions_dir(tmp_path: Path, repo_root: Path, edit: object) -> Path:
+    for name in config.CONFIG_FILES:
+        shutil.copy(repo_root / "config" / name, tmp_path / name)
+    path = tmp_path / config.VERSIONS_FILE
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert callable(edit)
+    edit(data["duckdb_extensions"])
+    path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    return tmp_path
+
+
+def _wrong_engine(ext: dict[str, object]) -> None:
+    ext["engine"] = "v1.4.2"
+
+
+def _engine_without_v(ext: dict[str, object]) -> None:
+    ext["engine"] = "1.4.3"
+
+
+def _missing_pair(ext: dict[str, object]) -> None:
+    sha = ext["sha256"]
+    assert isinstance(sha, dict)
+    sha.pop(next(iter(sha)))
+
+
+def _short_digest(ext: dict[str, object]) -> None:
+    sha = ext["sha256"]
+    assert isinstance(sha, dict)
+    sha[next(iter(sha))] = "abc123"
+
+
+def _unknown_pair(ext: dict[str, object]) -> None:
+    sha = ext["sha256"]
+    assert isinstance(sha, dict)
+    sha["wasm_threads/parquet"] = "0" * 64
+
+
+def _http_source(ext: dict[str, object]) -> None:
+    ext["source"] = "http://extensions.duckdb.org"
+
+
+@pytest.mark.parametrize(
+    "edit",
+    [_wrong_engine, _engine_without_v, _missing_pair, _short_digest, _unknown_pair, _http_source],
+)
+def test_duckdb_extensions_reject(tmp_path: Path, repo_root: Path, edit: object) -> None:
+    directory = _versions_dir(tmp_path, repo_root, edit)
+    with pytest.raises(ValueError):
+        config.load_versions(directory)

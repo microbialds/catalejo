@@ -14,6 +14,7 @@ from typing import Annotated, NoReturn
 import typer
 
 from ingest import __version__
+from ingest.synth import DEFAULT_GENOMES, DEFAULT_SEED, DEFAULT_SPECIES
 
 app = typer.Typer(
     name="catalejo",
@@ -226,9 +227,11 @@ def synth(
     out: Annotated[Path, typer.Option("--out", help="Output directory, replaced if it exists.")],
     species: Annotated[
         int, typer.Option("--species", min=1, help="Number of species (1 to 10).")
-    ] = 3,
-    genomes: Annotated[int, typer.Option("--genomes", min=1, help="Number of genomes.")] = 60,
-    seed: Annotated[int, typer.Option("--seed", help="Random seed.")] = 42,
+    ] = DEFAULT_SPECIES,
+    genomes: Annotated[
+        int, typer.Option("--genomes", min=1, help="Number of genomes.")
+    ] = DEFAULT_GENOMES,
+    seed: Annotated[int, typer.Option("--seed", help="Random seed.")] = DEFAULT_SEED,
 ) -> None:
     """Write a synthetic mgap results directory and its side tables (contract §8.5)."""
     from ingest.synth import SynthError, run_synth

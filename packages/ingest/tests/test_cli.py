@@ -75,6 +75,13 @@ def test_synth_refusal_exits_2(tmp_path: Path) -> None:
     out = tmp_path / "precious"
     out.mkdir()
     (out / "keep.txt").write_text("keep")
-    result = runner.invoke(app, ["synth", "--genomes", "12", "--out", str(out)])
+    result = runner.invoke(app, ["synth", "--species", "3", "--genomes", "12", "--out", str(out)])
     assert result.exit_code == 2
     assert "refusing to replace" in result.stderr
+
+
+def test_synth_help_shows_the_defaults() -> None:
+    result = runner.invoke(app, ["synth", "--help"])
+    assert result.exit_code == 0
+    text = " ".join(result.stdout.split())
+    assert "[default: 10]" in text and "[default: 100]" in text

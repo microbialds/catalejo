@@ -51,7 +51,7 @@ known-first-party = ["ingest"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
-markers = ["slow: the default-size synthetic run (about 60 genomes)"]
+markers = ["slow: the default-size synthetic run (100 genomes)"]
 
 [tool.pyright]
 include = ["src", "tests"]

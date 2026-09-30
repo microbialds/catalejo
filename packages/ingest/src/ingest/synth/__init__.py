@@ -45,9 +45,25 @@ from ingest.synth.writers import (
     write_software_versions,
 )
 
-__all__ = ["RESULTS_DIR", "MARKER", "MANIFEST", "SynthError", "SynthSummary", "run_synth"]
+__all__ = [
+    "DEFAULT_GENOMES",
+    "DEFAULT_SEED",
+    "DEFAULT_SPECIES",
+    "MANIFEST",
+    "MARKER",
+    "RESULTS_DIR",
+    "SynthError",
+    "SynthSummary",
+    "run_synth",
+]
 
 RESULTS_DIR = "results"
+
+# Defaults of `catalejo synth`: ten species so that more than eight exist
+# (checklist C7) and one lacks an MLST scheme (C8, Serratia marcescens).
+DEFAULT_SPECIES = 10
+DEFAULT_GENOMES = 100
+DEFAULT_SEED = 42
 MARKER = ".catalejo-synth"
 MANIFEST = "synth_manifest.json"
 

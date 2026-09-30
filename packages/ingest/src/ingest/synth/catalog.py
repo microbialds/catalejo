@@ -1620,7 +1620,7 @@ SPECIES_PARAMS: tuple[SpeciesParams, ...] = (
         point_mutations=(),
         virulence=(),
         mutation_genes=(),
-        weight=0.12,
+        weight=0.14,
     ),
     SpeciesParams(
         code="ECO",
@@ -1691,7 +1691,7 @@ SPECIES_PARAMS: tuple[SpeciesParams, ...] = (
         point_mutations=(),
         virulence=(),
         mutation_genes=(),
-        weight=0.10,
+        weight=0.09,
     ),
     SpeciesParams(
         code="ABA",
@@ -1729,7 +1729,7 @@ SPECIES_PARAMS: tuple[SpeciesParams, ...] = (
         point_mutations=(),
         virulence=(),
         mutation_genes=(),
-        weight=0.10,
+        weight=0.07,
     ),
     SpeciesParams(
         code="EFM",
@@ -1759,7 +1759,7 @@ SPECIES_PARAMS: tuple[SpeciesParams, ...] = (
         point_mutations=(),
         virulence=(),
         mutation_genes=(),
-        weight=0.08,
+        weight=0.05,
     ),
     SpeciesParams(
         code="SPN",
@@ -1789,7 +1789,7 @@ SPECIES_PARAMS: tuple[SpeciesParams, ...] = (
         point_mutations=(),
         virulence=(),
         mutation_genes=(),
-        weight=0.08,
+        weight=0.03,
     ),
     SpeciesParams(
         code="EHO",
@@ -1819,7 +1819,7 @@ SPECIES_PARAMS: tuple[SpeciesParams, ...] = (
         point_mutations=(),
         virulence=(),
         mutation_genes=(),
-        weight=0.08,
+        weight=0.02,
     ),
 )
 

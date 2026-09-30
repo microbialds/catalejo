@@ -263,6 +263,48 @@ class DesignTokens(_Model):
 # versions.yaml ----------------------------------------------------------------
 
 
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_ENGINE_TAG = re.compile(r"^v\d+\.\d+\.\d+$")
+
+
+class DuckdbExtensions(_Model):
+    """DuckDB extensions served from the platform's origin (requirements §9).
+
+    ``sha256`` is keyed ``<platform>/<name>`` and must hold a 64-character
+    lowercase hex digest for every platform and name pair, and nothing else.
+    """
+
+    source: str
+    engine: str
+    platforms: list[str] = Field(min_length=1)
+    names: list[str] = Field(min_length=1)
+    sha256: dict[str, str]
+
+    @model_validator(mode="after")
+    def _check(self) -> DuckdbExtensions:
+        if not re.fullmatch(r"https://[^\s/]+(/\S*)?", self.source):
+            raise ValueError(f"duckdb_extensions.source must be an https URL: {self.source!r}")
+        if not _ENGINE_TAG.match(self.engine):
+            raise ValueError(
+                f"duckdb_extensions.engine must read v<major.minor.patch>: {self.engine!r}"
+            )
+        for field_name, values in (("platforms", self.platforms), ("names", self.names)):
+            if len(set(values)) != len(values):
+                raise ValueError(f"duckdb_extensions.{field_name} has duplicates: {values}")
+        expected = {f"{p}/{n}" for p in self.platforms for n in self.names}
+        missing = sorted(expected - set(self.sha256))
+        extra = sorted(set(self.sha256) - expected)
+        if missing or extra:
+            raise ValueError(f"duckdb_extensions.sha256 missing {missing}, unexpected {extra}")
+        for key, digest in self.sha256.items():
+            if not _SHA256.match(digest):
+                raise ValueError(f"duckdb_extensions.sha256[{key}] is not a 64-hex digest")
+        return self
+
+    def sha256_of(self, platform: str, name: str) -> str:
+        return self.sha256[f"{platform}/{name}"]
+
+
 class VersionsConfig(_Model):
     """``config/versions.yaml`` (CLAUDE.md, Toolchain pins)."""
 
@@ -272,6 +314,7 @@ class VersionsConfig(_Model):
     duckdb_wasm_npm: str
     duckdb_engine: str
     duckdb_engine_minor: str
+    duckdb_extensions: DuckdbExtensions
 
     @model_validator(mode="after")
     def _check(self) -> VersionsConfig:
@@ -279,6 +322,11 @@ class VersionsConfig(_Model):
         python_minor = ".".join(self.duckdb_python.split(".")[:2])
         if engine_minor != self.duckdb_engine_minor or python_minor != self.duckdb_engine_minor:
             raise ValueError("duckdb_python and duckdb_engine must share duckdb_engine_minor")
+        if self.duckdb_extensions.engine != f"v{self.duckdb_engine}":
+            raise ValueError(
+                f"duckdb_extensions.engine {self.duckdb_extensions.engine!r} must equal "
+                f"'v' + duckdb_engine ({self.duckdb_engine!r})"
+            )
         return self
 
 

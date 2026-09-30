@@ -51,7 +51,7 @@ PROMOTER_SPACER = 260
 GAP_LENGTH = 100
 FRAGMENTED_JUNK_CONTIGS = 160
 # Chromosomal and plasmid backbone genes are shortened by this factor so that a
-# default run (60 genomes) stays a few tens of megabytes; determinants and the
+# default run (100 genomes) stays near 100 megabytes; determinants and the
 # genes carrying screened mutations keep their real lengths.
 GENE_SCALE = 0.7
 

@@ -18,7 +18,18 @@ from Bio.Seq import Seq
 from ingest import mgap_layout as L
 from ingest.config import load_platform, load_species_registry
 from ingest.side_tables import GENOME_GROUPS, GROUPS, METADATA, SETS, TOMBSTONES
-from ingest.synth import MANIFEST, MARKER, RESULTS_DIR, SynthError, prepare_output, run_synth
+from ingest.synth import (
+    DEFAULT_GENOMES,
+    DEFAULT_SEED,
+    DEFAULT_SPECIES,
+    MANIFEST,
+    MARKER,
+    RESULTS_DIR,
+    SynthError,
+    prepare_output,
+    run_synth,
+)
+from ingest.synth.plan import plan_run
 from ingest.synth.sequences import random_cds, sha1_16, sub_rng, translate
 from ingest.synth.species import load_species
 
@@ -147,14 +158,55 @@ def test_rejects_impossible_requests(tmp_path: Path) -> None:
     assert not (tmp_path / "x").exists() and not (tmp_path / "y").exists()
 
 
+def test_default_plan_covers_the_checklist() -> None:
+    """The defaults give C7 (more than eight species) and C8 (a species without MLST)."""
+    run = plan_run(DEFAULT_SEED, DEFAULT_SPECIES, DEFAULT_GENOMES)
+    assert (DEFAULT_SPECIES, DEFAULT_GENOMES) == (10, 100)
+    assert len(run.species) > 8
+    no_scheme = [s.code for s in run.species if s.mlst_scheme is None]
+    assert no_scheme == ["SMA"]
+    counts = {s.code: len(run.by_species(s.code)) for s in run.species}
+    assert sum(counts.values()) == DEFAULT_GENOMES
+    for code in counts:
+        genomes = run.by_species(code)
+        assert len(genomes) >= 2
+        assert sum(g.complete for g in genomes) == 1 and any(not g.complete for g in genomes)
+    # Uneven, so charts have small species to group as Other.
+    ordered = sorted(counts.values())
+    assert ordered[0] <= 4 and ordered[-1] >= 4 * ordered[0]
+    assert len(set(counts.values())) >= 6
+    assert sum(g.fragmented for g in run.genomes) == 1
+    assert sum(g.sample != g.genome_id for g in run.genomes) == 1
+    kpc_with_mob = [g for g in run.genomes if "pKPC" in g.plasmids and g.has_mobsuite]
+    assert len(kpc_with_mob) >= 3
+    sen = run.by_species("SEN")
+    assert len({g.bakta_db for g in sen}) == 2 and len({g.amrfinder_db for g in sen}) == 2
+
+
 @pytest.mark.slow
 def test_default_run_is_fast_and_deterministic(tmp_path: Path) -> None:
     started = time.monotonic()
-    summary = run_synth(out=tmp_path / "default", n_species=3, n_genomes=60, seed=42)
+    out = tmp_path / "default"
+    summary = run_synth(
+        out=out, n_species=DEFAULT_SPECIES, n_genomes=DEFAULT_GENOMES, seed=DEFAULT_SEED
+    )
     elapsed = time.monotonic() - started
-    assert summary.genomes == 60
-    assert elapsed < 60, f"default synth run took {elapsed:.1f} s"
-    assert summary.bytes < 80e6
+    assert summary.genomes == DEFAULT_GENOMES
+    assert len(summary.species) == DEFAULT_SPECIES
+    # Measured at milestone 0: about 15 s and 101 MB; the caps leave margin.
+    assert elapsed < 90, f"default synth run took {elapsed:.1f} s"
+    assert summary.bytes < 140e6
+    plants = json.loads((out / MANIFEST).read_text())["plants"]
+    assert list(plants["no_mlst_scheme"]) == ["SMA"]
+    assert all(len(v) == 1 for v in plants["complete_genomes"].values())
+    assert all(plants["draft_genomes"].values())
+    assert len(plants["fragmented_assembly"]) == 1
+    assert len(plants["prefixed_sample_name"]) == 1
+    assert plants["mixed_annotation_versions"]["species_code"] == "SEN"
+    kpc = plants["carbapenemase_plasmid"]
+    with_mob = [g for g, site in kpc["carriers"].items() if site["has_mobsuite"]]
+    assert len(with_mob) >= 3
+    assert plants["shared_mob_clusters"][kpc["mob_primary_cluster"]] == with_mob
 
 
 # Output shape --------------------------------------------------------------------------------

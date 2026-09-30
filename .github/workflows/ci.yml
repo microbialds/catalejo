@@ -1,7 +1,7 @@
 # Continuous integration (requirements §13). Lint, type checks and tests for
-# both packages on every pull request. The web job builds the synthetic data
-# before its tests; from milestone 1a it also builds the synthetic release
-# (metadata init, ingest, release check, release build).
+# both packages on every pull request. The web job builds the synthetic release
+# (synth, metadata init, ingest, side tables, release check, release build)
+# before its tests, so the end-to-end tests have data.
 name: ci
 
 on:
@@ -94,14 +94,27 @@ jobs:
         # file over the Pages limit of 25 MiB in the output, and no CDN host.
         run: pnpm --dir packages/web build
 
-      - name: Synthetic data
+      - name: Synthetic release
         # Ten species with one lacking an MLST scheme, so checklist items C7
-        # and C8 have data. Milestone 1a adds: catalejo metadata init, ingest,
-        # release check and release build writing releases/synth, which the
-        # dev server serves.
+        # and C8 have data. The synthetic mgap results go through the same
+        # commands as a real run (contract §8): metadata init keeps the manual
+        # entries synth wrote, ingest builds the catalog, the side tables add
+        # access groups, tombstones and curated sets, release check validates
+        # (§9), and release build writes releases/synth, which the dev server
+        # and the end-to-end tests serve. A final check verifies the checksums
+        # of the built release.
         run: |
           uv sync --project packages/ingest --locked
-          uv run --project packages/ingest catalejo synth --species 10 --genomes 100 --out data/synth
+          catalejo() { uv run --project packages/ingest catalejo "$@"; }
+          catalejo synth --species 10 --genomes 100 --out data/synth
+          catalejo metadata init --mgap data/synth/results --existing data/synth/metadata.csv --out data/synth/metadata.csv
+          catalejo ingest --mgap data/synth/results --metadata data/synth/metadata.csv --catalog data/catalog/synth.duckdb
+          catalejo groups ingest --groups data/synth/groups.csv --members data/synth/genome_groups.csv --catalog data/catalog/synth.duckdb
+          catalejo tombstones ingest --file data/synth/tombstones.csv --catalog data/catalog/synth.duckdb
+          catalejo sets ingest --file data/synth/sets.csv --catalog data/catalog/synth.duckdb
+          catalejo release check --catalog data/catalog/synth.duckdb --metadata data/synth/metadata.csv --mgap data/synth/results
+          catalejo release build --catalog data/catalog/synth.duckdb --out releases/synth
+          catalejo release check --catalog data/catalog/synth.duckdb --release releases/synth
 
       - name: Component tests
         run: pnpm --dir packages/web test

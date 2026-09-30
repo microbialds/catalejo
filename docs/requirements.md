@@ -105,7 +105,7 @@ All colors come from `config/palette.yaml`, read by the Python exports and the T
 
 - Species colors are assigned once in `species_registry.color` from an Okabe-Ito based sequence of eight, with "Other" in gray, and never change between releases. When more than eight species are present, the collection page groups the smallest into "Other" for charts and keeps individual colors in tables and chips.
 - Drug classes have a fixed palette of fourteen distinguishable colors on white, listed in the palette file, with a stated order.
-- Contig types are fixed. Chromosome dark gray, plasmid blue, prophage light blue, unclassified light gray. The AMR track and determinant highlight is vermillion; virulence is purple; GC skew is dark blue.
+- Contig types are fixed. Chromosome dark gray, plasmid purple, prophage lavender, unclassified light gray, none of which appears in the species sequence. The AMR track and determinant highlight is vermillion; virulence is purple; GC skew is dark blue.
 - The embedding map uses a dark background and a lifted variant of the species palette, also listed in the palette file, so the mapping from species to hue is preserved.
 - Interface chrome uses no saturated color other than the accent (dark brick red) for links and the active navigation item, so that data colors are the only saturated colors on a page.
 

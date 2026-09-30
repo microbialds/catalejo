@@ -31,6 +31,9 @@ typography:
     regular: 400
     medium: 500
     semibold: 600
+  line_heights:
+    tight: 1.1        # wordmark and large numerals
+    body: 1.5         # summary sentence and running text
   letter_spacing:
     tight: -0.01em
     tagline: 0.04em

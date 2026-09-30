@@ -1,6 +1,7 @@
 # Platform parameters (contract §3, §7 and §8; requirements §5.4, §6.1, §6.7).
 #
-# Every catalejo command reads this file (contract §8). Values here are
+# Every catalejo command reads this file and config/species_registry.yaml
+# (data contract 0.7 §8). Values here are
 # parameters of the platform, and changing one changes what a release
 # contains, so a change is recorded in the release notes.
 
@@ -8,16 +9,20 @@ version: 1
 
 platform_name: Catalejo
 
-# Pattern every genome_id must match (contract §3.1). Checked by
-# `catalejo metadata validate` and `catalejo release check`.
-genome_id_pattern: "^[A-Z]{2,5}[0-9]{3,6}$"
+# Pattern every genome_id must match (data contract 0.7 §3.1). Collections receive
+# identifiers from many origins, so the default is open within a character set
+# that is safe in paths and URLs; a group may tighten it here. Identifiers must
+# also be unique without regard to case, since release files may sit on file
+# systems that ignore case; `catalejo metadata validate` and `catalejo release
+# check` enforce both from milestone 1a.
+genome_id_pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
 
-# Rules that propose a genome_id from an mgap sample directory name
-# (contract §3.1 and §4.2, mgap_sample). `catalejo metadata init` applies them
-# in order as regular expression substitutions and writes both columns for the
-# maintainer to review; a manual entry in metadata.csv always wins. Some
-# projects prefix nanopore samples with ont_ (ont_SCL30014 is SCL30014), and
-# mgap file stems may end in an underscore.
+# Rules that derive a candidate genome_id from an mgap sample directory name
+# (data contract 0.7 §3.1 and §4.2, mgap_sample). `catalejo metadata init`
+# applies them in order as regular expression substitutions and writes both
+# columns for the maintainer to review; a manual entry in metadata.csv always
+# wins. Some projects prefix nanopore samples with ont_ (ont_SCL30014 is
+# SCL30014), and mgap file stems may end in an underscore.
 sample_name_rules:
   - pattern: "(?i)^ont_"
     replace: ""

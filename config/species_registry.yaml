@@ -1,0 +1,124 @@
+# Species registry (contract §3.3, §4.9 and §5.1).
+#
+# One entry per species the collection may contain. `catalejo ingest` loads
+# this file into the species_registry table, and a genome whose assigned
+# species is absent from it fails validation. Species are matched by canonical
+# name, alias, GTDB name and MLST scheme, so no alias or scheme may belong to
+# two species. Adding a species is a change to this file.
+#
+# color_index is a position in the species sequence of config/palette.yaml and
+# gives the species its color in every chart and chip. Indices are assigned
+# once and freeze at the first real release, because a color that moves
+# between releases would break figures and the reader's memory of them. The
+# order below comes from the synthetic generator, with the three default
+# synthetic species first. If the main species of the collection differ,
+# reorder the indices before the first real release. Species beyond the eighth
+# have a null index and take the palette's other color.
+#
+# ncbi_taxid and gtdb_name are filled only where they are certain; the rest
+# are left null for the maintainer to complete. The synthetic generator takes
+# species codes, names and MLST schemes from this file (contract §10).
+
+version: 1
+
+species:
+  - species_code: KPN
+    canonical_name: Klebsiella pneumoniae
+    gtdb_name: Klebsiella pneumoniae
+    ncbi_taxid: 573
+    aliases:
+      - Klebsiella pneumoniae subsp. pneumoniae
+    mlst_schemes:
+      - klebsiella
+    pangenome_eligible: true
+    color_index: 0
+
+  - species_code: SEN
+    canonical_name: Salmonella enterica
+    gtdb_name: Salmonella enterica
+    ncbi_taxid: 28901
+    aliases:
+      - Salmonella enterica subsp. enterica
+    mlst_schemes:
+      - senterica_achtman_2
+    pangenome_eligible: true
+    color_index: 1
+
+  - species_code: SAU
+    canonical_name: Staphylococcus aureus
+    gtdb_name: Staphylococcus aureus
+    ncbi_taxid: 1280
+    aliases: []
+    mlst_schemes:
+      - saureus
+    pangenome_eligible: true
+    color_index: 2
+
+  - species_code: SMA
+    canonical_name: Serratia marcescens
+    gtdb_name: null
+    ncbi_taxid: 615
+    aliases: []
+    mlst_schemes: []
+    pangenome_eligible: true
+    color_index: 3
+
+  - species_code: ECO
+    canonical_name: Escherichia coli
+    gtdb_name: Escherichia coli
+    ncbi_taxid: 562
+    aliases: []
+    mlst_schemes:
+      - ecoli_achtman_4
+    pangenome_eligible: true
+    color_index: 4
+
+  - species_code: PAE
+    canonical_name: Pseudomonas aeruginosa
+    gtdb_name: Pseudomonas aeruginosa
+    ncbi_taxid: 287
+    aliases: []
+    mlst_schemes:
+      - paeruginosa
+    pangenome_eligible: true
+    color_index: 5
+
+  - species_code: ABA
+    canonical_name: Acinetobacter baumannii
+    gtdb_name: Acinetobacter baumannii
+    ncbi_taxid: 470
+    aliases: []
+    mlst_schemes:
+      - abaumannii_2
+    pangenome_eligible: true
+    color_index: 6
+
+  - species_code: EFM
+    canonical_name: Enterococcus faecium
+    gtdb_name: null
+    ncbi_taxid: 1352
+    aliases: []
+    mlst_schemes:
+      - efaecium
+    pangenome_eligible: true
+    color_index: 7
+
+  - species_code: SPN
+    canonical_name: Streptococcus pneumoniae
+    gtdb_name: null
+    ncbi_taxid: 1313
+    aliases: []
+    mlst_schemes:
+      - spneumoniae
+    pangenome_eligible: true
+    color_index: null
+
+  - species_code: EHO
+    canonical_name: Enterobacter hormaechei
+    gtdb_name: null
+    ncbi_taxid: 158836
+    aliases: []
+    mlst_schemes:
+      - ecloacae
+    pangenome_eligible: true
+    color_index: null

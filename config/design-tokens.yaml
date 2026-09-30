@@ -83,3 +83,16 @@ shape:
   rule_heavy: 1px        # counter strip and table top rule, drawn in ink
   active_rule: 3px       # left rule on the active navigation item
   panel_title_rule_gap: 6px
+
+# Marks drawn in a low-contrast data color on a light background (paper or
+# panel) carry a thin outline in ink, because the color alone is too faint on
+# white. It applies to bars, points, legend swatches, chips and map features
+# drawn in the species color at species_index of the palette's species
+# sequence (index 6 is the yellow). The embedding map's dark panel uses the
+# lifted color and no outline.
+marks:
+  species_outlines:
+    - species_index: 6
+      background: light
+      outline_width: 0.5px
+      outline_color: palette:chrome.ink

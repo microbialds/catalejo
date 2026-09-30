@@ -20,26 +20,27 @@ species:
     - "#CC79A7"  # reddish purple
     - "#56B4E9"  # sky blue
     - "#D55E00"  # vermillion
-    - "#F0E442"  # yellow (proposal, milestone 0)
-    - "#000000"  # black (proposal, milestone 0)
+    - "#F0E442"  # yellow
+    - "#B15928"  # brown
   other: "#b5b3aa"
 
 # Drug classes, in their stated order. Each entry lists the AMRFinderPlus
-# class or subclass values (and CARD drug classes, lowercased) that map to it;
-# a determinant takes the first entry whose match list contains its subclass,
-# then its class. Anything unmatched, including multi-class values such as
-# "AMINOGLYCOSIDE/QUINOLONE", falls into "other". Colors are proposals from
+# class or subclass values (and CARD drug classes, lowercased) that map to it.
+# A determinant's subclass, then its class, is split on "/" and the parts are
+# tried in order ("AMINOGLYCOSIDE/QUINOLONE" tries AMINOGLYCOSIDE, then
+# QUINOLONE); the first part found in an entry's match list decides, and only
+# a value with no matching part falls into "other". Colors are proposals from
 # milestone 0, chosen to be distinguishable on white (Paul Tol muted and light
 # schemes).
 drug_classes:
-  - key: carbapenem
-    label_key: drugClassCarbapenem
-    color: "#882255"
-    match: [CARBAPENEM, carbapenem]
   - key: beta_lactam
     label_key: drugClassBetaLactam
     color: "#CC6677"
     match: [BETA-LACTAM, CEPHALOSPORIN, penam, cephalosporin, monobactam, penem]
+  - key: carbapenem
+    label_key: drugClassCarbapenem
+    color: "#882255"
+    match: [CARBAPENEM, carbapenem]
   - key: aminoglycoside
     label_key: drugClassAminoglycoside
     color: "#117733"
@@ -89,12 +90,13 @@ drug_classes:
     color: "#8c8a82"
     match: []
 
-# Contig types (requirements §5.4). Chromosome dark gray, plasmid blue,
-# prophage light blue, unclassified light gray.
+# Contig types (requirements §5.4). Chromosome dark gray, plasmid purple,
+# prophage lavender, unclassified light gray; none of them appears in the
+# species sequence, because the Genes page shows both scales side by side.
 contig_types:
   chromosome: "#6b6a64"
-  plasmid: "#0072B2"
-  prophage: "#56B4E9"
+  plasmid: "#5D3A9B"
+  prophage: "#B39DDB"
   unclassified: "#b5b3aa"
 
 # CGView tracks (contract §7.1), outside in.
@@ -104,17 +106,17 @@ tracks:
   other_features: "#3d3c37"
   amr: "#D55E00"
   virulence: "#CC79A7"
-  region_prophage: "#56B4E9"
-  region_plasmid: "#0072B2"
+  region_prophage: "#B39DDB"
+  region_plasmid: "#5D3A9B"
   gc_content: "#1c1c1a"
-  gc_skew: "#0072B2"
+  gc_skew: "#009E73"
   track_rule: "#e3e1da"
 
 # Neighborhood strip categories (requirements §6.3).
 neighborhood_categories:
   resistance: "#D55E00"
   transposase_is: "#E69F00"
-  plasmid_replication_transfer: "#0072B2"
+  plasmid_replication_transfer: "#5D3A9B"
   other: "#b5b3aa"
 
 # The embedding map (requirements §5.4, §6.7). Dark background and a lifted
@@ -128,8 +130,8 @@ embedding_map:
     - "#e08ac2"
     - "#7fd0f2"
     - "#f07a3a"
-    - "#f5ec7a"  # proposal, milestone 0
-    - "#c8c6bf"  # proposal, milestone 0
+    - "#f5ec7a"
+    - "#d08a5a"
   other: "#8f8d85"
   background: "#0f1216"
   panel: "#1a1f26"

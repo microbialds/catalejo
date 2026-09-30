@@ -253,6 +253,47 @@ def test_cgview_documents(release: Path, small_manifest: dict[str, Any]) -> None
         ]  # fmt: skip
 
 
+def _palette_colors() -> set[str]:
+    palette = load_palette()
+    colors = {palette.species.other, *palette.species.sequence}
+    colors |= {d.color for d in palette.drug_classes}
+    for section in ("contig_types", "tracks", "neighborhood_categories", "chrome"):
+        colors |= set(palette.section(section).values())
+    return {c.lower() for c in colors}
+
+
+def _color_values(node: Any) -> list[str]:
+    """Every string under a key that names a color, anywhere in a CGView document."""
+    found: list[str] = []
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if isinstance(value, str) and "color" in key.lower():
+                found.append(value)
+            else:
+                found += _color_values(value)
+    elif isinstance(node, list):
+        for item in node:
+            found += _color_values(item)
+    return found
+
+
+def test_cgview_colors_come_from_the_palette(release: Path, small_manifest: dict[str, Any]) -> None:
+    """CLAUDE.md, Design: every color comes from config/palette.yaml, map furniture included."""
+    allowed = _palette_colors()
+    for gid, info in small_manifest["genomes"].items():
+        data = json.loads(
+            (release / "genomes" / info["species_code"] / gid / "cgview.json").read_text()
+        )
+        for doc in [data["genome"], *data["contigs"].values()]:
+            cg = doc["cgview"]
+            for key in ("backbone", "dividers", "ruler", "annotation"):
+                assert key in cg, key
+            assert "backgroundColor" in cg["settings"]
+            values = _color_values(cg)
+            assert values
+            assert {v.lower() for v in values} <= allowed, set(values) - allowed
+
+
 def test_cgview_version_matches_the_web_package(repo_root: Path) -> None:
     package = repo_root / "packages" / "web" / "package.json"
     if not package.is_file():

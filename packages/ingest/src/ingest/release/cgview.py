@@ -23,6 +23,10 @@ library:
   ``WINDOW`` bases; positions are whole-map coordinates, starting at 1 in each
   contig's first window and offset by the preceding contigs' lengths.
 - ``settings.showShading`` is false (no gradients, requirements §7).
+- Every color is a palette entry, including those CGView would otherwise take
+  from its own defaults: the background, the backbone (whose two alternating
+  shades mark the contig boundaries of the multi-contig map, the dividers of
+  §7.1), the rules between tracks, the ruler, labels and legend text.
 
 Legend item names are interface text. They are few and stable: "CDS
 forward", "CDS reverse", "Other features", "Virulence", "Prophage",
@@ -293,6 +297,22 @@ def _feature_json(f: MapFeature) -> dict[str, Any]:
     }
 
 
+def _chrome(palette: PaletteConfig) -> dict[str, Any]:
+    """Map furniture colored from the palette instead of CGView's defaults."""
+    c = palette.chrome
+    return {
+        "settings": {"backgroundColor": c["panel"]},
+        "backbone": {"color": c["text_faint"], "colorAlternate": c["border_strong"]},
+        "dividers": {
+            "track": {"color": palette.tracks["track_rule"]},
+            "slot": {"color": palette.tracks["track_rule"]},
+        },
+        "ruler": {"color": c["text_secondary"]},
+        "annotation": {"color": c["ink"]},
+        "legend": {"defaultFontColor": c["ink"], "backgroundColor": c["panel"]},
+    }
+
+
 def document(
     name: str,
     contigs: Sequence[MapContig],
@@ -307,13 +327,22 @@ def document(
         (f for f in features if f.contig_id in names),
         key=lambda f: (order[f.source], f.contig_id, f.start, f.end, f.name),
     )
+    chrome = _chrome(palette)
     return {
         "cgview": {
             "version": CGVIEW_VERSION,
             "name": name,
-            "settings": {"format": "circular" if circular else "linear", "showShading": False},
+            "settings": {
+                "format": "circular" if circular else "linear",
+                "showShading": False,
+                **chrome["settings"],
+            },
+            "backbone": chrome["backbone"],
+            "dividers": chrome["dividers"],
+            "ruler": chrome["ruler"],
+            "annotation": chrome["annotation"],
             "sequence": {"contigs": [{"name": c.contig_id, "length": c.length} for c in contigs]},
-            "legend": {"items": _legend(palette)},
+            "legend": {**chrome["legend"], "items": _legend(palette)},
             "features": [_feature_json(f) for f in placed],
             "plots": _plots(contigs),
             "tracks": _tracks(),

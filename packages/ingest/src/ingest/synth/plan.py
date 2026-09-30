@@ -19,16 +19,14 @@ from ingest.synth.catalog import (
     ISOLATION_SITES,
     MAX_SPECIES,
     SITES,
-    SPECIES,
     WARDS,
     SpeciesSpec,
     StProfile,
 )
 from ingest.synth.sequences import sub_rng
+from ingest.synth.species import SynthError, load_species
 
-
-class SynthError(Exception):
-    """The requested synthetic run cannot be produced."""
+__all__ = ["SynthError"]
 
 
 # Current and previous annotation versions. The mixed-version species uses the
@@ -150,7 +148,7 @@ def _pick_profile(spec: SpeciesSpec, gid: str, seed: int) -> StProfile | None:
 def plan_run(seed: int, n_species: int, n_genomes: int) -> RunPlan:
     if not 1 <= n_species <= MAX_SPECIES:
         raise SynthError(f"--species must be between 1 and {MAX_SPECIES}; got {n_species}")
-    species = list(SPECIES[:n_species])
+    species = list(load_species()[:n_species])
     counts = allocate(n_genomes, species)
     genomes: list[GenomePlan] = []
     for s_index, (spec, count) in enumerate(zip(species, counts, strict=True)):

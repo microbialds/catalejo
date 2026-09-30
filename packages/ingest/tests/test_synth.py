@@ -16,10 +16,11 @@ import yaml
 from Bio.Seq import Seq
 
 from ingest import mgap_layout as L
-from ingest.config import load_platform
+from ingest.config import load_platform, load_species_registry
 from ingest.side_tables import GENOME_GROUPS, GROUPS, METADATA, SETS, TOMBSTONES
 from ingest.synth import MANIFEST, MARKER, RESULTS_DIR, SynthError, prepare_output, run_synth
 from ingest.synth.sequences import random_cds, sha1_16, sub_rng, translate
+from ingest.synth.species import load_species
 
 
 def _at(path: L.MgapPath, results: Path, manifest: dict[str, Any], genome_id: str) -> Path:
@@ -541,3 +542,50 @@ def test_more_species(tmp_path: Path) -> None:
     gid = no_scheme["SMA"][0]
     mlst = _rows(L.MLST.report.resolve(out / RESULTS_DIR, gid))[0]
     assert mlst[1:] == [L.MLST.missing, L.MLST.missing]
+
+
+# Species identities come from the registry (contract 0.7 §4.9 and §10) ------------------
+
+
+def test_every_synth_species_is_in_the_registry() -> None:
+    registry = load_species_registry()
+    species = load_species(registry)
+    assert len(species) == 10
+    for spec in species:
+        entry = registry.get(spec.code)
+        assert spec.name == entry.canonical_name
+        assert spec.gtdb_name == (entry.gtdb_name or entry.canonical_name)
+        assert spec.mlst_scheme == (entry.mlst_schemes[0] if entry.mlst_schemes else None)
+        assert spec.aliases == tuple(entry.aliases)
+
+
+def test_synth_output_uses_registry_identities(
+    small_synth: Path, small_results: Path, small_manifest: dict[str, Any]
+) -> None:
+    registry = load_species_registry()
+    for row in small_manifest["species"]:
+        entry = registry.get(row["species_code"])
+        assert row["canonical_name"] == entry.canonical_name
+        assert row["mlst_scheme"] == (entry.mlst_schemes[0] if entry.mlst_schemes else None)
+    conflicts = set(small_manifest["plants"]["species_conflict"])
+    gtdb = {
+        r[L.GTDBTK.columns.user_genome]: r[L.GTDBTK.columns.classification]
+        for r in _dicts(L.GTDBTK.summary.resolve(small_results))
+    }
+    for gid, info in small_manifest["genomes"].items():
+        entry = registry.get(info["species_code"])
+        assert info["species"] == entry.canonical_name
+        mlst = _rows(_at(L.MLST.report, small_results, small_manifest, gid))[0]
+        assert mlst[1] == (entry.mlst_schemes[0] if entry.mlst_schemes else L.MLST.missing)
+        if gid in conflicts:
+            continue
+        if gid in gtdb:
+            assert gtdb[gid].endswith(f"s__{entry.gtdb_name or entry.canonical_name}")
+        report = _rows(_at(L.KRAKEN2.report, small_results, small_manifest, gid))
+        species_rows = [r for r in report if r[3] == L.KRAKEN2.rank_species]
+        top = max(species_rows, key=lambda r: int(r[1]))
+        assert top[5].strip() == entry.canonical_name
+    for row in _csv(small_synth / METADATA.file_name):
+        name = row[METADATA.columns.species]
+        if name:
+            assert registry.by_name(name) is not None, name

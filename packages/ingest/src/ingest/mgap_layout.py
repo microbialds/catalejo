@@ -1,4 +1,4 @@
-"""Every mgap file path and column name, defined once (contract §4.1).
+"""Every mgap file path and column name, defined once (data contract 0.7 §4.1).
 
 This module is the single place that knows the layout of an mgap results
 directory (gene2dis/mgap ``--outdir``). The parsers (``ingest.parsers``,
@@ -12,16 +12,17 @@ genome assembled by Autocycler and reoriented by Dnaapler (sample directory
 ``ont_SCL30014``, genome SCL30014, five circular replicons). Entries marked
 ``provisional=True`` are confirmed by neither; they follow the tools'
 documented outputs and must be checked against the first mgap run that
-produces them. ``CONTRACT_DIFFERENCES`` lists where the examples disagree with
-contract §4.1.
+produces them. ``CONTRACT_DIFFERENCES`` records where the examples disagreed
+with contract 0.6 and the contract 0.7 section that resolved each difference.
 
 Names. Three names can differ for one genome, and templates use two
 placeholders for them.
 
 - ``{sample}`` is the per-genome directory in the results (``SCL29833``,
   ``ont_SCL30014``). It maps to ``genome_id`` through the ``mgap_sample``
-  metadata column, and ``catalejo metadata init`` proposes the genome_id with
-  ``sample_name_rules`` in ``config/platform.yaml``.
+  metadata column (contract 0.7 §3.1 and §4.2), and ``catalejo metadata
+  init`` derives a candidate genome_id from it with ``sample_name_rules`` in
+  ``config/platform.yaml``.
 - ``{prefix}`` is the stem of most tool files (``SCL29833``,
   ``ont_SCL30014_`` with a trailing underscore). ``resolve_prefix`` discovers
   it from the Bakta summary and falls back to the sample. A few files are
@@ -30,19 +31,22 @@ placeholders for them.
 - Names written inside the reports (CheckM2 ``Name``, MLST ``FILE``, Kleborate
   ``strain``, QUAST ``Assembly``) come from the input reads, for example
   ``SCL29833.scaffolds`` or ``SCL30014_nanopore``. Parsers never key on them:
-  every per-genome report is found through its path and holds one genome.
+  every per-genome report is found through its path and holds one genome
+  (contract 0.7 §4.1).
 
 Other conventions the parsers rely on.
 
 - Run-level files live under ``pipeline_info/``.
 - The Bakta nucleotide FASTA (``.fna``) is the assembly every annotation tool
-  reads. Bakta renames contigs to ``contig_<k>`` in assembly order after
-  dropping those shorter than ``MIN_CONTIG_LENGTH``. Its headers carry
+  reads, and its names are ``contig_id`` (contract 0.7 §3.2). Bakta renames
+  contigs to ``contig_<k>`` in assembly order after dropping those shorter
+  than ``MIN_CONTIG_LENGTH``. Its headers carry
   bracketed tags that give topology and completeness on every platform:
   ``[gcode=11] [topology=linear]`` for Illumina drafts, and
   ``[gcode=11] [completeness=complete] [topology=circular]`` followed by
   ``[location=chromosome]`` or ``[plasmid-name=unnamed<n>]`` for complete
-  nanopore genomes (``BaktaLayout.fna_tag_re``, ``parse_fna_header``).
+  nanopore genomes (``BaktaLayout.fna_tag_re``, ``parse_fna_header``;
+  contract 0.7 §4.1).
 - AMRFinderPlus, geNomad, MOB-suite and Kleborate report ``contig_<k>`` names
   (MOB-suite with the bracketed tags), while the SPAdes FASTA files and RGI
   use the SPAdes names ``NODE_<k>_length_<L>_cov_<C>`` and the Autocycler and
@@ -703,7 +707,7 @@ class BaktaTsvColumns:
 
 @dataclass(frozen=True)
 class BaktaFeatureTypes:
-    """Feature types as the Bakta ``.tsv`` writes them (contract §5.4 ``type``)."""
+    """Feature types as the Bakta ``.tsv`` writes them (contract 0.7 §5.4 ``type``)."""
 
     cds: str = "cds"
     sorf: str = "sorf"
@@ -831,7 +835,8 @@ class BaktaLayout:
         "Sequence Id", "Start", "Stop", "Strand", "Locus Tag", "Mol Weight [kDa]",
         "Iso El. Point", "Pfam hits", "Dbxrefs",
     )  # fmt: skip
-    # Strands in the .tsv: "+", "-", "?" (oriC, oriT) and "." (assembly gaps).
+    # Strands in the .tsv: "+", "-", "?" (oriC, oriT) and "." (assembly gaps),
+    # stored and hashed unchanged (contract 0.7 §3.4 and §5.4).
     strands: tuple[str, ...] = ("+", "-", "?", ".")
     # .faa and .ffn record descriptions are "<locus_tag> <product>".
     # The .gff3 ends with a FASTA section after this line.
@@ -933,7 +938,9 @@ class AmrFinderLayout:
     ``<genome_id>-mutations.tsv`` (``--mutation_all``) has the same columns and
     lists every screened position, including wild type ones whose element name
     ends in `` [WILDTYPE]`` and unclassified ones ending in `` [UNKNOWN]``.
-    Protein id is the Bakta locus tag, or NA for nucleotide hits.
+    Protein id is the Bakta locus tag, or NA for nucleotide hits. The element
+    symbol splits at its last underscore into ``gene`` and ``variant``, and
+    only rows of subtype POINT are mutations (contract 0.7 §5.6).
     """
 
     tool: str = "amrfinderplus"
@@ -945,7 +952,7 @@ class AmrFinderLayout:
     # run-level software_versions.yml; this per-genome file (nf-core
     # versions.yml format, like the Bakta one) is how the synthetic generator
     # represents genomes annotated with different database versions. See
-    # README "Annotation versions" and the milestone 0 report.
+    # contract 0.7 §4.1 (per-genome version sources first) and §5.15.
     versions: MgapPath = MgapPath(
         "{sample}/annotation/amrfinder/versions.yml", provisional=True, optional=True
     )
@@ -1282,7 +1289,8 @@ class PipelineInfoLayout:
     Top-level keys are Nextflow process names (quoted), each mapping tool
     names to versions. The key ``Workflow`` holds the pipeline and Nextflow
     versions. The file is written once per run, so a results directory
-    assembled from several runs keeps the last run's file.
+    assembled from several runs keeps the last run's file. Per-genome
+    sources take precedence over it (contract 0.7 §4.1 and §5.15).
     """
 
     software_versions: MgapPath = MgapPath("pipeline_info/software_versions.yml")
@@ -1404,9 +1412,18 @@ def parse_fna_header(header: str) -> tuple[str, dict[str, str]]:
 
 @dataclass(frozen=True)
 class ContractDifference:
+    """A place where the real mgap runs disagreed with contract 0.6 §4.1.
+
+    ``contract`` is what contract 0.6 said, ``example`` what the runs show, and
+    ``resolved_in`` the contract version and section that now states it, or
+    None while the difference is open. Entries are kept once resolved as the
+    record of why the contract changed.
+    """
+
     module: str
     contract: str
     example: str
+    resolved_in: str | None = None
 
 
 CONTRACT_DIFFERENCES: tuple[ContractDifference, ...] = (
@@ -1415,6 +1432,7 @@ CONTRACT_DIFFERENCES: tuple[ContractDifference, ...] = (
         "paths relative to the results directory, module files named by tool",
         "per-genome files under <sample>/annotation/<tool>/, <sample>/assemblies/, "
         "<sample>/read_processing/<tool>/ and <sample>/qc/quast/",
+        resolved_in="0.7 §4.1",
     ),
     ContractDifference(
         "Sample names (§3.1)",
@@ -1422,6 +1440,7 @@ CONTRACT_DIFFERENCES: tuple[ContractDifference, ...] = (
         "the sample directory may differ from genome_id (ont_SCL30014 for SCL30014), and most "
         "file stems carry a further prefix (ont_SCL30014_); names inside the reports come from "
         "the read files (SCL30014_nanopore, SCL29833.scaffolds)",
+        resolved_in="0.7 §3.1, §4.2",
     ),
     ContractDifference(
         "Assembly",
@@ -1434,33 +1453,39 @@ CONTRACT_DIFFERENCES: tuple[ContractDifference, ...] = (
         "renames contigs to contig_k and drops those under 200 bp, so assembler and Bakta names "
         "differ; topology and completeness come from the Bakta .fna header tags on every "
         "platform",
+        resolved_in="0.7 §3.2, §4.1",
     ),
     ContractDifference(
         "Read QC (not listed)",
         "not listed",
         "fastp (Illumina) and fastplong (nanopore) under read_processing/, both optional",
+        resolved_in="0.7 §4.1 (lists only files the platform reads)",
     ),
     ContractDifference(
         "CheckM2",
         "quality_report.tsv",
         "<s>/annotation/checkm2/<s>_checkm2_report.tsv; Name is the read-file stem",
+        resolved_in="0.7 §4.1",
     ),
     ContractDifference(
         "Kraken2 / Bracken",
         "report files",
         "<s>/read_processing/kraken2/<p>.kraken2.report.txt (no header) on every platform; "
         "<s>/read_processing/bracken/<p>.tsv is optional and absent from the nanopore run",
+        resolved_in="0.7 §4.1",
     ),
     ContractDifference(
         "MLST",
         "mlst.tsv",
         "<s>/annotation/mlst/<p>.tsv, one line, no header; FILE is the assembly file name "
         "(SCL29833.scaffolds.fa.gz, SCL30014_nanopore.fasta)",
+        resolved_in="0.7 §4.1",
     ),
     ContractDifference(
         "GTDB-Tk",
         "gtdbtk.bac120.summary.tsv",
         "absent from both examples (layout provisional, run-level gtdbtk/)",
+        resolved_in="0.7 §4.1 (provisional)",
     ),
     ContractDifference(
         "Bakta",
@@ -1471,6 +1496,7 @@ CONTRACT_DIFFERENCES: tuple[ContractDifference, ...] = (
         "replicons, [completeness=complete] and [location=chromosome] or [plasmid-name=...]; "
         ".tsv types include assembly_gap (not gap) and sorf; strands include ? (oriC, oriT) "
         "and . (gaps)",
+        resolved_in="0.7 §3.4, §4.1, §5.4",
     ),
     ContractDifference(
         "AMRFinderPlus",
@@ -1478,6 +1504,7 @@ CONTRACT_DIFFERENCES: tuple[ContractDifference, ...] = (
         "<s>/annotation/amrfinder/<p>.tsv (Subtype POINT rows, element symbol "
         "<gene>_<variant>) and <p>-mutations.tsv (--mutation_all, same columns, including "
         "[WILDTYPE] and [UNKNOWN] rows); Protein id is the Bakta locus tag or NA",
+        resolved_in="0.7 §4.1, §5.6",
     ),
     ContractDifference(
         "RGI",
@@ -1485,11 +1512,13 @@ CONTRACT_DIFFERENCES: tuple[ContractDifference, ...] = (
         "<s>/annotation/rgi/<p>.txt and <p>.json, optional on any platform (absent from the "
         "nanopore run); on Illumina it runs on the SPAdes scaffolds with SPAdes contig names "
         "and RGI's own ORFs, not on Bakta contigs",
+        resolved_in="0.7 §3.2, §4.1",
     ),
     ContractDifference(
         "geNomad",
         "<id>_summary/*_virus_summary.tsv, *_plasmid_summary.tsv",
         "as stated, under <s>/annotation/genomad/, named from the sample",
+        resolved_in="0.7 §4.1",
     ),
     ContractDifference(
         "MOB-suite",
@@ -1497,6 +1526,7 @@ CONTRACT_DIFFERENCES: tuple[ContractDifference, ...] = (
         "optional on any platform (absent from the nanopore run); under "
         "<s>/annotation/mobsuite/; contig_id carries the Bakta .fna tags; mobtyper_results.txt "
         "only when a plasmid is reconstructed; molecule_type is chromosome or plasmid only",
+        resolved_in="0.7 §4.1",
     ),
     ContractDifference(
         "Kleborate, sccmec, SISTR",
@@ -1504,11 +1534,13 @@ CONTRACT_DIFFERENCES: tuple[ContractDifference, ...] = (
         "Kleborate 3 at <s>/annotation/kleborate/klebsiella_pneumo_complex_output.txt "
         "(117 trimmed columns, strain is the read-file stem); sccmec and SISTR absent from both "
         "examples",
+        resolved_in="0.7 §4.1",
     ),
     ContractDifference(
         "QUAST",
         "not listed",
         "<s>/qc/quast/<p>.tsv (transposed report)",
+        resolved_in="0.7 §4.1",
     ),
     ContractDifference(
         "Pipeline info",
@@ -1516,11 +1548,18 @@ CONTRACT_DIFFERENCES: tuple[ContractDifference, ...] = (
         "run-level only, and absent from the nanopore example; AMRFinderPlus database version "
         "present, Bakta database version absent (per genome in Bakta .txt), no database "
         "versions for CheckM2, geNomad, Kraken2, MOB-suite or RGI; rgi version empty",
+        resolved_in="0.7 §4.1, §5.15",
     ),
 )
 
 
+def open_differences() -> tuple[ContractDifference, ...]:
+    """Differences that no contract version has resolved yet."""
+    return tuple(d for d in CONTRACT_DIFFERENCES if d.resolved_in is None)
+
+
 # Contract §4.1 row names the layout covers, for the test that every row is modeled.
+
 CONTRACT_MODULE_ROWS: tuple[str, ...] = tuple(
     d.module
     for d in CONTRACT_DIFFERENCES

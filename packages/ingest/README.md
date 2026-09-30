@@ -87,7 +87,7 @@ data/synth/
                                        for complete genomes
     gtdbtk/gtdbtk.bac120.summary.tsv
     pipeline_info/software_versions.yml
-  metadata.csv             contract §4.2, with the proposed mgap_sample column
+  metadata.csv             contract §4.2, with the mgap_sample column
   sets.csv                 contract §4.6
   tombstones.csv           contract §4.7
   groups.csv               contract §4.8
@@ -111,7 +111,9 @@ The tests that compare the module against the two runs read `data/mgap-example/`
 
 ## Metadata, external inputs and releases
 
-The metadata table and the `metadata` commands arrive in milestone 1a, as defined in [contract §4.2 and §8.1](../../docs/data-contract.md#42-metadata-table). Because an mgap sample name may differ from the genome_id, as `ont_SCL30014` does for SCL30014, `metadata init` will propose the genome_id with the `sample_name_rules` of [config/platform.yaml](../../config/platform.yaml), and the `mgap_sample` column records the sample name and stays empty when it equals the genome_id. The column is proposed in pull request 1 and awaits the maintainer's review, and `synth` already writes it.
+The metadata table and the `metadata` commands arrive in milestone 1a, as defined in [contract §4.2 and §8.1](../../docs/data-contract.md#42-metadata-table). Because an mgap sample name may differ from the genome_id, as `ont_SCL30014` does for SCL30014, `metadata init` will derive a candidate genome_id with the `sample_name_rules` of [config/platform.yaml](../../config/platform.yaml), and the `mgap_sample` column records the sample name and stays empty when it equals the genome_id. The column is part of data contract 0.7 (§3.1 and §4.2), and `synth` already writes it.
+
+The genome_id pattern in `config/platform.yaml` is open by default, as contract 0.7 §3.1 states. Any identifier made of letters, digits, dots, underscores and hyphens, starting with a letter or digit and at most 64 characters long, is accepted, so identifiers received with isolates such as `SP10` pass unchanged. A group may tighten the pattern. Identifiers must also be unique without regard to case, which `metadata validate` and `release check` will enforce from milestone 1a.
 
 The external inputs of [contract §4.3 to §4.8](../../docs/data-contract.md#43-pangenome-inputs) arrive with milestones 1a for curated sets, tombstones and access groups, 4a for pangenomes and trees, and 6 for embeddings.
 
@@ -119,7 +121,9 @@ The release procedure of [contract §8.3](../../docs/data-contract.md#83-release
 
 ## Configuration
 
-The package reads the files in [config/](../../config) through `src/ingest/config.py`, which validates `platform.yaml`, `palette.yaml`, `design-tokens.yaml`, `versions.yaml`, `typing_display.yaml`, `summary_templates.yaml` and `export-presets.yaml`, and checks that every color in the design tokens resolves in the palette. At milestone 0 `synth` reads `summary_templates.yaml` to record the expected resistance phrases in `synth_manifest.json`, and the tests load every file. The configuration directory is `config/` at the repository root unless the environment variable `CATALEJO_CONFIG_DIR` points elsewhere.
+The package reads the files in [config/](../../config) through `src/ingest/config.py`, which validates `platform.yaml`, `palette.yaml`, `design-tokens.yaml`, `versions.yaml`, `typing_display.yaml`, `summary_templates.yaml`, `export-presets.yaml` and `species_registry.yaml`, and checks that every color in the design tokens resolves in the palette.
+
+[config/species_registry.yaml](../../config/species_registry.yaml) is the species registry of contract 0.7 §4.9. It gives each species its code, canonical name, GTDB name, NCBI taxid, aliases, MLST schemes and a `color_index` into the species sequence of the palette, and validation refuses a code, color index, name or MLST scheme used by two species and an index outside the palette. The color indices freeze at the first real release, so the maintainer should reorder them before then if the collection's main species differ from the three synthetic defaults at the top. `synth` takes every species code, name and MLST scheme from this file and keeps only its generation parameters in `src/ingest/synth/catalog.py`, so the synthetic genomes and the registry cannot disagree (contract 0.7 §10). At milestone 0 `synth` reads `summary_templates.yaml` to record the expected resistance phrases in `synth_manifest.json`, and the tests load every file. The configuration directory is `config/` at the repository root unless the environment variable `CATALEJO_CONFIG_DIR` points elsewhere.
 
 ## DuckDB pin and the cross-read test
 

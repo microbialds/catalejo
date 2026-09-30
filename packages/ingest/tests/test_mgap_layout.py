@@ -115,6 +115,12 @@ def test_contract_rows_are_modeled() -> None:
     assert {"geNomad", "MOB-suite", "Kleborate, sccmec, SISTR", "Pipeline info"} <= rows
 
 
+def test_contract_differences_are_resolved_in_0_7() -> None:
+    assert L.open_differences() == ()
+    for d in L.CONTRACT_DIFFERENCES:
+        assert d.resolved_in is not None and d.resolved_in.startswith("0.7 §"), d.module
+
+
 def test_provisional_entries_are_marked() -> None:
     for module in (L.GTDBTK, L.SISTR, L.SCCMEC):
         assert _module_is_provisional(module), type(module).__name__
@@ -181,9 +187,16 @@ def test_prefix_platform_and_sample_names(example: Example) -> None:
         else:
             assert prefix == sample
         genome_id = rules.genome_id_from_sample(sample)
-        assert rules.genome_id_regex.match(genome_id) or genome_id == "SP10"
+        assert rules.genome_id_regex.match(genome_id), genome_id
     if example.name == "ont_example":
         assert rules.genome_id_from_sample("ont_SCL30014") == "SCL30014"
+
+
+def test_genome_id_pattern_accepts_the_example_ids() -> None:
+    """Contract 0.7 §3.1: the default pattern is open within a path-safe set."""
+    pattern = load_platform().genome_id_regex
+    for genome_id in ("SP10", "SCL29833", "SCL30014"):
+        assert pattern.match(genome_id), genome_id
 
 
 def test_declared_paths_exist(example: Example) -> None:

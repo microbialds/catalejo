@@ -1,8 +1,8 @@
 """File names, columns and vocabularies of the ingestion side tables.
 
-These are the inputs beside the mgap results directory (contract §4.2 and
-§4.6 to §4.8). Like ``mgap_layout``, this module is the one place that spells
-them, so the synthetic generator and the ingestion commands agree.
+These are the inputs beside the mgap results directory (data contract 0.7
+§4.2 and §4.6 to §4.8). Like ``mgap_layout``, this module is the one place
+that spells them, so the synthetic generator and the ingestion commands agree.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ class MetadataColumns:
 
     genome_id: str = "genome_id"
     # The sample directory in the mgap results when it differs from genome_id
-    # (proposed contract §4.2 row); empty means genome_id.
+    # (data contract 0.7 §3.1 and §4.2); empty means genome_id.
     mgap_sample: str = "mgap_sample"
     species: str = "species"
     source_type: str = "source_type"

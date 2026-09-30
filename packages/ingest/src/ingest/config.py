@@ -32,6 +32,7 @@ VERSIONS_FILE = "versions.yaml"
 TYPING_DISPLAY_FILE = "typing_display.yaml"
 SUMMARY_TEMPLATES_FILE = "summary_templates.yaml"
 EXPORT_PRESETS_FILE = "export-presets.yaml"
+SPECIES_REGISTRY_FILE = "species_registry.yaml"
 
 CONFIG_FILES = (
     PLATFORM_FILE,
@@ -41,6 +42,7 @@ CONFIG_FILES = (
     TYPING_DISPLAY_FILE,
     SUMMARY_TEMPLATES_FILE,
     EXPORT_PRESETS_FILE,
+    SPECIES_REGISTRY_FILE,
 )
 
 _HEX = re.compile(r"^#[0-9A-Fa-f]{6}$")
@@ -235,6 +237,7 @@ class Typography(_Model):
     sizes: dict[str, str]
     weights: dict[str, int]
     letter_spacing: dict[str, str]
+    line_heights: dict[str, float] = Field(default_factory=dict[str, float])
 
 
 class DesignTokens(_Model):
@@ -446,6 +449,111 @@ class ExportPresetsConfig(_Model):
     rules: ExportRules
 
 
+# species_registry.yaml ----------------------------------------------------------
+
+
+def _species_code(value: str) -> str:
+    if not re.fullmatch(r"[A-Z]{3,5}", value):
+        raise ValueError(f"species_code must be 3 to 5 uppercase letters: {value!r}")
+    return value
+
+
+SpeciesCode = Annotated[str, AfterValidator(_species_code)]
+
+
+class SpeciesEntry(_Model):
+    """One species of ``config/species_registry.yaml`` (contract §4.9)."""
+
+    species_code: SpeciesCode
+    canonical_name: str = Field(min_length=1)
+    gtdb_name: str | None = None
+    ncbi_taxid: int | None = Field(default=None, gt=0)
+    aliases: list[str] = Field(default_factory=list[str])
+    mlst_schemes: list[str] = Field(default_factory=list[str])
+    pangenome_eligible: bool
+    color_index: int | None = Field(ge=0)
+
+    def names(self) -> list[str]:
+        """Every name that maps to this species: canonical, GTDB and aliases."""
+        out = [self.canonical_name, *self.aliases]
+        if self.gtdb_name:
+            out.append(self.gtdb_name)
+        return out
+
+
+class SpeciesRegistry(_Model):
+    """``config/species_registry.yaml`` (contract §3.3, §4.9, §5.1 and §9).
+
+    Validation fails on a duplicate species_code, a color_index used twice, and
+    a name or MLST scheme that maps to two species. Names are compared without
+    regard to case. The color_index range is checked against the palette by
+    ``check_palette`` (``load_species_registry`` does both).
+    """
+
+    version: int
+    species: list[SpeciesEntry] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _check(self) -> SpeciesRegistry:
+        codes = [s.species_code for s in self.species]
+        if len(set(codes)) != len(codes):
+            raise ValueError(f"duplicate species_code in {codes}")
+        indices = [s.color_index for s in self.species if s.color_index is not None]
+        if len(set(indices)) != len(indices):
+            raise ValueError(f"a color_index is used by two species: {indices}")
+        owner: dict[str, str] = {}
+        for s in self.species:
+            for name in {n.casefold() for n in s.names()}:
+                if owner.setdefault(name, s.species_code) != s.species_code:
+                    raise ValueError(f"name {name!r} maps to {owner[name]} and {s.species_code}")
+        scheme_owner: dict[str, str] = {}
+        for s in self.species:
+            for scheme in s.mlst_schemes:
+                if scheme_owner.setdefault(scheme, s.species_code) != s.species_code:
+                    raise ValueError(
+                        f"MLST scheme {scheme!r} maps to {scheme_owner[scheme]} and "
+                        f"{s.species_code}"
+                    )
+        return self
+
+    def check_palette(self, palette: PaletteConfig) -> None:
+        """Every color_index must lie inside the palette's species sequence (§9)."""
+        size = len(palette.species.sequence)
+        for s in self.species:
+            if s.color_index is not None and s.color_index >= size:
+                raise ValueError(
+                    f"{s.species_code}: color_index {s.color_index} is outside the "
+                    f"palette's species sequence of {size} colors"
+                )
+
+    def get(self, species_code: str) -> SpeciesEntry:
+        for s in self.species:
+            if s.species_code == species_code:
+                return s
+        raise KeyError(species_code)
+
+    def by_name(self, name: str) -> SpeciesEntry | None:
+        """The species a canonical name, alias or GTDB name maps to, ignoring case."""
+        key = name.casefold()
+        for s in self.species:
+            if key in {n.casefold() for n in s.names()}:
+                return s
+        return None
+
+    def by_mlst_scheme(self, scheme: str) -> SpeciesEntry | None:
+        for s in self.species:
+            if scheme in s.mlst_schemes:
+                return s
+        return None
+
+    def color(self, species_code: str, palette: PaletteConfig) -> str:
+        """The species color: its palette sequence entry, or ``species.other`` when null."""
+        index = self.get(species_code).color_index
+        if index is None:
+            return palette.species.other
+        return palette.species.sequence[index]
+
+
 # Loading ------------------------------------------------------------------------
 
 
@@ -514,3 +622,13 @@ def load_export_presets(directory: Path | None = None) -> ExportPresetsConfig:
 def platform() -> PlatformConfig:
     """The platform configuration, loaded once per process."""
     return load_platform()
+
+
+def load_species_registry(directory: Path | None = None) -> SpeciesRegistry:
+    """Load the species registry and check its color indices against the palette."""
+    registry = SpeciesRegistry.model_validate(_read_yaml(SPECIES_REGISTRY_FILE, directory))
+    try:
+        registry.check_palette(load_palette(directory))
+    except ValueError as exc:
+        raise ConfigError(str(exc)) from exc
+    return registry

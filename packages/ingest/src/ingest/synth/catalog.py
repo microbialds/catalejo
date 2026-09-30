@@ -9,7 +9,7 @@ file path or an mgap column name; those come from ``ingest.mgap_layout``.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from ingest import mgap_layout as L
 
@@ -1277,18 +1277,23 @@ class StProfile:
     typing: tuple[tuple[str, str], ...] = ()
 
 
-@dataclass(frozen=True)
-class SpeciesSpec:
+@dataclass(frozen=True, kw_only=True)
+class SpeciesParams:
+    """How the generator builds genomes of one species, keyed by ``code``.
+
+    Species identities (canonical name, GTDB name, aliases, MLST schemes) are
+    not here: they come from ``config/species_registry.yaml`` (contract §4.9
+    and §10), merged in ``ingest.synth.species``.
+    """
+
     code: str
-    name: str
-    taxid: int
+    taxid: int  # NCBI taxid written in the Kraken2 report
     gc: float
     gram_negative: bool
     lineage: tuple[TaxonLine, ...]  # phylum to genus, for the Kraken2 report
     relative: TaxonLine  # a second species of the genus in the Kraken2 report
-    gtdb_lineage: str
+    gtdb_genus_lineage: str  # GTDB lineage down to the genus; the species comes from the registry
     gtdb_reference: str
-    mlst_scheme: str | None
     mlst_genes: tuple[str, ...]
     st_profiles: tuple[StProfile, ...]
     typing_tool: str | None  # a tool key of mgap_layout (kleborate, sistr, sccmec)
@@ -1300,9 +1305,26 @@ class SpeciesSpec:
     mutation_genes: tuple[GeneSpec, ...]  # core genes carrying screened positions
     min_genomes: int = 2
     weight: float = 1.0
-    source_weights: tuple[tuple[str, float], ...] = field(
-        default=(("clinical", 0.7), ("environmental", 0.1), ("food", 0.1), ("animal", 0.1))
+    source_weights: tuple[tuple[str, float], ...] = (
+        ("clinical", 0.7),
+        ("environmental", 0.1),
+        ("food", 0.1),
+        ("animal", 0.1),
     )
+
+
+@dataclass(frozen=True, kw_only=True)
+class SpeciesSpec(SpeciesParams):
+    """Generation parameters merged with the species' identity from the registry."""
+
+    name: str  # canonical_name
+    gtdb_name: str  # the registry gtdb_name, or the canonical name when it is null
+    mlst_scheme: str | None  # the first registry MLST scheme; None when there is none
+    aliases: tuple[str, ...]
+
+    @property
+    def gtdb_lineage(self) -> str:
+        return f"{self.gtdb_genus_lineage};s__{self.gtdb_name}"
 
 
 _PROTEO = TaxonLine("P", 1224, "Pseudomonadota")
@@ -1317,10 +1339,9 @@ _PARC = _g("parC", "DNA topoisomerase IV subunit A", 752)
 _GYRA_SAU = _g("gyrA", "DNA gyrase subunit A", 889)
 _GRLA = _g("grlA", "DNA topoisomerase IV subunit A", 800)
 
-SPECIES: tuple[SpeciesSpec, ...] = (
-    SpeciesSpec(
+SPECIES_PARAMS: tuple[SpeciesParams, ...] = (
+    SpeciesParams(
         code="KPN",
-        name="Klebsiella pneumoniae",
         taxid=573,
         gc=0.57,
         gram_negative=True,
@@ -1332,10 +1353,9 @@ SPECIES: tuple[SpeciesSpec, ...] = (
             TaxonLine("G", 570, "Klebsiella"),
         ),
         relative=TaxonLine("S", 244366, "Klebsiella variicola"),
-        gtdb_lineage="d__Bacteria;p__Pseudomonadota;c__Gammaproteobacteria;o__Enterobacterales;"
-        "f__Enterobacteriaceae;g__Klebsiella;s__Klebsiella pneumoniae",
+        gtdb_genus_lineage="d__Bacteria;p__Pseudomonadota;c__Gammaproteobacteria;o__Enterobacterales;"
+        "f__Enterobacteriaceae;g__Klebsiella",
         gtdb_reference="GCF_000742135.1",
-        mlst_scheme="klebsiella",
         mlst_genes=("gapA", "infB", "mdh", "pgi", "phoE", "rpoB", "tonB"),
         st_profiles=(
             StProfile(
@@ -1432,9 +1452,8 @@ SPECIES: tuple[SpeciesSpec, ...] = (
         min_genomes=6,
         weight=0.45,
     ),
-    SpeciesSpec(
+    SpeciesParams(
         code="SEN",
-        name="Salmonella enterica",
         taxid=28901,
         gc=0.52,
         gram_negative=True,
@@ -1446,10 +1465,9 @@ SPECIES: tuple[SpeciesSpec, ...] = (
             TaxonLine("G", 590, "Salmonella"),
         ),
         relative=TaxonLine("S", 54736, "Salmonella bongori"),
-        gtdb_lineage="d__Bacteria;p__Pseudomonadota;c__Gammaproteobacteria;o__Enterobacterales;"
-        "f__Enterobacteriaceae;g__Salmonella;s__Salmonella enterica",
+        gtdb_genus_lineage="d__Bacteria;p__Pseudomonadota;c__Gammaproteobacteria;o__Enterobacterales;"
+        "f__Enterobacteriaceae;g__Salmonella",
         gtdb_reference="GCF_000006945.2",
-        mlst_scheme="senterica_achtman_2",
         mlst_genes=("aroC", "dnaN", "hemD", "hisD", "purE", "sucA", "thrA"),
         st_profiles=(
             StProfile(
@@ -1522,9 +1540,8 @@ SPECIES: tuple[SpeciesSpec, ...] = (
         weight=0.30,
         source_weights=(("clinical", 0.4), ("food", 0.3), ("animal", 0.2), ("environmental", 0.1)),
     ),
-    SpeciesSpec(
+    SpeciesParams(
         code="SAU",
-        name="Staphylococcus aureus",
         taxid=1280,
         gc=0.33,
         gram_negative=False,
@@ -1536,10 +1553,9 @@ SPECIES: tuple[SpeciesSpec, ...] = (
             TaxonLine("G", 1279, "Staphylococcus"),
         ),
         relative=TaxonLine("S", 985002, "Staphylococcus argenteus"),
-        gtdb_lineage="d__Bacteria;p__Bacillota;c__Bacilli;o__Staphylococcales;"
-        "f__Staphylococcaceae;g__Staphylococcus;s__Staphylococcus aureus",
+        gtdb_genus_lineage="d__Bacteria;p__Bacillota;c__Bacilli;o__Staphylococcales;"
+        "f__Staphylococcaceae;g__Staphylococcus",
         gtdb_reference="GCF_000013425.1",
-        mlst_scheme="saureus",
         mlst_genes=("arcC", "aroE", "glpF", "gmk", "pta", "tpi", "yqiL"),
         st_profiles=(
             StProfile("5", (1, 4, 1, 4, 12, 1, 10), 2.0, ((_SC.type, "II"), (_SC.subtype, "IIa"))),
@@ -1579,9 +1595,8 @@ SPECIES: tuple[SpeciesSpec, ...] = (
         weight=0.25,
         source_weights=(("clinical", 0.75), ("animal", 0.2), ("food", 0.05)),
     ),
-    SpeciesSpec(
+    SpeciesParams(
         code="SMA",
-        name="Serratia marcescens",
         taxid=615,
         gc=0.59,
         gram_negative=True,
@@ -1593,10 +1608,9 @@ SPECIES: tuple[SpeciesSpec, ...] = (
             TaxonLine("G", 613, "Serratia"),
         ),
         relative=TaxonLine("S", 458197, "Serratia nematodiphila"),
-        gtdb_lineage="d__Bacteria;p__Pseudomonadota;c__Gammaproteobacteria;o__Enterobacterales;"
-        "f__Enterobacteriaceae;g__Serratia;s__Serratia marcescens",
+        gtdb_genus_lineage="d__Bacteria;p__Pseudomonadota;c__Gammaproteobacteria;o__Enterobacterales;"
+        "f__Enterobacteriaceae;g__Serratia",
         gtdb_reference="GCF_003516165.1",
-        mlst_scheme=None,
         mlst_genes=(),
         st_profiles=(),
         typing_tool=None,
@@ -1608,9 +1622,8 @@ SPECIES: tuple[SpeciesSpec, ...] = (
         mutation_genes=(),
         weight=0.12,
     ),
-    SpeciesSpec(
+    SpeciesParams(
         code="ECO",
-        name="Escherichia coli",
         taxid=562,
         gc=0.51,
         gram_negative=True,
@@ -1622,10 +1635,9 @@ SPECIES: tuple[SpeciesSpec, ...] = (
             TaxonLine("G", 561, "Escherichia"),
         ),
         relative=TaxonLine("S", 208962, "Escherichia albertii"),
-        gtdb_lineage="d__Bacteria;p__Pseudomonadota;c__Gammaproteobacteria;o__Enterobacterales;"
-        "f__Enterobacteriaceae;g__Escherichia;s__Escherichia coli",
+        gtdb_genus_lineage="d__Bacteria;p__Pseudomonadota;c__Gammaproteobacteria;o__Enterobacterales;"
+        "f__Enterobacteriaceae;g__Escherichia",
         gtdb_reference="GCF_000005845.2",
-        mlst_scheme="ecoli_achtman_4",
         mlst_genes=("adk", "fumC", "gyrB", "icd", "mdh", "purA", "recA"),
         st_profiles=(
             StProfile("131", (53, 40, 47, 13, 36, 28, 29), 2.0),
@@ -1651,9 +1663,8 @@ SPECIES: tuple[SpeciesSpec, ...] = (
         mutation_genes=(_GYRA_KPN,),
         weight=0.12,
     ),
-    SpeciesSpec(
+    SpeciesParams(
         code="PAE",
-        name="Pseudomonas aeruginosa",
         taxid=287,
         gc=0.66,
         gram_negative=True,
@@ -1665,10 +1676,9 @@ SPECIES: tuple[SpeciesSpec, ...] = (
             TaxonLine("G", 286, "Pseudomonas"),
         ),
         relative=TaxonLine("S", 2994495, "Pseudomonas paraeruginosa"),
-        gtdb_lineage="d__Bacteria;p__Pseudomonadota;c__Gammaproteobacteria;o__Pseudomonadales;"
-        "f__Pseudomonadaceae;g__Pseudomonas;s__Pseudomonas aeruginosa",
+        gtdb_genus_lineage="d__Bacteria;p__Pseudomonadota;c__Gammaproteobacteria;o__Pseudomonadales;"
+        "f__Pseudomonadaceae;g__Pseudomonas",
         gtdb_reference="GCF_000006765.1",
-        mlst_scheme="paeruginosa",
         mlst_genes=("acsA", "aroE", "guaA", "mutL", "nuoD", "ppsA", "trpE"),
         st_profiles=(
             StProfile("235", (38, 11, 3, 13, 1, 2, 4)),
@@ -1683,9 +1693,8 @@ SPECIES: tuple[SpeciesSpec, ...] = (
         mutation_genes=(),
         weight=0.10,
     ),
-    SpeciesSpec(
+    SpeciesParams(
         code="ABA",
-        name="Acinetobacter baumannii",
         taxid=470,
         gc=0.39,
         gram_negative=True,
@@ -1697,10 +1706,9 @@ SPECIES: tuple[SpeciesSpec, ...] = (
             TaxonLine("G", 469, "Acinetobacter"),
         ),
         relative=TaxonLine("S", 48296, "Acinetobacter pittii"),
-        gtdb_lineage="d__Bacteria;p__Pseudomonadota;c__Gammaproteobacteria;o__Pseudomonadales;"
-        "f__Moraxellaceae;g__Acinetobacter;s__Acinetobacter baumannii",
+        gtdb_genus_lineage="d__Bacteria;p__Pseudomonadota;c__Gammaproteobacteria;o__Pseudomonadales;"
+        "f__Moraxellaceae;g__Acinetobacter",
         gtdb_reference="GCF_009035845.1",
-        mlst_scheme="abaumannii_2",
         mlst_genes=(
             "Pas_cpn60",
             "Pas_fusA",
@@ -1723,9 +1731,8 @@ SPECIES: tuple[SpeciesSpec, ...] = (
         mutation_genes=(),
         weight=0.10,
     ),
-    SpeciesSpec(
+    SpeciesParams(
         code="EFM",
-        name="Enterococcus faecium",
         taxid=1352,
         gc=0.38,
         gram_negative=False,
@@ -1737,10 +1744,9 @@ SPECIES: tuple[SpeciesSpec, ...] = (
             TaxonLine("G", 1350, "Enterococcus"),
         ),
         relative=TaxonLine("S", 357441, "Enterococcus lactis"),
-        gtdb_lineage="d__Bacteria;p__Bacillota;c__Bacilli;o__Lactobacillales;"
-        "f__Enterococcaceae;g__Enterococcus;s__Enterococcus faecium",
+        gtdb_genus_lineage="d__Bacteria;p__Bacillota;c__Bacilli;o__Lactobacillales;"
+        "f__Enterococcaceae;g__Enterococcus",
         gtdb_reference="GCF_009734005.1",
-        mlst_scheme="efaecium",
         mlst_genes=("atpA", "ddl", "gdh", "purK", "gyd", "pstS", "adk"),
         st_profiles=(
             StProfile("17", (1, 1, 1, 1, 1, 1, 1)),
@@ -1755,9 +1761,8 @@ SPECIES: tuple[SpeciesSpec, ...] = (
         mutation_genes=(),
         weight=0.08,
     ),
-    SpeciesSpec(
+    SpeciesParams(
         code="SPN",
-        name="Streptococcus pneumoniae",
         taxid=1313,
         gc=0.40,
         gram_negative=False,
@@ -1769,10 +1774,9 @@ SPECIES: tuple[SpeciesSpec, ...] = (
             TaxonLine("G", 1301, "Streptococcus"),
         ),
         relative=TaxonLine("S", 28037, "Streptococcus mitis"),
-        gtdb_lineage="d__Bacteria;p__Bacillota;c__Bacilli;o__Lactobacillales;"
-        "f__Streptococcaceae;g__Streptococcus;s__Streptococcus pneumoniae",
+        gtdb_genus_lineage="d__Bacteria;p__Bacillota;c__Bacilli;o__Lactobacillales;"
+        "f__Streptococcaceae;g__Streptococcus",
         gtdb_reference="GCF_001457635.1",
-        mlst_scheme="spneumoniae",
         mlst_genes=("aroE", "gdh", "gki", "recP", "spi", "xpt", "ddl"),
         st_profiles=(
             StProfile("320", (4, 16, 19, 15, 6, 20, 1)),
@@ -1787,9 +1791,8 @@ SPECIES: tuple[SpeciesSpec, ...] = (
         mutation_genes=(),
         weight=0.08,
     ),
-    SpeciesSpec(
+    SpeciesParams(
         code="EHO",
-        name="Enterobacter hormaechei",
         taxid=158836,
         gc=0.55,
         gram_negative=True,
@@ -1801,10 +1804,9 @@ SPECIES: tuple[SpeciesSpec, ...] = (
             TaxonLine("G", 547, "Enterobacter"),
         ),
         relative=TaxonLine("S", 550, "Enterobacter cloacae"),
-        gtdb_lineage="d__Bacteria;p__Pseudomonadota;c__Gammaproteobacteria;o__Enterobacterales;"
-        "f__Enterobacteriaceae;g__Enterobacter;s__Enterobacter hormaechei_A",
+        gtdb_genus_lineage="d__Bacteria;p__Pseudomonadota;c__Gammaproteobacteria;o__Enterobacterales;"
+        "f__Enterobacteriaceae;g__Enterobacter",
         gtdb_reference="GCF_001729785.1",
-        mlst_scheme="ecloacae",
         mlst_genes=("dnaA", "fusA", "gyrB", "leuS", "pyrG", "rplB", "rpoB"),
         st_profiles=(
             StProfile("78", (1, 4, 13, 1, 3, 3, 12)),
@@ -1821,7 +1823,7 @@ SPECIES: tuple[SpeciesSpec, ...] = (
     ),
 )
 
-MAX_SPECIES = len(SPECIES)
+MAX_SPECIES = len(SPECIES_PARAMS)
 
 
 # Metadata vocabularies ---------------------------------------------------------------------------

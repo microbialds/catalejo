@@ -5,24 +5,52 @@ directory (gene2dis/mgap ``--outdir``). The parsers (``ingest.parsers``,
 milestone 1a) and the synthetic generator (``ingest.synth``) both import it
 and never spell a path or a column name themselves; a test enforces this.
 
-The layout was derived from ``data/mgap-example/`` (mgap 2.0.0, two Illumina
-SPAdes draft genomes, SCL29833 and SP10). Entries marked ``provisional=True``
-are not confirmed by that example; they follow the documented output names of
-the tools and must be checked against the first mgap run that produces them.
-``CONTRACT_DIFFERENCES`` lists where the example disagrees with contract §4.1.
+The layout was derived from two real runs, both mgap 2.0.0:
+``data/mgap-example/`` holds two Illumina SPAdes drafts (SCL29833, SP10) with
+run-level ``pipeline_info/``, and ``data/ont_example/`` holds one nanopore
+genome assembled by Autocycler and reoriented by Dnaapler (sample directory
+``ont_SCL30014``, genome SCL30014, five circular replicons). Entries marked
+``provisional=True`` are confirmed by neither; they follow the tools'
+documented outputs and must be checked against the first mgap run that
+produces them. ``CONTRACT_DIFFERENCES`` lists where the examples disagree with
+contract §4.1.
 
-Conventions seen in the example, which the parsers rely on.
+Names. Three names can differ for one genome, and templates use two
+placeholders for them.
 
-- Per-genome files live under ``<genome_id>/`` and run-level files under
-  ``pipeline_info/``. Templates below use ``{genome_id}``.
+- ``{sample}`` is the per-genome directory in the results (``SCL29833``,
+  ``ont_SCL30014``). It maps to ``genome_id`` through the ``mgap_sample``
+  metadata column, and ``catalejo metadata init`` proposes the genome_id with
+  ``sample_name_rules`` in ``config/platform.yaml``.
+- ``{prefix}`` is the stem of most tool files (``SCL29833``,
+  ``ont_SCL30014_`` with a trailing underscore). ``resolve_prefix`` discovers
+  it from the Bakta summary and falls back to the sample. A few files are
+  named from the sample instead (CheckM2, geNomad, the Autocycler genome size
+  and the Dnaapler graph), which the templates state.
+- Names written inside the reports (CheckM2 ``Name``, MLST ``FILE``, Kleborate
+  ``strain``, QUAST ``Assembly``) come from the input reads, for example
+  ``SCL29833.scaffolds`` or ``SCL30014_nanopore``. Parsers never key on them:
+  every per-genome report is found through its path and holds one genome.
+
+Other conventions the parsers rely on.
+
+- Run-level files live under ``pipeline_info/``.
 - The Bakta nucleotide FASTA (``.fna``) is the assembly every annotation tool
-  reads. Bakta renames contigs to ``contig_<k>`` in the order of the SPAdes
-  scaffolds after dropping those shorter than ``MIN_CONTIG_LENGTH``, and its
-  headers carry `` [gcode=11] [topology=linear]``. AMRFinderPlus, geNomad,
-  MOB-suite and Kleborate report ``contig_<k>`` names (MOB-suite with the
-  bracketed suffix), while the SPAdes FASTA files and RGI use the SPAdes names
-  ``NODE_<k>_length_<L>_cov_<C>``.
-- CheckM2, QUAST and MLST name the assembly ``<genome_id>.scaffolds``.
+  reads. Bakta renames contigs to ``contig_<k>`` in assembly order after
+  dropping those shorter than ``MIN_CONTIG_LENGTH``. Its headers carry
+  bracketed tags that give topology and completeness on every platform:
+  ``[gcode=11] [topology=linear]`` for Illumina drafts, and
+  ``[gcode=11] [completeness=complete] [topology=circular]`` followed by
+  ``[location=chromosome]`` or ``[plasmid-name=unnamed<n>]`` for complete
+  nanopore genomes (``BaktaLayout.fna_tag_re``, ``parse_fna_header``).
+- AMRFinderPlus, geNomad, MOB-suite and Kleborate report ``contig_<k>`` names
+  (MOB-suite with the bracketed tags), while the SPAdes FASTA files and RGI
+  use the SPAdes names ``NODE_<k>_length_<L>_cov_<C>`` and the Autocycler and
+  Dnaapler FASTA files use ``<k> length=<L> circular=true``.
+- RGI, MOB-suite, Bracken, fastp and fastplong are independently optional on
+  any platform (``optional=True``). Paths that exist only for one platform
+  carry ``platform``; ``detect_platform`` tells the platform from the
+  assembly directory.
 - ``-`` means "none" in MLST, MOB-suite and Kleborate; ``NA`` in
   AMRFinderPlus and geNomad.
 """
@@ -35,7 +63,11 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-GENOME_ID = "{genome_id}"
+SAMPLE = "{sample}"
+PREFIX = "{prefix}"
+
+PLATFORM_ILLUMINA = "illumina"
+PLATFORM_ONT = "ont"
 
 # Bakta keeps contigs of at least this length; SCL29833 has 255 scaffolds and
 # 137 Bakta contigs, the shortest exactly 200 bp.
@@ -47,27 +79,34 @@ class MgapPath:
     """A path relative to the mgap results directory.
 
     ``optional`` marks files that may be absent for a genome on which the
-    module ran (for example ``mobtyper_results.txt`` when no plasmid was
-    found, or a species-specific typing tool).
+    module ran, or modules that a run may skip (RGI, MOB-suite, Bracken,
+    fastp, fastplong, species-specific typing, ``mobtyper_results.txt`` when
+    no plasmid was found). ``platform`` marks paths that exist only for one
+    sequencing platform.
     """
 
     template: str
     provisional: bool = False
     optional: bool = False
+    platform: str | None = None
 
     @property
     def per_genome(self) -> bool:
-        return GENOME_ID in self.template
+        return SAMPLE in self.template or PREFIX in self.template
 
-    def relative(self, genome_id: str | None = None) -> str:
-        if self.per_genome:
-            if genome_id is None:
-                raise ValueError(f"{self.template} needs a genome_id")
-            return self.template.replace(GENOME_ID, genome_id)
-        return self.template
+    def relative(self, sample: str | None = None, prefix: str | None = None) -> str:
+        """The path for ``sample``; ``prefix`` defaults to the sample name."""
+        if not self.per_genome:
+            return self.template
+        if sample is None:
+            raise ValueError(f"{self.template} needs a sample name")
+        stem = sample if prefix is None else prefix
+        return self.template.replace(SAMPLE, sample).replace(PREFIX, stem)
 
-    def resolve(self, results_dir: Path, genome_id: str | None = None) -> Path:
-        return results_dir / self.relative(genome_id)
+    def resolve(
+        self, results_dir: Path, sample: str | None = None, prefix: str | None = None
+    ) -> Path:
+        return results_dir / self.relative(sample, prefix)
 
 
 class HeaderStyle(StrEnum):
@@ -97,6 +136,9 @@ class Table:
 
 # Assembly ----------------------------------------------------------------------------------------
 
+_ILLUMINA = PLATFORM_ILLUMINA
+_ONT = PLATFORM_ONT
+
 
 @dataclass(frozen=True)
 class SpadesLayout:
@@ -104,10 +146,12 @@ class SpadesLayout:
 
     tool: str = "spades"
     process: str = "GENE2DIS_MGAP:MGAP:ILLUMINA:SPADES"
-    contigs: MgapPath = MgapPath("{genome_id}/assemblies/{genome_id}.contigs.fa.gz")
-    scaffolds: MgapPath = MgapPath("{genome_id}/assemblies/{genome_id}.scaffolds.fa.gz")
-    graph: MgapPath = MgapPath("{genome_id}/assemblies/{genome_id}.assembly.gfa.gz")
-    log: MgapPath = MgapPath("{genome_id}/assemblies/{genome_id}.spades.log")
+    contigs: MgapPath = MgapPath("{sample}/assemblies/{prefix}.contigs.fa.gz", platform=_ILLUMINA)
+    scaffolds: MgapPath = MgapPath(
+        "{sample}/assemblies/{prefix}.scaffolds.fa.gz", platform=_ILLUMINA
+    )
+    graph: MgapPath = MgapPath("{sample}/assemblies/{prefix}.assembly.gfa.gz", platform=_ILLUMINA)
+    log: MgapPath = MgapPath("{sample}/assemblies/{prefix}.spades.log", platform=_ILLUMINA)
     # SPAdes sequence names; k is the rank by length, L the length, C the coverage.
     node_name: str = "NODE_{index}_length_{length}_cov_{coverage}"
     node_name_re: re.Pattern[str] = re.compile(
@@ -116,65 +160,66 @@ class SpadesLayout:
     # GFA 1.2 header line; the assembler version is in the sp tag.
     gfa_header: str = "H\tVN:Z:1.2\tsp:Z:SPAdes-{version}"
     gfa_version_re: re.Pattern[str] = re.compile(r"sp:Z:SPAdes-(?P<version>\S+)")
-    # Name CheckM2, QUAST and MLST give the assembly.
-    assembly_name: str = "{genome_id}.scaffolds"
-    # The scaffolds file stem CheckM2 and QUAST report and the file MLST names.
-    assembly_file: str = "{genome_id}.scaffolds.fa.gz"
-
-
-@dataclass(frozen=True)
-class FlyeInfoColumns:
-    seq_name: str = "#seq_name"
-    length: str = "length"
-    coverage: str = "cov."
-    circular: str = "circ."
-    repeat: str = "repeat"
-    multiplicity: str = "mult."
-    alt_group: str = "alt_group"
-    graph_path: str = "graph_path"
+    # Name inside CheckM2, QUAST and Kleborate, and the file MLST reports, as
+    # observed for an unprefixed sample (SCL29833.scaffolds). Never keyed on.
+    internal_name: str = "{sample}.scaffolds"
+    internal_file: str = "{sample}.scaffolds.fa.gz"
 
 
 @dataclass(frozen=True)
 class LongReadLayout:
-    """Long-read assembly for complete genomes (Flye, Autocycler) and Dnaapler.
+    """Nanopore assembly: Autocycler consensus, then Dnaapler reorientation.
 
-    Provisional. data/mgap-example holds only Illumina SPAdes drafts, so these
-    names follow the tools' documented outputs (Flye assembly.fasta and
-    assembly_info.txt, Autocycler consensus_assembly.fasta, Dnaapler
-    <prefix>_reoriented.fasta) placed where mgap publishes SPAdes output.
+    Confirmed by data/ont_example. Both FASTA files are uncompressed with one
+    line per sequence and headers ``<k> length=<L> circular=true``; the
+    Dnaapler FASTA is the Autocycler one rotated to dnaA and repA, and is what
+    Bakta annotates. Both graphs are GFA 1.0 with the full sequence in each S
+    line and a pair of self-links (``+``/``+`` and ``-``/``-``, overlap 0M)
+    for each circular segment; Dnaapler adds ``RT:z:<gene>`` to the segments
+    it rotated. mgap has no Flye path. The process names are provisional
+    because the example has no pipeline_info.
     """
 
-    flye_tool: str = "flye"
-    flye_process: str = "GENE2DIS_MGAP:MGAP:NANOPORE:FLYE"
-    flye_fasta: MgapPath = MgapPath(
-        "{genome_id}/assemblies/{genome_id}.assembly.fasta.gz", provisional=True
-    )
-    flye_info: MgapPath = MgapPath(
-        "{genome_id}/assemblies/{genome_id}.assembly_info.txt", provisional=True
-    )
-    flye_info_columns: FlyeInfoColumns = FlyeInfoColumns()
-    flye_circular_yes: str = "Y"
-    flye_circular_no: str = "N"
-    flye_contig_name: str = "contig_{index}"
-    # Name CheckM2, QUAST and MLST give a reoriented complete assembly.
-    assembly_name: str = "{genome_id}_reoriented"
-    assembly_file: str = "{genome_id}_reoriented.fasta.gz"
     autocycler_tool: str = "autocycler"
     autocycler_process: str = "GENE2DIS_MGAP:MGAP:NANOPORE:AUTOCYCLER"
+    autocycler_dir: MgapPath = MgapPath("{sample}/assemblies/autocycler", platform=_ONT)
     autocycler_fasta: MgapPath = MgapPath(
-        "{genome_id}/assemblies/{genome_id}.autocycler.fasta.gz", provisional=True
+        "{sample}/assemblies/autocycler/{prefix}.fasta", platform=_ONT
     )
-    # Autocycler writes the circularity in the FASTA description.
-    autocycler_circular_tag: str = "circular=true"
+    autocycler_gfa: MgapPath = MgapPath(
+        "{sample}/assemblies/autocycler/{prefix}.gfa", platform=_ONT
+    )
+    genome_size: MgapPath = MgapPath(
+        "{sample}/assemblies/autocycler/genome_size/{sample}_genome_size.txt", platform=_ONT
+    )
     dnaapler_tool: str = "dnaapler"
-    dnaapler_process: str = "GENE2DIS_MGAP:MGAP:DNAAPLER"
+    dnaapler_process: str = "GENE2DIS_MGAP:MGAP:NANOPORE:DNAAPLER"
+    dnaapler_dir: MgapPath = MgapPath("{sample}/assemblies/dnaapler", platform=_ONT)
     dnaapler_fasta: MgapPath = MgapPath(
-        "{genome_id}/assemblies/{genome_id}_reoriented.fasta.gz", provisional=True
+        "{sample}/assemblies/dnaapler/{prefix}.fasta", platform=_ONT
     )
-
-    @property
-    def flye_info_table(self) -> Table:
-        return Table(self.flye_info, _columns(self.flye_info_columns))
+    dnaapler_gfa: MgapPath = MgapPath(
+        "{sample}/assemblies/dnaapler/{sample}_reoriented.gfa", platform=_ONT
+    )
+    fasta_header: str = "{index} length={length} circular={circular}"
+    fasta_header_re: re.Pattern[str] = re.compile(
+        r"^(?P<index>\S+) length=(?P<length>\d+)(?: circular=(?P<circular>true|false))?"
+    )
+    circular_true: str = "true"
+    gfa_header: str = "H\tVN:Z:1.0"
+    gfa_segment: str = "S\t{index}\t{sequence}\tDP:f:{depth:.2f}\tCL:Z:steelblue"
+    gfa_self_links: tuple[str, str] = (
+        "L\t{index}\t+\t{index}\t+\t0M",
+        "L\t{index}\t-\t{index}\t-\t0M",
+    )
+    gfa_rotated_tag: str = "RT:z:{gene}"
+    # The genome size file holds one integer, Autocycler's estimate.
+    # Name inside CheckM2, QUAST and Kleborate, and the file MLST reports, as
+    # observed (SCL30014_nanopore): the stem of the input read file, unrelated
+    # to the sample or the prefix. Never keyed on.
+    internal_name_example: str = "SCL30014_nanopore"
+    internal_name: str = "{genome_id}_nanopore"
+    internal_file: str = "{genome_id}_nanopore.fasta"
 
 
 # Quality -----------------------------------------------------------------------------------------
@@ -202,7 +247,7 @@ class CheckM2Columns:
 class CheckM2Layout:
     tool: str = "checkm2"
     process: str = "GENE2DIS_MGAP:MGAP:CHECKM2"
-    report: MgapPath = MgapPath("{genome_id}/annotation/checkm2/{genome_id}_checkm2_report.tsv")
+    report: MgapPath = MgapPath("{sample}/annotation/checkm2/{sample}_checkm2_report.tsv")
     columns: CheckM2Columns = CheckM2Columns()
     # Name column value: the assembly name (SpadesLayout.assembly_name).
     model_specific: str = "Neural Network (Specific Model)"
@@ -248,7 +293,7 @@ class QuastLayout:
 
     tool: str = "quast"
     process: str = "GENE2DIS_MGAP:MGAP:QUAST"
-    report: MgapPath = MgapPath("{genome_id}/qc/quast/{genome_id}.tsv")
+    report: MgapPath = MgapPath("{sample}/qc/quast/{prefix}.tsv")
     rows: QuastRows = QuastRows()
     # Thresholds of the "(>= N bp)" rows. The unqualified rows count contigs of
     # at least 500 bp, QUAST's default --min-contig.
@@ -279,9 +324,9 @@ class Kraken2ReportColumns:
 class Kraken2Layout:
     tool: str = "kraken2"
     process: str = "GENE2DIS_MGAP:MGAP:ILLUMINA:KRAKEN2"
-    report: MgapPath = MgapPath(
-        "{genome_id}/read_processing/kraken2/{genome_id}.kraken2.report.txt"
-    )
+    # Provisional: the nanopore example has no pipeline_info.
+    ont_process: str = "GENE2DIS_MGAP:MGAP:NANOPORE:KRAKEN2"
+    report: MgapPath = MgapPath("{sample}/read_processing/kraken2/{prefix}.kraken2.report.txt")
     columns: Kraken2ReportColumns = Kraken2ReportColumns()
     # Percent is right-aligned to width 6 with two decimals; the name is
     # indented by two spaces per level below root.
@@ -310,13 +355,74 @@ class BrackenColumns:
 class BrackenLayout:
     tool: str = "bracken"
     process: str = "GENE2DIS_MGAP:MGAP:ILLUMINA:BRACKEN"
-    report: MgapPath = MgapPath("{genome_id}/read_processing/bracken/{genome_id}.tsv")
+    report: MgapPath = MgapPath("{sample}/read_processing/bracken/{prefix}.tsv", optional=True)
     columns: BrackenColumns = BrackenColumns()
     level_species: str = "S"
 
     @property
     def table(self) -> Table:
         return Table(self.report, _columns(self.columns))
+
+
+@dataclass(frozen=True)
+class FastpLayout:
+    """Illumina read trimming by fastp; optional, not read by the platform yet."""
+
+    tool: str = "fastp"
+    process: str = "GENE2DIS_MGAP:MGAP:ILLUMINA:FASTP"
+    json: MgapPath = MgapPath(
+        "{sample}/read_processing/fastp/{prefix}.fastp.json", optional=True, platform=_ILLUMINA
+    )
+    key_summary: str = "summary"
+    key_version: str = "fastp_version"
+    key_sequencing: str = "sequencing"
+    key_before: str = "before_filtering"
+    key_after: str = "after_filtering"
+    key_filtering: str = "filtering_result"
+    key_command: str = "command"
+    summary_keys: tuple[str, ...] = (
+        "total_reads", "total_bases", "q20_bases", "q30_bases", "q20_rate", "q30_rate",
+        "read1_mean_length", "read2_mean_length", "gc_content",
+    )  # fmt: skip
+    filtering_keys: tuple[str, ...] = (
+        "passed_filter_reads", "low_quality_reads", "too_many_N_reads", "too_short_reads",
+        "too_long_reads",
+    )  # fmt: skip
+
+
+@dataclass(frozen=True)
+class FastplongLayout:
+    """Nanopore read filtering by fastplong; optional, not read by the platform yet.
+
+    The JSON report has ``summary`` (with ``fastplong_version``,
+    ``before_filtering`` and ``after_filtering``), ``filtering_result``,
+    ``adapter_cutting``, ``read_before_filtering``, ``read_after_filtering``
+    and ``command``. The process name is provisional.
+    """
+
+    tool: str = "fastplong"
+    process: str = "GENE2DIS_MGAP:MGAP:NANOPORE:FASTPLONG"
+    json: MgapPath = MgapPath(
+        "{sample}/read_processing/fastplong/{prefix}.fastplong.json", optional=True, platform=_ONT
+    )
+    log: MgapPath = MgapPath(
+        "{sample}/read_processing/fastplong/{prefix}.fastplong.log", optional=True, platform=_ONT
+    )
+    key_summary: str = "summary"
+    key_version: str = "fastplong_version"
+    key_before: str = "before_filtering"
+    key_after: str = "after_filtering"
+    key_filtering: str = "filtering_result"
+    key_adapter: str = "adapter_cutting"
+    key_command: str = "command"
+    summary_keys: tuple[str, ...] = (
+        "total_reads", "total_bases", "q20_bases", "q30_bases", "q20_rate", "q30_rate",
+        "read_mean_length", "gc_content",
+    )  # fmt: skip
+    filtering_keys: tuple[str, ...] = (
+        "passed_filter_reads", "low_quality_reads", "too_many_N_reads", "too_short_reads",
+        "too_long_reads",
+    )  # fmt: skip
 
 
 # Typing ------------------------------------------------------------------------------------------
@@ -335,7 +441,7 @@ class MlstColumns:
 class MlstLayout:
     tool: str = "mlst"
     process: str = "GENE2DIS_MGAP:MGAP:MLST"
-    report: MgapPath = MgapPath("{genome_id}/annotation/mlst/{genome_id}.tsv")
+    report: MgapPath = MgapPath("{sample}/annotation/mlst/{prefix}.tsv")
     columns: MlstColumns = MlstColumns()
     # Allele columns follow ST, written gene(allele), for example gapA(2).
     allele: str = "{gene}({allele})"
@@ -421,10 +527,32 @@ class KleborateLayout:
     tool: str = "kleborate"
     process: str = "GENE2DIS_MGAP:MGAP:KLEBSIELLA:KLEBORATE"
     report: MgapPath = MgapPath(
-        "{genome_id}/annotation/kleborate/klebsiella_pneumo_complex_output.txt", optional=True
+        "{sample}/annotation/kleborate/klebsiella_pneumo_complex_output.txt", optional=True
+    )
+    hamronization: MgapPath = MgapPath(
+        "{sample}/annotation/kleborate/klebsiella_pneumo_complex_hAMRonization_output.txt",
+        optional=True,
     )
     columns: KleborateColumns = KleborateColumns()
     missing: str = "-"
+    # hAMRonization export of the resistance calls, one row per gene.
+    hamronization_columns: tuple[str, ...] = (
+        "Input_file_name", "Gene_symbol", "Mutation", "Genetic_variation_type", "Drug_class",
+        "Input_sequence_ID", "Input_gene_length", "Input_gene_start", "Input_gene_stop",
+        "Reference_gene_length", "Reference_gene_start", "Reference_gene_stop",
+        "Sequence_identity", "Coverage", "Reference_accession", "Strand_orientation",
+        "Software_name", "Software_version", "Reference_database_name",
+        "Reference_database_version", "Input_protein_length", "Reference_protein_length",
+        "Input_protein_start", "Input_protein_stop", "Antimicrobial_agent", "Coverage_depth",
+        "Coverage_ratio", "Predicted_phenotype", "predicted_phenotype_confidence_level",
+        "Reference_protein_start", "Reference_protein_stop", "Resistance_mechanism",
+    )  # fmt: skip
+    hamronization_presence: str = "Gene presence detected"
+    hamronization_software: str = "Kleborate"
+
+    @property
+    def hamronization_table(self) -> Table:
+        return Table(self.hamronization, self.hamronization_columns)
 
     @property
     def table(self) -> Table:
@@ -461,7 +589,7 @@ class SistrLayout:
     tool: str = "sistr"
     process: str = "GENE2DIS_MGAP:MGAP:SALMONELLA:SISTR"
     report: MgapPath = MgapPath(
-        "{genome_id}/annotation/sistr/{genome_id}.tab", provisional=True, optional=True
+        "{sample}/annotation/sistr/{prefix}.tab", provisional=True, optional=True
     )
     columns: SistrColumns = SistrColumns()
 
@@ -497,7 +625,7 @@ class SccmecLayout:
     tool: str = "sccmec"
     process: str = "GENE2DIS_MGAP:MGAP:STAPHYLOCOCCUS:SCCMEC"
     report: MgapPath = MgapPath(
-        "{genome_id}/annotation/sccmec/{genome_id}.tsv", provisional=True, optional=True
+        "{sample}/annotation/sccmec/{prefix}.tsv", provisional=True, optional=True
     )
     columns: SccmecColumns = SccmecColumns()
 
@@ -632,14 +760,21 @@ class BaktaLayout:
 
     tool: str = "bakta"
     process: str = "GENE2DIS_MGAP:MGAP:BAKTA"
-    tsv: MgapPath = MgapPath("{genome_id}/annotation/bakta/{genome_id}.tsv")
-    gff3: MgapPath = MgapPath("{genome_id}/annotation/bakta/{genome_id}.gff3")
-    gbff: MgapPath = MgapPath("{genome_id}/annotation/bakta/{genome_id}.gbff")
-    faa: MgapPath = MgapPath("{genome_id}/annotation/bakta/{genome_id}.faa")
-    ffn: MgapPath = MgapPath("{genome_id}/annotation/bakta/{genome_id}.ffn")
-    fna: MgapPath = MgapPath("{genome_id}/annotation/bakta/{genome_id}.fna")
-    summary: MgapPath = MgapPath("{genome_id}/annotation/bakta/{genome_id}.txt")
-    versions: MgapPath = MgapPath("{genome_id}/annotation/bakta/versions.yml")
+    directory: MgapPath = MgapPath("{sample}/annotation/bakta")
+    tsv: MgapPath = MgapPath("{sample}/annotation/bakta/{prefix}.tsv")
+    gff3: MgapPath = MgapPath("{sample}/annotation/bakta/{prefix}.gff3")
+    gbff: MgapPath = MgapPath("{sample}/annotation/bakta/{prefix}.gbff")
+    embl: MgapPath = MgapPath("{sample}/annotation/bakta/{prefix}.embl")
+    faa: MgapPath = MgapPath("{sample}/annotation/bakta/{prefix}.faa")
+    ffn: MgapPath = MgapPath("{sample}/annotation/bakta/{prefix}.ffn")
+    fna: MgapPath = MgapPath("{sample}/annotation/bakta/{prefix}.fna")
+    summary: MgapPath = MgapPath("{sample}/annotation/bakta/{prefix}.txt")
+    hypotheticals_tsv: MgapPath = MgapPath("{sample}/annotation/bakta/{prefix}.hypotheticals.tsv")
+    hypotheticals_faa: MgapPath = MgapPath("{sample}/annotation/bakta/{prefix}.hypotheticals.faa")
+    versions: MgapPath = MgapPath("{sample}/annotation/bakta/versions.yml")
+    # The summary is the only .txt in the directory; resolve_prefix takes its stem.
+    summary_suffix: str = ".txt"
+    hypotheticals_marker: str = ".hypotheticals."
     tsv_columns: BaktaTsvColumns = BaktaTsvColumns()
     feature_types: BaktaFeatureTypes = BaktaFeatureTypes()
     summary_keys: BaktaSummaryKeys = BaktaSummaryKeys()
@@ -659,13 +794,43 @@ class BaktaLayout:
     software_re: re.Pattern[str] = re.compile(r"v(?P<version>[0-9.]+)")
     # Contig names Bakta assigns, and the description of each .fna record.
     contig_name: str = "contig_{index}"
-    fna_description: str = "[gcode={gcode}] [topology={topology}]"
-    fna_description_re: re.Pattern[str] = re.compile(
-        r"\[gcode=(?P<gcode>\d+)\] \[topology=(?P<topology>\w+)\]"
+    # .fna descriptions. Drafts carry gcode and topology; complete replicons
+    # add completeness and either location (chromosome) or plasmid-name.
+    fna_description_draft: str = "[gcode={gcode}] [topology={topology}]"
+    fna_description_chromosome: str = (
+        "[gcode={gcode}] [completeness=complete] [topology=circular] [location=chromosome]"
     )
+    fna_description_plasmid: str = (
+        "[gcode={gcode}] [completeness=complete] [topology=circular] [plasmid-name={name}]"
+    )
+    fna_tag_re: re.Pattern[str] = re.compile(r"\[(?P<key>[A-Za-z-]+)=(?P<value>[^\]]*)\]")
+    tag_gcode: str = "gcode"
+    tag_completeness: str = "completeness"
+    tag_topology: str = "topology"
+    tag_location: str = "location"
+    tag_plasmid_name: str = "plasmid-name"
+    completeness_complete: str = "complete"
+    location_chromosome: str = "chromosome"
+    plasmid_name: str = "unnamed{index}"
     topology_linear: str = "linear"
     topology_circular: str = "circular"
     gcode: int = 11
+    # .gbff DEFINITION lines (without the final period Biopython adds) and
+    # divisions; complete replicons also get a /plasmid qualifier on source.
+    gbff_definition_draft: str = "{contig}, whole genome shotgun sequence"
+    gbff_definition_chromosome: str = "chromosome, complete genome"
+    gbff_definition_plasmid: str = "plasmid {name}, complete sequence"
+    gbff_division_draft: str = "UNK"
+    gbff_division_complete: str = "BCT"
+    # The .hypotheticals.tsv starts with these comment lines, then its header.
+    hypotheticals_comment_lines: tuple[str, ...] = (
+        "#Annotated with Bakta v{software}, https://github.com/oschwengers/bakta",
+        "#Database v{database}, https://doi.org/10.5281/zenodo.4247252",
+    )
+    hypotheticals_columns: tuple[str, ...] = (
+        "Sequence Id", "Start", "Stop", "Strand", "Locus Tag", "Mol Weight [kDa]",
+        "Iso El. Point", "Pfam hits", "Dbxrefs",
+    )  # fmt: skip
     # Strands in the .tsv: "+", "-", "?" (oriC, oriT) and "." (assembly gaps).
     strands: tuple[str, ...] = ("+", "-", "?", ".")
     # .faa and .ffn record descriptions are "<locus_tag> <product>".
@@ -722,6 +887,16 @@ class BaktaLayout:
             comment_prefix="# ",
         )
 
+    @property
+    def hypotheticals_table(self) -> Table:
+        return Table(
+            self.hypotheticals_tsv,
+            self.hypotheticals_columns,
+            header=HeaderStyle.AFTER_COMMENTS,
+            header_prefix=self.tsv_header_prefix,
+            comment_prefix="#",
+        )
+
 
 @dataclass(frozen=True)
 class AmrFinderColumns:
@@ -764,15 +939,15 @@ class AmrFinderLayout:
     tool: str = "amrfinderplus"
     process: str = "GENE2DIS_MGAP:MGAP:AMRFINDERPLUS_RUN"
     database_key: str = "amrfinderplus-database"
-    report: MgapPath = MgapPath("{genome_id}/annotation/amrfinder/{genome_id}.tsv")
-    mutations: MgapPath = MgapPath("{genome_id}/annotation/amrfinder/{genome_id}-mutations.tsv")
+    report: MgapPath = MgapPath("{sample}/annotation/amrfinder/{prefix}.tsv")
+    mutations: MgapPath = MgapPath("{sample}/annotation/amrfinder/{prefix}-mutations.tsv")
     # Provisional. mgap records the AMRFinderPlus database version only in the
     # run-level software_versions.yml; this per-genome file (nf-core
     # versions.yml format, like the Bakta one) is how the synthetic generator
     # represents genomes annotated with different database versions. See
     # README "Annotation versions" and the milestone 0 report.
     versions: MgapPath = MgapPath(
-        "{genome_id}/annotation/amrfinder/versions.yml", provisional=True, optional=True
+        "{sample}/annotation/amrfinder/versions.yml", provisional=True, optional=True
     )
     columns: AmrFinderColumns = AmrFinderColumns()
     missing: str = "NA"
@@ -850,8 +1025,8 @@ class RgiLayout:
 
     tool: str = "rgi"
     process: str = "GENE2DIS_MGAP:MGAP:RGI_MAIN"
-    report: MgapPath = MgapPath("{genome_id}/annotation/rgi/{genome_id}.txt")
-    json: MgapPath = MgapPath("{genome_id}/annotation/rgi/{genome_id}.json")
+    report: MgapPath = MgapPath("{sample}/annotation/rgi/{prefix}.txt", optional=True)
+    json: MgapPath = MgapPath("{sample}/annotation/rgi/{prefix}.json", optional=True)
     columns: RgiColumns = RgiColumns()
     orf_name: str = "{contig}_{orf}"
     orf_id: str = (
@@ -913,11 +1088,68 @@ class GenomadLayout:
     tool: str = "genomad"
     process: str = "GENE2DIS_MGAP:MGAP:GENOMAD"
     virus_summary: MgapPath = MgapPath(
-        "{genome_id}/annotation/genomad/{genome_id}_summary/{genome_id}_virus_summary.tsv"
+        "{sample}/annotation/genomad/{sample}_summary/{sample}_virus_summary.tsv"
     )
     plasmid_summary: MgapPath = MgapPath(
-        "{genome_id}/annotation/genomad/{genome_id}_summary/{genome_id}_plasmid_summary.tsv"
+        "{sample}/annotation/genomad/{sample}_summary/{sample}_plasmid_summary.tsv"
     )
+    # Further geNomad outputs, not read by the platform.
+    virus_genes: MgapPath = MgapPath(
+        "{sample}/annotation/genomad/{sample}_summary/{sample}_virus_genes.tsv"
+    )
+    plasmid_genes: MgapPath = MgapPath(
+        "{sample}/annotation/genomad/{sample}_summary/{sample}_plasmid_genes.tsv"
+    )
+    virus_fna: MgapPath = MgapPath(
+        "{sample}/annotation/genomad/{sample}_summary/{sample}_virus.fna.gz"
+    )
+    plasmid_fna: MgapPath = MgapPath(
+        "{sample}/annotation/genomad/{sample}_summary/{sample}_plasmid.fna.gz"
+    )
+    virus_proteins: MgapPath = MgapPath(
+        "{sample}/annotation/genomad/{sample}_summary/{sample}_virus_proteins.faa.gz"
+    )
+    plasmid_proteins: MgapPath = MgapPath(
+        "{sample}/annotation/genomad/{sample}_summary/{sample}_plasmid_proteins.faa.gz"
+    )
+    aggregated: MgapPath = MgapPath(
+        "{sample}/annotation/genomad/{sample}_aggregated_classification/"
+        "{sample}_aggregated_classification.tsv"
+    )
+    provirus_aggregated: MgapPath = MgapPath(
+        "{sample}/annotation/genomad/{sample}_aggregated_classification/"
+        "{sample}_provirus_aggregated_classification.tsv"
+    )
+    taxonomy: MgapPath = MgapPath(
+        "{sample}/annotation/genomad/{sample}_annotate/{sample}_taxonomy.tsv"
+    )
+    provirus: MgapPath = MgapPath(
+        "{sample}/annotation/genomad/{sample}_find_proviruses/{sample}_provirus.tsv"
+    )
+    marker: MgapPath = MgapPath(
+        "{sample}/annotation/genomad/{sample}_marker_classification/"
+        "{sample}_marker_classification.tsv"
+    )
+    provirus_marker: MgapPath = MgapPath(
+        "{sample}/annotation/genomad/{sample}_marker_classification/"
+        "{sample}_provirus_marker_classification.tsv"
+    )
+    classification_columns: tuple[str, ...] = (
+        "seq_name", "chromosome_score", "plasmid_score", "virus_score",
+    )  # fmt: skip
+    taxonomy_columns: tuple[str, ...] = (
+        "seq_name", "n_genes_with_taxonomy", "agreement", "taxid", "lineage",
+    )  # fmt: skip
+    provirus_columns: tuple[str, ...] = (
+        "seq_name", "source_seq", "start", "end", "length", "n_genes", "v_vs_c_score",
+        "in_seq_edge", "integrases",
+    )  # fmt: skip
+    genes_columns: tuple[str, ...] = (
+        "gene", "start", "end", "length", "strand", "gc_content", "genetic_code", "rbs_motif",
+        "marker", "evalue", "bitscore", "uscg", "plasmid_hallmark", "virus_hallmark", "taxid",
+        "taxname", "annotation_conjscan", "annotation_amr", "annotation_accessions",
+        "annotation_description",
+    )  # fmt: skip
     virus_columns: GenomadVirusColumns = GenomadVirusColumns()
     plasmid_columns: GenomadPlasmidColumns = GenomadPlasmidColumns()
     # A provirus is named <contig>|provirus_<start>_<end> with coordinates
@@ -1014,12 +1246,12 @@ class MobSuiteLayout:
 
     tool: str = "mobsuite"
     process: str = "GENE2DIS_MGAP:MGAP:MOBSUITE_RECON"
-    directory: MgapPath = MgapPath("{genome_id}/annotation/mobsuite", optional=True)
+    directory: MgapPath = MgapPath("{sample}/annotation/mobsuite", optional=True)
     contig_report: MgapPath = MgapPath(
-        "{genome_id}/annotation/mobsuite/contig_report.txt", optional=True
+        "{sample}/annotation/mobsuite/contig_report.txt", optional=True
     )
     mobtyper_results: MgapPath = MgapPath(
-        "{genome_id}/annotation/mobsuite/mobtyper_results.txt", optional=True
+        "{sample}/annotation/mobsuite/mobtyper_results.txt", optional=True
     )
     contig_report_columns: MobContigReportColumns = MobContigReportColumns()
     mobtyper_columns: MobTyperColumns = MobTyperColumns()
@@ -1027,7 +1259,7 @@ class MobSuiteLayout:
     molecule_plasmid: str = "plasmid"
     circularity_not_tested: str = "not tested"
     mobility_values: tuple[str, ...] = ("conjugative", "mobilizable", "non-mobilizable")
-    mobtyper_sample_id: str = "{genome_id}:{cluster}"
+    mobtyper_sample_id: str = "{sample_id}:{cluster}"
     list_separator: str = ","
     missing: str = "-"
 
@@ -1064,6 +1296,8 @@ class PipelineInfoLayout:
 # Module instances --------------------------------------------------------------------------------
 
 SPADES = SpadesLayout()
+FASTP = FastpLayout()
+FASTPLONG = FastplongLayout()
 LONG_READ = LongReadLayout()
 CHECKM2 = CheckM2Layout()
 QUAST = QuastLayout()
@@ -1082,8 +1316,8 @@ MOBSUITE = MobSuiteLayout()
 PIPELINE_INFO = PipelineInfoLayout()
 
 MODULES: tuple[object, ...] = (
-    SPADES, LONG_READ, CHECKM2, QUAST, KRAKEN2, BRACKEN, MLST, KLEBORATE, SISTR, SCCMEC,
-    GTDBTK, BAKTA, AMRFINDERPLUS, RGI, GENOMAD, MOBSUITE, PIPELINE_INFO,
+    SPADES, LONG_READ, CHECKM2, QUAST, KRAKEN2, BRACKEN, FASTP, FASTPLONG, MLST, KLEBORATE,
+    SISTR, SCCMEC, GTDBTK, BAKTA, AMRFINDERPLUS, RGI, GENOMAD, MOBSUITE, PIPELINE_INFO,
 )  # fmt: skip
 
 
@@ -1121,6 +1355,50 @@ def software_version_keys() -> dict[str, str]:
     return out
 
 
+# Sample, prefix and platform ---------------------------------------------------------------------
+
+
+def resolve_prefix(results_dir: Path, sample: str) -> str:
+    """The file stem of ``sample``: the stem of its single Bakta summary, else the sample.
+
+    ``SCL29833`` gives ``SCL29833``; ``ont_SCL30014`` gives ``ont_SCL30014_``
+    because its Bakta files are ``ont_SCL30014_.txt`` and so on.
+    """
+    directory = BAKTA.directory.resolve(results_dir, sample)
+    if directory.is_dir():
+        summaries = sorted(
+            p.name
+            for p in directory.iterdir()
+            if p.is_file()
+            and p.name.endswith(BAKTA.summary_suffix)
+            and BAKTA.hypotheticals_marker not in p.name
+        )
+        if len(summaries) == 1:
+            return summaries[0][: -len(BAKTA.summary_suffix)]
+    return sample
+
+
+def detect_platform(results_dir: Path, sample: str) -> str | None:
+    """``ont`` for an Autocycler or Dnaapler assembly, ``illumina`` for SPAdes, else None."""
+    if LONG_READ.autocycler_dir.resolve(results_dir, sample).is_dir():
+        return PLATFORM_ONT
+    if LONG_READ.dnaapler_dir.resolve(results_dir, sample).is_dir():
+        return PLATFORM_ONT
+    prefix = resolve_prefix(results_dir, sample)
+    spades = (SPADES.scaffolds, SPADES.contigs, SPADES.graph, SPADES.log)
+    if any(p.resolve(results_dir, sample, prefix).is_file() for p in spades):
+        return PLATFORM_ILLUMINA
+    return None
+
+
+def parse_fna_header(header: str) -> tuple[str, dict[str, str]]:
+    """Split a Bakta ``.fna`` header into the contig id and its bracketed tags."""
+    text = header[1:] if header.startswith(">") else header
+    contig, _, rest = text.strip().partition(" ")
+    tags = {m.group("key"): m.group("value") for m in BAKTA.fna_tag_re.finditer(rest)}
+    return contig, tags
+
+
 # Differences from contract §4.1 ------------------------------------------------------------------
 
 
@@ -1135,94 +1413,116 @@ CONTRACT_DIFFERENCES: tuple[ContractDifference, ...] = (
     ContractDifference(
         "All modules",
         "paths relative to the results directory, module files named by tool",
-        "per-genome files under <genome_id>/annotation/<tool>/, <genome_id>/assemblies/, "
-        "<genome_id>/read_processing/<tool>/ and <genome_id>/qc/quast/",
+        "per-genome files under <sample>/annotation/<tool>/, <sample>/assemblies/, "
+        "<sample>/read_processing/<tool>/ and <sample>/qc/quast/",
+    ),
+    ContractDifference(
+        "Sample names (§3.1)",
+        "genome_id is the sample name in mgap",
+        "the sample directory may differ from genome_id (ont_SCL30014 for SCL30014), and most "
+        "file stems carry a further prefix (ont_SCL30014_); names inside the reports come from "
+        "the read files (SCL30014_nanopore, SCL29833.scaffolds)",
     ),
     ContractDifference(
         "Assembly",
-        "assembly FASTA; assembler info or GFA for circularity; contig_id as in the assembly "
-        "FASTA and in Bakta (§3.2)",
-        "SPAdes <id>.contigs.fa.gz, <id>.scaffolds.fa.gz, <id>.assembly.gfa.gz (no "
-        "circularity in the GFA); FASTA names are NODE_k_length_L_cov_C while Bakta renames "
-        "contigs to contig_k and drops those under 200 bp, so the two names differ; Bakta "
-        ".fna headers carry [topology=linear|circular]",
+        "Flye, SPAdes, Autocycler and Dnaapler; assembly FASTA; assembler info or GFA for "
+        "circularity; contig_id as in the assembly FASTA and in Bakta (§3.2)",
+        "Illumina: SPAdes <p>.contigs.fa.gz, <p>.scaffolds.fa.gz, <p>.assembly.gfa.gz under "
+        "assemblies/, with NODE_k_length_L_cov_C names. Nanopore: assemblies/autocycler/<p>.fasta "
+        "and <p>.gfa plus genome_size/<s>_genome_size.txt, and assemblies/dnaapler/<p>.fasta and "
+        "<s>_reoriented.gfa, uncompressed, headers 'k length=L circular=true'; no Flye. Bakta "
+        "renames contigs to contig_k and drops those under 200 bp, so assembler and Bakta names "
+        "differ; topology and completeness come from the Bakta .fna header tags on every "
+        "platform",
+    ),
+    ContractDifference(
+        "Read QC (not listed)",
+        "not listed",
+        "fastp (Illumina) and fastplong (nanopore) under read_processing/, both optional",
     ),
     ContractDifference(
         "CheckM2",
         "quality_report.tsv",
-        "<id>/annotation/checkm2/<id>_checkm2_report.tsv; Name is <id>.scaffolds",
+        "<s>/annotation/checkm2/<s>_checkm2_report.tsv; Name is the read-file stem",
     ),
     ContractDifference(
         "Kraken2 / Bracken",
         "report files",
-        "<id>/read_processing/kraken2/<id>.kraken2.report.txt (no header) and "
-        "<id>/read_processing/bracken/<id>.tsv (species-level estimates)",
+        "<s>/read_processing/kraken2/<p>.kraken2.report.txt (no header) on every platform; "
+        "<s>/read_processing/bracken/<p>.tsv is optional and absent from the nanopore run",
     ),
     ContractDifference(
         "MLST",
         "mlst.tsv",
-        "<id>/annotation/mlst/<id>.tsv, one line, no header; FILE is <id>.scaffolds.fa.gz",
+        "<s>/annotation/mlst/<p>.tsv, one line, no header; FILE is the assembly file name "
+        "(SCL29833.scaffolds.fa.gz, SCL30014_nanopore.fasta)",
     ),
     ContractDifference(
         "GTDB-Tk",
         "gtdbtk.bac120.summary.tsv",
-        "absent from the example (layout provisional, run-level gtdbtk/)",
+        "absent from both examples (layout provisional, run-level gtdbtk/)",
     ),
     ContractDifference(
         "Bakta",
         "<id>.tsv, .gff3, .gbff, .faa, .ffn, .txt",
-        "as stated, under <id>/annotation/bakta/, plus .fna, .embl, .hypotheticals.* and a "
-        "per-genome versions.yml (software version only); the database version is in the "
-        ".txt and .tsv headers; .tsv types include assembly_gap (not gap) and sorf; strands "
-        "include ? (oriC, oriT) and . (gaps)",
+        "under <s>/annotation/bakta/ as <p>.tsv and so on, plus .fna, .embl, "
+        ".hypotheticals.* and a versions.yml (software version only); the database version is "
+        "in the .txt and .tsv headers; .fna headers carry [gcode] [topology] and, for complete "
+        "replicons, [completeness=complete] and [location=chromosome] or [plasmid-name=...]; "
+        ".tsv types include assembly_gap (not gap) and sorf; strands include ? (oriC, oriT) "
+        "and . (gaps)",
     ),
     ContractDifference(
         "AMRFinderPlus",
         "<id>.amrfinder.tsv, rows of type gene and point mutation",
-        "<id>/annotation/amrfinder/<id>.tsv (Subtype POINT rows, element symbol "
-        "<gene>_<variant>) and <id>-mutations.tsv (--mutation_all, same columns, including "
+        "<s>/annotation/amrfinder/<p>.tsv (Subtype POINT rows, element symbol "
+        "<gene>_<variant>) and <p>-mutations.tsv (--mutation_all, same columns, including "
         "[WILDTYPE] and [UNKNOWN] rows); Protein id is the Bakta locus tag or NA",
     ),
     ContractDifference(
         "RGI",
         "<id>.rgi.txt",
-        "<id>/annotation/rgi/<id>.txt and <id>.json, run on the SPAdes scaffolds with SPAdes "
-        "contig names and RGI's own ORFs, not on Bakta contigs",
+        "<s>/annotation/rgi/<p>.txt and <p>.json, optional on any platform (absent from the "
+        "nanopore run); on Illumina it runs on the SPAdes scaffolds with SPAdes contig names "
+        "and RGI's own ORFs, not on Bakta contigs",
     ),
     ContractDifference(
         "geNomad",
         "<id>_summary/*_virus_summary.tsv, *_plasmid_summary.tsv",
-        "as stated, under <id>/annotation/genomad/",
+        "as stated, under <s>/annotation/genomad/, named from the sample",
     ),
     ContractDifference(
         "MOB-suite",
         "contig_report.txt, mobtyper_results.txt",
-        "under <id>/annotation/mobsuite/; contig_id carries ' [gcode=11] [topology=linear]'; "
-        "mobtyper_results.txt only when a plasmid is reconstructed; molecule_type is "
-        "chromosome or plasmid only (no unclassified)",
+        "optional on any platform (absent from the nanopore run); under "
+        "<s>/annotation/mobsuite/; contig_id carries the Bakta .fna tags; mobtyper_results.txt "
+        "only when a plasmid is reconstructed; molecule_type is chromosome or plasmid only",
     ),
     ContractDifference(
         "Kleborate, sccmec, SISTR",
         "tool-specific TSV",
-        "Kleborate 3 at <id>/annotation/kleborate/klebsiella_pneumo_complex_output.txt "
-        "(117 trimmed columns); sccmec and SISTR absent from the example",
+        "Kleborate 3 at <s>/annotation/kleborate/klebsiella_pneumo_complex_output.txt "
+        "(117 trimmed columns, strain is the read-file stem); sccmec and SISTR absent from both "
+        "examples",
     ),
     ContractDifference(
         "QUAST",
         "not listed",
-        "<id>/qc/quast/<id>.tsv (transposed report)",
+        "<s>/qc/quast/<p>.tsv (transposed report)",
     ),
     ContractDifference(
         "Pipeline info",
         "pipeline_info/software_versions.yml, versions attached to each genome",
-        "run-level only; AMRFinderPlus database version present, Bakta database version "
-        "absent (per genome in Bakta .txt), no database versions for CheckM2, geNomad, "
-        "Kraken2, MOB-suite or RGI; rgi version empty",
+        "run-level only, and absent from the nanopore example; AMRFinderPlus database version "
+        "present, Bakta database version absent (per genome in Bakta .txt), no database "
+        "versions for CheckM2, geNomad, Kraken2, MOB-suite or RGI; rgi version empty",
     ),
 )
 
 
 # Contract §4.1 row names the layout covers, for the test that every row is modeled.
 CONTRACT_MODULE_ROWS: tuple[str, ...] = tuple(
-    d.module for d in CONTRACT_DIFFERENCES if d.module not in {"All modules", "QUAST"}
+    d.module
+    for d in CONTRACT_DIFFERENCES
+    if d.module not in {"All modules", "QUAST", "Sample names (§3.1)", "Read QC (not listed)"}
 )

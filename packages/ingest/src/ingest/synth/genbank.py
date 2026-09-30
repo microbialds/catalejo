@@ -70,45 +70,70 @@ def _features(f: Feature) -> list[SeqFeature]:
     return out
 
 
-def gbff_text(genome: Genome, software: str, database: str) -> str:
-    """The .gbff of ``genome`` as Bakta writes it (one record per contig)."""
+# EMBL divisions as Bakta writes them (PRO for complete replicons, UNC for drafts).
+EMBL_DIVISION_COMPLETE = "PRO"
+EMBL_DIVISION_DRAFT = "UNC"
+
+
+def _records(genome: Genome, software: str, database: str, embl: bool) -> list[SeqRecord]:
+    b = L.BAKTA
     records: list[SeqRecord] = []
     comment = "\n".join(
         [
             "Annotated with Bakta",
             f"Software: v{software}",
-            f"Database: v{database}, {L.BAKTA.database_type}",
-            f"DOI: {L.BAKTA.doi}",
-            f"URL: {L.BAKTA.url}",
+            f"Database: v{database}, {b.database_type}",
+            f"DOI: {b.doi}",
+            f"URL: {b.url}",
         ]
     )
     for c in genome.contigs:
-        topology = L.BAKTA.topology_circular if c.circular else L.BAKTA.topology_linear
+        topology = b.topology_circular if c.circular else b.topology_linear
+        if not c.circular:
+            definition = b.gbff_definition_draft.format(contig=c.bakta_id)
+            division = EMBL_DIVISION_DRAFT if embl else b.gbff_division_draft
+        else:
+            if c.plasmid_name:
+                definition = b.gbff_definition_plasmid.format(name=c.plasmid_name)
+            else:
+                definition = b.gbff_definition_chromosome
+            division = EMBL_DIVISION_COMPLETE if embl else b.gbff_division_complete
         record = SeqRecord(
             Seq(c.seq),
             id=c.bakta_id,
             name=c.bakta_id,
-            description=f"{c.bakta_id}, whole genome shotgun sequence",
+            description=definition,
             annotations={  # type: ignore[arg-type]
                 "molecule_type": "DNA",
                 "topology": topology,
-                "data_file_division": "UNK",
+                "data_file_division": division,
                 "date": LOCUS_DATE,
                 "accessions": [c.bakta_id],
                 "sequence_version": 1,
                 "comment": comment,
             },
         )
+        source: dict[str, list[str]] = {"mol_type": ["genomic DNA"]}
+        if c.plasmid_name:
+            source["plasmid"] = [c.plasmid_name]
         record.features.append(
-            SeqFeature(
-                FeatureLocation(0, c.length, strand=1),
-                type="source",
-                qualifiers={"mol_type": ["genomic DNA"]},
-            )
+            SeqFeature(FeatureLocation(0, c.length, strand=1), type="source", qualifiers=source)
         )
         for f in c.features:
             record.features.extend(_features(f))
         records.append(record)
+    return records
+
+
+def gbff_text(genome: Genome, software: str, database: str) -> str:
+    """The .gbff of ``genome`` as Bakta writes it (one record per contig)."""
     buffer = io.StringIO()
-    seqio_write(records, buffer, "genbank")
+    seqio_write(_records(genome, software, database, embl=False), buffer, "genbank")
+    return buffer.getvalue()
+
+
+def embl_text(genome: Genome, software: str, database: str) -> str:
+    """The .embl of ``genome`` (one record per contig)."""
+    buffer = io.StringIO()
+    seqio_write(_records(genome, software, database, embl=True), buffer, "embl")
     return buffer.getvalue()

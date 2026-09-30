@@ -9,17 +9,25 @@ gzip members with mtime 0 and no file name, and a fixed order for every list.
 
 from __future__ import annotations
 
-import gzip
-import io
 import random
-from collections.abc import Iterable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
-from pathlib import Path
 
 from ingest import mgap_layout as L
 from ingest.synth.build import CODING_TYPES, GAP_LENGTH, Contig, Feature, Genome
 from ingest.synth.catalog import DETERMINANTS, PLASMIDS, VIRUS_TAXONOMY, SpeciesSpec
+from ingest.synth.extras import write_extras
 from ingest.synth.genbank import gbff_text
+from ingest.synth.output import (
+    Output,
+    assembly_file,
+    assembly_name,
+    fasta,
+    kleborate_strain,
+    rel,
+    tsv,
+    versions_yml,
+)
 from ingest.synth.plan import (
     AMRFINDER_DB,
     AMRFINDER_VERSION,
@@ -27,7 +35,7 @@ from ingest.synth.plan import (
     GenomePlan,
     RunPlan,
 )
-from ingest.synth.sequences import gc_fraction, md5_hex, sub_rng, wrap
+from ingest.synth.sequences import gc_fraction, md5_hex, sub_rng
 
 T = L.BAKTA.feature_types
 
@@ -45,8 +53,10 @@ TOOL_VERSIONS: dict[str, str] = {
     L.MOBSUITE.tool: "3.1.9",
     L.QUAST.tool: "5.3.0",
     L.RGI.tool: "6.0.5",
-    L.LONG_READ.flye_tool: "2.9.6",
+    L.LONG_READ.autocycler_tool: "0.5.2",
     L.LONG_READ.dnaapler_tool: "1.2.0",
+    L.FASTP.tool: "1.0.1",
+    L.FASTPLONG.tool: "0.3.0",
     L.GTDBTK.tool: "2.4.1",
     L.SISTR.tool: "1.1.3",
     L.SCCMEC.tool: "1.2.0",
@@ -54,57 +64,6 @@ TOOL_VERSIONS: dict[str, str] = {
 PIPELINE_VERSION = "2.0.0"
 NEXTFLOW_VERSION = "26.04.4"
 KRAKEN2_PIGZ = ("pigz", "2.8")
-
-
-# Low-level output --------------------------------------------------------------------------------
-
-
-@dataclass
-class Output:
-    """Writes files under a results directory and counts them."""
-
-    root: Path
-    files: int = 0
-    bytes: int = 0
-
-    def text(self, relative: str, content: str) -> None:
-        self._bytes(relative, content.encode("utf-8"))
-
-    def gzip(self, relative: str, content: str) -> None:
-        buffer = io.BytesIO()
-        with gzip.GzipFile(filename="", mode="wb", fileobj=buffer, mtime=0) as fh:
-            fh.write(content.encode("utf-8"))
-        self._bytes(relative, buffer.getvalue())
-
-    def _bytes(self, relative: str, data: bytes) -> None:
-        path = self.root / relative
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(data)
-        self.files += 1
-        self.bytes += len(data)
-
-
-def tsv(header: Sequence[str] | None, rows: Iterable[Sequence[str]]) -> str:
-    lines = ["\t".join(header)] if header is not None else []
-    lines += ["\t".join(row) for row in rows]
-    return "\n".join(lines) + "\n"
-
-
-def fasta(records: Iterable[tuple[str, str]], width: int | None = 60) -> str:
-    out: list[str] = []
-    for header, seq in records:
-        out.append(f">{header}")
-        out.append(wrap(seq, width) if width else seq)
-    return "\n".join(out) + "\n"
-
-
-def versions_yml(entries: Sequence[tuple[str, Sequence[tuple[str, str]]]]) -> str:
-    """nf-core versions.yml: quoted process names mapping tools to versions."""
-    lines: list[str] = []
-    for process, tools in entries:
-        lines.append(f'"{process}":')
-        lines += [f"    {tool}: {version}" for tool, version in tools]
-    return "\n".join(lines) + "\n"
 
 
 @dataclass(frozen=True)
@@ -141,41 +100,54 @@ def _f2(x: float) -> str:
 # Assembly ----------------------------------------------------------------------------------------
 
 
-def assembly_name(plan: GenomePlan) -> str:
-    template = L.LONG_READ.assembly_name if plan.complete else L.SPADES.assembly_name
-    return template.replace(L.GENOME_ID, plan.genome_id)
+_rel = rel
 
 
-def assembly_file(plan: GenomePlan) -> str:
-    template = L.LONG_READ.assembly_file if plan.complete else L.SPADES.assembly_file
-    return template.replace(L.GENOME_ID, plan.genome_id)
+def _long_read_fasta(contigs: list[Contig], rotated: bool) -> str:
+    lr = L.LONG_READ
+    records = [
+        (
+            lr.fasta_header.format(
+                index=c.assembly_name, length=c.length, circular=lr.circular_true
+            ),
+            c.seq if rotated else c.autocycler_seq,
+        )
+        for c in contigs
+    ]
+    return fasta(records, width=None)
 
 
-def write_assembly(out: Output, g: Genome) -> None:
-    gid = g.genome_id
-    records = [(c.assembly_name, c.seq) for c in g.contigs]
+def _long_read_gfa(contigs: list[Contig], rotated: bool) -> str:
+    lr = L.LONG_READ
+    lines = [lr.gfa_header]
+    for c in contigs:
+        segment = lr.gfa_segment.format(
+            index=c.assembly_name,
+            sequence=c.seq if rotated else c.autocycler_seq,
+            depth=c.coverage,
+        )
+        if rotated and c.rotated_to:
+            segment += "\t" + lr.gfa_rotated_tag.format(gene=c.rotated_to)
+        lines.append(segment)
+        if c.circular:
+            lines += [link.format(index=c.assembly_name) for link in lr.gfa_self_links]
+    return "\n".join(lines) + "\n"
+
+
+def write_assembly(out: Output, g: Genome, rng: random.Random) -> None:
     if g.plan.complete:
         lr = L.LONG_READ
-        out.gzip(lr.flye_fasta.relative(gid), fasta(records))
-        rows = [
-            [
-                c.assembly_name,
-                str(c.length),
-                str(round(c.coverage)),
-                lr.flye_circular_yes if c.circular else lr.flye_circular_no,
-                "N",
-                "1",
-                "*",
-                str(c.index),
-            ]
-            for c in g.contigs
-        ]
-        out.text(lr.flye_info.relative(gid), tsv(lr.flye_info_table.columns, rows))
-        out.gzip(lr.dnaapler_fasta.relative(gid), fasta(records))
+        out.text(_rel(lr.autocycler_fasta, g), _long_read_fasta(g.contigs, rotated=False))
+        out.text(_rel(lr.autocycler_gfa, g), _long_read_gfa(g.contigs, rotated=False))
+        estimate = round(g.size * rng.uniform(0.99, 1.02))
+        out.text(_rel(lr.genome_size, g), f"{estimate}\n")
+        out.text(_rel(lr.dnaapler_fasta, g), _long_read_fasta(g.contigs, rotated=True))
+        out.text(_rel(lr.dnaapler_gfa, g), _long_read_gfa(g.contigs, rotated=True))
         return
+    records = [(c.assembly_name, c.seq) for c in g.contigs]
     sp = L.SPADES
-    out.gzip(sp.scaffolds.relative(gid), fasta(records))
-    out.gzip(sp.contigs.relative(gid), fasta(g.spades_contigs))
+    out.gzip(_rel(sp.scaffolds, g), fasta(records))
+    out.gzip(_rel(sp.contigs, g), fasta(g.spades_contigs))
     lines = [sp.gfa_header.format(version=TOOL_VERSIONS[sp.tool])]
     segment = 0
     paths: list[str] = []
@@ -188,9 +160,9 @@ def write_assembly(out: Output, g: Genome) -> None:
             ids.append(f"{segment}+")
             lines.append(f"S\t{segment}\t*\tLN:i:{len(part)}")
         paths.append(f"P\t{c.assembly_name}\t{','.join(ids)}\t*")
-    out.gzip(sp.graph.relative(gid), "\n".join(lines + paths) + "\n")
+    out.gzip(_rel(sp.graph, g), "\n".join(lines + paths) + "\n")
     out.text(
-        sp.log.relative(gid),
+        _rel(sp.log, g),
         f"SPAdes version: {TOOL_VERSIONS[sp.tool]}\n\n======= SPAdes pipeline finished.\n",
     )
 
@@ -213,8 +185,14 @@ def _bakta_header(plan: GenomePlan) -> list[str]:
 
 
 def _fna_header(c: Contig) -> str:
-    topology = L.BAKTA.topology_circular if c.circular else L.BAKTA.topology_linear
-    return f"{c.bakta_id} " + L.BAKTA.fna_description.format(gcode=L.BAKTA.gcode, topology=topology)
+    b = L.BAKTA
+    if not c.circular:
+        tags = b.fna_description_draft.format(gcode=b.gcode, topology=b.topology_linear)
+    elif c.plasmid_name:
+        tags = b.fna_description_plasmid.format(gcode=b.gcode, name=c.plasmid_name)
+    else:
+        tags = b.fna_description_chromosome.format(gcode=b.gcode)
+    return f"{c.bakta_id} {tags}"
 
 
 def _gff_escape(value: str) -> str:
@@ -225,11 +203,10 @@ def _gff_escape(value: str) -> str:
 
 def write_bakta(out: Output, g: Genome) -> None:
     b = L.BAKTA
-    gid = g.genome_id
     plan = g.plan
     header = _bakta_header(plan)
 
-    out.text(b.fna.relative(gid), fasta((_fna_header(c), c.seq) for c in g.contigs))
+    out.text(_rel(b.fna, g), fasta((_fna_header(c), c.seq) for c in g.contigs))
 
     rows: list[list[str]] = []
     for c in g.contigs:
@@ -249,17 +226,17 @@ def write_bakta(out: Output, g: Genome) -> None:
             )
     columns = b.tsv_table.columns
     out.text(
-        b.tsv.relative(gid),
+        _rel(b.tsv, g),
         "\n".join(header) + "\n" + tsv([b.tsv_header_prefix + columns[0], *columns[1:]], rows),
     )
 
     coding = [f for f in g.features if f.type in CODING_TYPES]
     out.text(
-        b.faa.relative(gid),
+        _rel(b.faa, g),
         fasta(((f"{f.locus_tag} {f.product}", f.protein or "") for f in coding), width=None),
     )
     out.text(
-        b.ffn.relative(gid),
+        _rel(b.ffn, g),
         fasta(
             ((f"{f.ident} {f.product}", f.seq) for f in g.features if f.type != T.gap), width=None
         ),
@@ -314,13 +291,11 @@ def write_bakta(out: Output, g: Genome) -> None:
                 )
             )
     gff.append(b.gff3_fasta_marker)
-    out.text(
-        b.gff3.relative(gid), "\n".join(gff) + "\n" + fasta((c.bakta_id, c.seq) for c in g.contigs)
-    )
+    out.text(_rel(b.gff3, g), "\n".join(gff) + "\n" + fasta((c.bakta_id, c.seq) for c in g.contigs))
 
-    out.text(b.gbff.relative(gid), gbff_text(g, plan.bakta_version, plan.bakta_db))
-    out.text(b.summary.relative(gid), _bakta_summary(g))
-    out.text(b.versions.relative(gid), versions_yml([(b.process, [(b.tool, plan.bakta_version)])]))
+    out.text(_rel(b.gbff, g), gbff_text(g, plan.bakta_version, plan.bakta_db))
+    out.text(_rel(b.summary, g), _bakta_summary(g))
+    out.text(_rel(b.versions, g), versions_yml([(b.process, [(b.tool, plan.bakta_version)])]))
 
 
 def _bakta_summary(g: Genome) -> str:
@@ -536,12 +511,11 @@ def amrfinder_rows(g: Genome, rng: random.Random) -> tuple[list[list[str]], list
 
 def write_amrfinder(out: Output, g: Genome, rng: random.Random) -> None:
     a = L.AMRFINDERPLUS
-    gid = g.genome_id
     report, mutations = amrfinder_rows(g, rng)
-    out.text(a.report.relative(gid), tsv(a.report_table.columns, report))
-    out.text(a.mutations.relative(gid), tsv(a.mutations_table.columns, mutations))
+    out.text(_rel(a.report, g), tsv(a.report_table.columns, report))
+    out.text(_rel(a.mutations, g), tsv(a.mutations_table.columns, mutations))
     entries = [(a.tool, g.plan.amrfinder_version), (a.database_key, g.plan.amrfinder_db)]
-    out.text(a.versions.relative(gid), versions_yml([(a.process, entries)]))
+    out.text(_rel(a.versions, g), versions_yml([(a.process, entries)]))
 
 
 # RGI ---------------------------------------------------------------------------------------------
@@ -609,7 +583,7 @@ def write_rgi(out: Output, g: Genome, rng: random.Random) -> None:
                     d.rgi.antibiotic,
                 ]
             )
-    out.text(r.report.relative(g.genome_id), tsv(r.table.columns, rows))
+    out.text(_rel(r.report, g), tsv(r.table.columns, rows))
 
 
 # geNomad -----------------------------------------------------------------------------------------
@@ -617,7 +591,6 @@ def write_rgi(out: Output, g: Genome, rng: random.Random) -> None:
 
 def write_genomad(out: Output, g: Genome, rng: random.Random) -> None:
     gn = L.GENOMAD
-    gid = g.genome_id
     virus: list[list[str]] = []
     plasmid: list[list[str]] = []
     for c in g.contigs:
@@ -656,8 +629,8 @@ def write_genomad(out: Output, g: Genome, rng: random.Random) -> None:
                     gn.missing,
                 ]
             )
-    out.text(gn.virus_summary.relative(gid), tsv(gn.virus_table.columns, virus))
-    out.text(gn.plasmid_summary.relative(gid), tsv(gn.plasmid_table.columns, plasmid))
+    out.text(_rel(gn.virus_summary, g), tsv(gn.virus_table.columns, virus))
+    out.text(_rel(gn.plasmid_summary, g), tsv(gn.plasmid_table.columns, plasmid))
 
 
 # MOB-suite ---------------------------------------------------------------------------------------
@@ -665,7 +638,7 @@ def write_genomad(out: Output, g: Genome, rng: random.Random) -> None:
 
 def write_mobsuite(out: Output, g: Genome) -> None:
     m = L.MOBSUITE
-    gid = g.genome_id
+    gid = g.plan.sample  # MOB-suite's sample_id; never keyed on
     rows: list[tuple[str, list[str]]] = []
     for c in g.contigs:
         spec = c.plasmid
@@ -718,9 +691,7 @@ def write_mobsuite(out: Output, g: Genome) -> None:
             ]
         rows.append((contig_id, row))
     rows.sort(key=lambda item: item[0])
-    out.text(
-        m.contig_report.relative(gid), tsv(m.contig_report_table.columns, [r for _, r in rows])
-    )
+    out.text(_rel(m.contig_report, g), tsv(m.contig_report_table.columns, [r for _, r in rows]))
     if not g.plan.plasmids:
         return
     typer_rows: list[list[str]] = []
@@ -731,7 +702,7 @@ def write_mobsuite(out: Output, g: Genome) -> None:
         rank, name = spec.host_range
         typer_rows.append(
             [
-                m.mobtyper_sample_id.format(genome_id=gid, cluster=spec.primary_cluster),
+                m.mobtyper_sample_id.format(sample_id=gid, cluster=spec.primary_cluster),
                 str(len(contigs)),
                 str(len(seq)),
                 repr(gc_fraction(seq)),
@@ -759,7 +730,7 @@ def write_mobsuite(out: Output, g: Genome) -> None:
                 m.missing,
             ]
         )
-    out.text(m.mobtyper_results.relative(gid), tsv(m.mobtyper_table.columns, typer_rows))
+    out.text(_rel(m.mobtyper_results, g), tsv(m.mobtyper_table.columns, typer_rows))
 
 
 # Quality and taxonomy ----------------------------------------------------------------------------
@@ -786,7 +757,7 @@ def write_checkm2(out: Output, g: Genome) -> None:
         str(s.largest),
         c2.notes_none,
     ]
-    out.text(c2.report.relative(g.genome_id), tsv(c2.table.columns, [row]))
+    out.text(_rel(c2.report, g), tsv(c2.table.columns, [row]))
 
 
 def write_quast(out: Output, g: Genome) -> None:
@@ -812,7 +783,7 @@ def write_quast(out: Output, g: Genome) -> None:
         f"{100000 * ns / s.total:.2f}",
     ]
     rows = [[label, value] for label, value in zip(q.table.columns, values, strict=True)]
-    out.text(q.report.relative(g.genome_id), tsv(None, rows))
+    out.text(_rel(q.report, g), tsv(None, rows))
 
 
 def _kraken_species(plan: GenomePlan) -> tuple[tuple[int, str], tuple[int, str]]:
@@ -881,7 +852,7 @@ def write_kraken(out: Output, g: Genome, rng: random.Random) -> None:
                 k2.indent * len(levels) + name,
             ]
         )
-    out.text(k2.report.relative(g.genome_id), tsv(None, rows))
+    out.text(_rel(k2.report, g), tsv(None, rows))
 
     est_top = int(classified * rng.uniform(0.95, 0.985))
     est_rel = int(classified * rng.uniform(0.002, 0.006))
@@ -905,7 +876,8 @@ def write_kraken(out: Output, g: Genome, rng: random.Random) -> None:
             f"{est_rel / classified:.5f}",
         ],
     ]
-    out.text(br.report.relative(g.genome_id), tsv(br.table.columns, b_rows))
+    if not g.plan.complete:  # Bracken is not run on the nanopore path
+        out.text(_rel(br.report, g), tsv(br.table.columns, b_rows))
 
 
 # Typing ------------------------------------------------------------------------------------------
@@ -926,7 +898,7 @@ def write_mlst(out: Output, g: Genome) -> None:
         for j, (gene, allele) in enumerate(zip(spec.mlst_genes, plan.profile.alleles, strict=True)):
             value = f"~{allele}" if plan.novel_st and j == 0 else str(allele)
             row.append(ml.allele.format(gene=gene, allele=value))
-    out.text(ml.report.relative(g.genome_id), tsv(None, [row]))
+    out.text(_rel(ml.report, g), tsv(None, [row]))
 
 
 def _typing(plan: GenomePlan) -> dict[str, str]:
@@ -947,7 +919,7 @@ def write_kleborate(out: Output, g: Genome, rng: random.Random) -> None:
     typing = _typing(plan)
     row.update(
         {
-            k.strain: plan.genome_id,
+            k.strain: kleborate_strain(plan),
             k.species: plan.conflict_species or plan.species.name,
             k.species_match: "strong",
             k.contig_count: str(s.count),
@@ -997,7 +969,7 @@ def write_kleborate(out: Output, g: Genome, rng: random.Random) -> None:
     amr = [s for s in carried if DETERMINANTS[s].type == L.AMRFINDERPLUS.type_amr]
     row[k.num_resistance_genes] = str(len(amr))
     row[k.num_resistance_classes] = str(len({DETERMINANTS[s].drug_class for s in amr}))
-    out.text(kl.report.relative(plan.genome_id), tsv(k.all, [[row[c] for c in k.all]]))
+    out.text(_rel(kl.report, g), tsv(k.all, [[row[c] for c in k.all]]))
 
 
 def write_sistr(out: Output, g: Genome, rng: random.Random) -> None:
@@ -1027,7 +999,7 @@ def write_sistr(out: Output, g: Genome, rng: random.Random) -> None:
         c.serovar_cgmlst: serovar,
     }
     columns = si.table.columns
-    out.text(si.report.relative(plan.genome_id), tsv(columns, [[values[x] for x in columns]]))
+    out.text(_rel(si.report, g), tsv(columns, [[values[x] for x in columns]]))
 
 
 def write_sccmec(out: Output, g: Genome) -> None:
@@ -1055,7 +1027,7 @@ def write_sccmec(out: Output, g: Genome) -> None:
         c.region_comment: "",
     }
     columns = sc.table.columns
-    out.text(sc.report.relative(plan.genome_id), tsv(columns, [[values[x] for x in columns]]))
+    out.text(_rel(sc.report, g), tsv(columns, [[values[x] for x in columns]]))
 
 
 def write_typing(out: Output, g: Genome, rng: random.Random) -> None:
@@ -1076,10 +1048,11 @@ def write_typing(out: Output, g: Genome, rng: random.Random) -> None:
 
 def write_genome(out: Output, g: Genome, seed: int) -> None:
     rng = sub_rng(seed, "tools", g.genome_id)
-    write_assembly(out, g)
+    write_assembly(out, g, rng)
     write_bakta(out, g)
     write_amrfinder(out, g, rng)
-    write_rgi(out, g, rng)
+    if g.plan.has_rgi:
+        write_rgi(out, g, rng)
     write_genomad(out, g, rng)
     if g.plan.has_mobsuite:
         write_mobsuite(out, g)
@@ -1088,6 +1061,7 @@ def write_genome(out: Output, g: Genome, seed: int) -> None:
     write_kraken(out, g, rng)
     write_mlst(out, g)
     write_typing(out, g, rng)
+    write_extras(out, g, sub_rng(seed, "extras", g.genome_id), TOOL_VERSIONS[L.KLEBORATE.tool])
 
 
 def write_gtdbtk(out: Output, run: RunPlan) -> None:
@@ -1138,6 +1112,8 @@ def write_software_versions(out: Output, run: RunPlan) -> None:
     """Run-level versions; the current AMRFinderPlus database is the run's."""
     genomes = run.genomes
     species = {s.typing_tool for s in run.species}
+    illumina = any(not g.complete for g in genomes)
+    nanopore = any(g.complete for g in genomes)
     entries: list[tuple[str, list[tuple[str, str]]]] = [
         (
             L.AMRFINDERPLUS.process,
@@ -1151,25 +1127,29 @@ def write_software_versions(out: Output, run: RunPlan) -> None:
     modules: list[tuple[str, str, bool]] = [
         (L.CHECKM2.process, L.CHECKM2.tool, True),
         (L.GENOMAD.process, L.GENOMAD.tool, True),
-        (L.BRACKEN.process, L.BRACKEN.tool, True),
-        (L.SPADES.process, L.SPADES.tool, any(not g.complete for g in genomes)),
-        (L.LONG_READ.flye_process, L.LONG_READ.flye_tool, any(g.complete for g in genomes)),
-        (L.LONG_READ.dnaapler_process, L.LONG_READ.dnaapler_tool, any(g.complete for g in genomes)),
+        (L.BRACKEN.process, L.BRACKEN.tool, illumina),
+        (L.FASTP.process, L.FASTP.tool, illumina),
+        (L.SPADES.process, L.SPADES.tool, illumina),
+        (L.LONG_READ.autocycler_process, L.LONG_READ.autocycler_tool, nanopore),
+        (L.LONG_READ.dnaapler_process, L.LONG_READ.dnaapler_tool, nanopore),
+        (L.FASTPLONG.process, L.FASTPLONG.tool, nanopore),
         (L.KLEBORATE.process, L.KLEBORATE.tool, L.KLEBORATE.tool in species),
         (L.SISTR.process, L.SISTR.tool, L.SISTR.tool in species),
         (L.SCCMEC.process, L.SCCMEC.tool, L.SCCMEC.tool in species),
         (L.MLST.process, L.MLST.tool, True),
         (L.MOBSUITE.process, L.MOBSUITE.tool, any(g.has_mobsuite for g in genomes)),
         (L.QUAST.process, L.QUAST.tool, True),
-        (L.RGI.process, L.RGI.tool, True),
+        (L.RGI.process, L.RGI.tool, any(g.has_rgi for g in genomes)),
         (L.GTDBTK.process, L.GTDBTK.tool, any(g.in_gtdbtk for g in genomes)),
     ]
     for process, tool, present in modules:
         if present:
             entries.append((process, [(tool, TOOL_VERSIONS[tool])]))
-    entries.append(
-        (L.KRAKEN2.process, [(L.KRAKEN2.tool, TOOL_VERSIONS[L.KRAKEN2.tool]), KRAKEN2_PIGZ])
-    )
+    kraken = [(L.KRAKEN2.tool, TOOL_VERSIONS[L.KRAKEN2.tool]), KRAKEN2_PIGZ]
+    if illumina:
+        entries.append((L.KRAKEN2.process, kraken))
+    if nanopore:
+        entries.append((L.KRAKEN2.ont_process, kraken))
     entries.sort(key=lambda e: e[0])
     pi = L.PIPELINE_INFO
     entries.append(

@@ -1,7 +1,9 @@
-"""The mgap layout module against data/mgap-example, and the single-definition rule.
+"""The mgap layout module against the real examples, and the single-definition rule.
 
-The example directory is a real mgap 2.0.0 run copied by the maintainer; it is
-ignored by git and absent in CI, where the tests that read it are skipped.
+Two real mgap 2.0.0 runs are checked: ``data/mgap-example`` (Illumina SPAdes
+drafts SCL29833 and SP10, with pipeline_info) and ``data/ont_example`` (the
+nanopore sample ont_SCL30014, genome SCL30014). Both are git-ignored and exist
+only on the maintainer's machine; in CI the tests that read them are skipped.
 """
 
 from __future__ import annotations
@@ -9,30 +11,86 @@ from __future__ import annotations
 import ast
 import gzip
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 import yaml
 
 from ingest import mgap_layout as L
+from ingest.config import load_platform
 
-EXAMPLE_GENOMES = ("SCL29833", "SP10")
+
+@dataclass(frozen=True)
+class Example:
+    name: str
+    root: Path
+    samples: tuple[str, ...]
+    platform: str
 
 
-@pytest.fixture(scope="module")
-def example(repo_root: Path) -> Path:
-    path = repo_root / "data" / "mgap-example"
-    if not path.is_dir():
+EXAMPLES: dict[str, tuple[tuple[str, ...], str]] = {
+    "mgap-example": (("SCL29833", "SP10"), L.PLATFORM_ILLUMINA),
+    "ont_example": (("ont_SCL30014",), L.PLATFORM_ONT),
+}
+
+
+def _example(repo_root: Path, name: str) -> Example:
+    root = repo_root / "data" / name
+    if not root.is_dir():
         pytest.skip(
-            "data/mgap-example is absent (it is git-ignored and exists only on the "
-            "maintainer's machine); layout checks against real mgap output are skipped"
+            f"data/{name} is absent (it is git-ignored and exists only on the maintainer's "
+            "machine); layout checks against this real mgap run are skipped"
         )
-    return path
+    samples, platform = EXAMPLES[name]
+    return Example(name, root, samples, platform)
+
+
+@pytest.fixture(params=sorted(EXAMPLES))
+def example(request: pytest.FixtureRequest, repo_root: Path) -> Example:
+    return _example(repo_root, request.param)
 
 
 def _module_is_provisional(module: object) -> bool:
     paths = [v for v in vars(module).values() if isinstance(v, L.MgapPath)]
     return bool(paths) and all(p.provisional for p in paths)
+
+
+def _module_is_nanopore_only(module: object) -> bool:
+    paths = [v for v in vars(module).values() if isinstance(v, L.MgapPath)]
+    return bool(paths) and all(p.platform == L.PLATFORM_ONT for p in paths)
+
+
+def _required(path: L.MgapPath, platform: str | None) -> bool:
+    return (
+        not path.provisional
+        and not path.optional
+        and (path.platform is None or path.platform == platform)
+    )
+
+
+def _header_line(table: L.Table, lines: list[str]) -> str:
+    marker = table.header_prefix + table.columns[0]
+    return next(line for line in lines if line.startswith(marker))
+
+
+def _header_ok(table: L.Table, lines: list[str]) -> None:
+    columns = list(table.columns)
+    match table.header:
+        case L.HeaderStyle.FIRST_LINE:
+            assert lines[0].split(table.separator) == columns
+        case L.HeaderStyle.AFTER_COMMENTS:
+            header = _header_line(table, lines)
+            assert header[len(table.header_prefix) :].split(table.separator) == columns
+            before = lines[: lines.index(header)]
+            assert all(line.startswith(table.comment_prefix) for line in before)
+        case L.HeaderStyle.NONE:
+            for line in lines:
+                if line:
+                    assert len(line.split(table.separator)) >= len(columns)
+        case L.HeaderStyle.ROW_LABELS:
+            labels = [x.split(table.separator)[0] for x in lines if x]
+            assert labels == columns
 
 
 # Internal consistency (always run) ---------------------------------------------------------
@@ -58,9 +116,16 @@ def test_contract_rows_are_modeled() -> None:
 
 
 def test_provisional_entries_are_marked() -> None:
-    for module in (L.LONG_READ, L.GTDBTK, L.SISTR, L.SCCMEC):
+    for module in (L.GTDBTK, L.SISTR, L.SCCMEC):
         assert _module_is_provisional(module), type(module).__name__
     assert L.AMRFINDERPLUS.versions.provisional
+    assert not _module_is_provisional(L.LONG_READ)
+
+
+def test_optional_modules_have_no_platform_tie() -> None:
+    for path in (L.RGI.report, L.MOBSUITE.contig_report, L.BRACKEN.report):
+        assert path.optional and path.platform is None
+    assert L.FASTP.json.optional and L.FASTPLONG.json.optional
 
 
 def test_patterns_parse_their_own_formats() -> None:
@@ -73,111 +138,212 @@ def test_patterns_parse_their_own_formats() -> None:
     assert m and m.group("gene") == "blaSHV" and m.group("variant") == "C-112T"
     m = L.MLST.allele_re.match(L.MLST.allele.format(gene="gapA", allele="~2"))
     assert m and m.group("allele") == "~2"
+    header = L.LONG_READ.fasta_header.format(index=1, length=500, circular="true")
+    m = L.LONG_READ.fasta_header_re.match(header)
+    assert m and m.group("circular") == "true"
 
 
-# Against data/mgap-example -----------------------------------------------------------------
+def test_sample_and_prefix_placeholders() -> None:
+    path = L.BAKTA.tsv
+    assert path.relative("SCL29833") == "SCL29833/annotation/bakta/SCL29833.tsv"
+    assert (
+        path.relative("ont_SCL30014", "ont_SCL30014_")
+        == "ont_SCL30014/annotation/bakta/ont_SCL30014_.tsv"
+    )
+    assert (
+        L.CHECKM2.report.relative("ont_SCL30014", "ont_SCL30014_")
+        == "ont_SCL30014/annotation/checkm2/ont_SCL30014_checkm2_report.tsv"
+    )
+    with pytest.raises(ValueError):
+        path.relative()
 
 
-def test_declared_paths_exist(example: Path) -> None:
-    for name, path in L.all_paths().items():
-        if path.provisional:
-            continue
-        if not path.per_genome:
-            assert path.resolve(example).exists(), name
-            continue
-        present = [g for g in EXAMPLE_GENOMES if path.resolve(example, g).exists()]
-        if path.optional:
-            assert present, f"{name}: {path.template} in no example genome"
+def test_detect_platform_without_assembly(tmp_path: Path) -> None:
+    assert L.detect_platform(tmp_path, "SCL0001") is None
+    assert L.resolve_prefix(tmp_path, "SCL0001") == "SCL0001"
+
+
+def test_parse_fna_header() -> None:
+    contig, tags = L.parse_fna_header(">contig_7 [gcode=11] [topology=linear]")
+    assert contig == "contig_7" and tags == {"gcode": "11", "topology": "linear"}
+
+
+# Against the real examples ------------------------------------------------------------------
+
+
+def test_prefix_platform_and_sample_names(example: Example) -> None:
+    rules = load_platform()
+    for sample in example.samples:
+        prefix = L.resolve_prefix(example.root, sample)
+        assert L.detect_platform(example.root, sample) == example.platform
+        if example.platform == L.PLATFORM_ONT:
+            assert prefix == f"{sample}_"
         else:
-            assert present == list(EXAMPLE_GENOMES), f"{name}: {path.template} only in {present}"
+            assert prefix == sample
+        genome_id = rules.genome_id_from_sample(sample)
+        assert rules.genome_id_regex.match(genome_id) or genome_id == "SP10"
+    if example.name == "ont_example":
+        assert rules.genome_id_from_sample("ont_SCL30014") == "SCL30014"
 
 
-def _header_ok(table: L.Table, lines: list[str]) -> None:
-    columns = list(table.columns)
-    match table.header:
-        case L.HeaderStyle.FIRST_LINE:
-            assert lines[0].split(table.separator) == columns
-        case L.HeaderStyle.AFTER_COMMENTS:
-            body = [x for x in lines if not x.startswith(table.comment_prefix)]
-            header = body[0]
-            assert header.startswith(table.header_prefix)
-            assert header[len(table.header_prefix) :].split(table.separator) == columns
-        case L.HeaderStyle.NONE:
-            for line in lines:
-                if line:
-                    assert len(line.split(table.separator)) >= len(columns)
-        case L.HeaderStyle.ROW_LABELS:
-            labels = [x.split(table.separator)[0] for x in lines if x]
-            assert labels == columns
+def test_declared_paths_exist(example: Example) -> None:
+    checked = 0
+    for name, path in L.all_paths().items():
+        if not path.per_genome:
+            if _required(path, None) and (example.root / "pipeline_info").is_dir():
+                assert path.resolve(example.root).exists(), name
+            continue
+        for sample in example.samples:
+            prefix = L.resolve_prefix(example.root, sample)
+            platform = L.detect_platform(example.root, sample)
+            if _required(path, platform):
+                assert path.resolve(example.root, sample, prefix).exists(), (
+                    f"{name}: {path.relative(sample, prefix)}"
+                )
+                checked += 1
+    assert checked >= 20
 
 
-def test_declared_columns_match_headers(example: Path) -> None:
+def test_optional_paths_seen_in_some_example(repo_root: Path) -> None:
+    examples = [_example(repo_root, name) for name in sorted(EXAMPLES)]
+    for name, path in L.all_paths().items():
+        if path.provisional or not path.optional or not path.per_genome:
+            continue
+        seen = [
+            (e.name, s)
+            for e in examples
+            for s in e.samples
+            if path.resolve(e.root, s, L.resolve_prefix(e.root, s)).exists()
+        ]
+        assert seen, f"{name}: {path.template} in no example"
+
+
+def test_declared_columns_match_headers(example: Example) -> None:
     checked = 0
     for name, table in L.all_tables().items():
-        if table.path.provisional:
+        if table.path.provisional or not table.path.per_genome:
             continue
-        for genome in EXAMPLE_GENOMES:
-            path = table.path.resolve(example, genome)
+        for sample in example.samples:
+            path = table.path.resolve(example.root, sample, L.resolve_prefix(example.root, sample))
             if not path.exists():
                 continue
             lines = path.read_text(encoding="utf-8").splitlines()
             try:
                 _header_ok(table, lines)
-            except AssertionError as exc:
-                raise AssertionError(f"{name} in {genome}") from exc
+            except (AssertionError, StopIteration) as exc:
+                raise AssertionError(f"{name} in {sample}") from exc
             checked += 1
-    assert checked >= 25
+    assert checked >= 12
 
 
-def test_example_value_formats(example: Path) -> None:
+def test_bakta_header_tags(example: Example) -> None:
+    b = L.BAKTA
+    for sample in example.samples:
+        fna = b.fna.resolve(example.root, sample, L.resolve_prefix(example.root, sample))
+        headers = [x for x in fna.read_text().splitlines() if x.startswith(">")]
+        assert headers
+        parsed = [L.parse_fna_header(h) for h in headers]
+        for contig, tags in parsed:
+            assert re.fullmatch(r"contig_\d+", contig)
+            assert tags[b.tag_gcode] == str(b.gcode)
+        if example.platform == L.PLATFORM_ONT:
+            assert len(parsed) == 5
+            for _, tags in parsed:
+                assert tags[b.tag_topology] == b.topology_circular
+                assert tags[b.tag_completeness] == b.completeness_complete
+            locations = [t.get(b.tag_location) for _, t in parsed]
+            assert locations.count(b.location_chromosome) == 1
+            assert sum(b.tag_plasmid_name in t for _, t in parsed) == 4
+            descriptions = [h.split(" ", 1)[1] for h in headers]
+            assert descriptions[0] == b.fna_description_chromosome.format(gcode=b.gcode)
+            assert descriptions[1] == b.fna_description_plasmid.format(
+                gcode=b.gcode, name=b.plasmid_name.format(index=1)
+            )
+        else:
+            for _, tags in parsed:
+                assert tags[b.tag_topology] == b.topology_linear
+                assert b.tag_completeness not in tags
+            assert headers[0].split(" ", 1)[1] == b.fna_description_draft.format(
+                gcode=b.gcode, topology=b.topology_linear
+            )
+
+
+def test_illumina_value_formats(repo_root: Path) -> None:
+    e = _example(repo_root, "mgap-example")
     g = "SCL29833"
-    with gzip.open(L.SPADES.scaffolds.resolve(example, g), "rt") as fh:
+    with gzip.open(L.SPADES.scaffolds.resolve(e.root, g), "rt") as fh:
         first = fh.readline()[1:].strip()
     assert L.SPADES.node_name_re.match(first)
-    fna = L.BAKTA.fna.resolve(example, g).read_text().splitlines()[0]
-    contig, description = fna[1:].split(" ", 1)
-    assert contig == L.BAKTA.contig_name.format(index=1)
-    assert L.BAKTA.fna_description_re.fullmatch(description)
-    summary = L.BAKTA.summary.resolve(example, g).read_text()
+    fna = L.BAKTA.fna.resolve(e.root, g).read_text().splitlines()[0]
+    summary = L.BAKTA.summary.resolve(e.root, g).read_text()
     database = next(
         line.split(": ", 1)[1]
         for line in summary.splitlines()
         if line.startswith(L.BAKTA.summary_keys.database + ":")
     )
     assert L.BAKTA.database_re.fullmatch(database)
-    report = L.MOBSUITE.contig_report.resolve(example, g).read_text().splitlines()
+    report = L.MOBSUITE.contig_report.resolve(e.root, g).read_text().splitlines()
     assert report[1].split("\t")[4] == fna[1:]
-    mlst = L.MLST.report.resolve(example, g).read_text().split("\t")
-    assert mlst[0] == L.SPADES.assembly_file.replace(L.GENOME_ID, g)
+    mlst = L.MLST.report.resolve(e.root, g).read_text().split("\t")
+    assert mlst[0] == L.SPADES.internal_file.format(sample=g)
     assert all(L.MLST.allele_re.match(x.strip()) for x in mlst[3:])
-    checkm2 = L.CHECKM2.report.resolve(example, g).read_text().splitlines()[1]
-    assert checkm2.split("\t")[0] == L.SPADES.assembly_name.replace(L.GENOME_ID, g)
-    virus = L.GENOMAD.virus_summary.resolve(example, g).read_text().splitlines()[1]
+    checkm2 = L.CHECKM2.report.resolve(e.root, g).read_text().splitlines()[1]
+    assert checkm2.split("\t")[0] == L.SPADES.internal_name.format(sample=g)
+    virus = L.GENOMAD.virus_summary.resolve(e.root, g).read_text().splitlines()[1]
     assert L.GENOMAD.provirus_name_re.match(virus.split("\t")[0])
-    points = [
-        row.split("\t")
-        for row in L.AMRFINDERPLUS.report.resolve(example, g).read_text().splitlines()[1:]
-    ]
-    for row in points:
-        if row[9] == L.AMRFINDERPLUS.subtype_point:
-            assert L.AMRFINDERPLUS.point_symbol_re.match(row[5])
-    with gzip.open(L.SPADES.graph.resolve(example, g), "rt") as fh:
+    for row in L.AMRFINDERPLUS.report.resolve(e.root, g).read_text().splitlines()[1:]:
+        fields = row.split("\t")
+        if fields[9] == L.AMRFINDERPLUS.subtype_point:
+            assert L.AMRFINDERPLUS.point_symbol_re.match(fields[5])
+    with gzip.open(L.SPADES.graph.resolve(e.root, g), "rt") as fh:
         assert L.SPADES.gfa_version_re.search(fh.readline())
 
 
-def test_software_versions_keys(example: Path) -> None:
-    data = yaml.safe_load(L.PIPELINE_INFO.software_versions.resolve(example).read_text())
+def test_nanopore_value_formats(repo_root: Path) -> None:
+    e = _example(repo_root, "ont_example")
+    s = e.samples[0]
+    p = L.resolve_prefix(e.root, s)
+    lr = L.LONG_READ
+    for path in (lr.autocycler_fasta, lr.dnaapler_fasta):
+        headers = [x[1:] for x in path.resolve(e.root, s, p).read_text().splitlines()
+                   if x.startswith(">")]  # fmt: skip
+        assert len(headers) == 5
+        for h in headers:
+            m = lr.fasta_header_re.match(h)
+            assert m and m.group("circular") == lr.circular_true
+    for path in (lr.autocycler_gfa, lr.dnaapler_gfa):
+        lines = path.resolve(e.root, s, p).read_text().splitlines()
+        assert lines[0] == lr.gfa_header
+        segments = [x.split("\t")[1] for x in lines if x.startswith("S\t")]
+        links = {x for x in lines if x.startswith("L\t")}
+        for index in segments:
+            assert {link.format(index=index) for link in lr.gfa_self_links} <= links
+    size = lr.genome_size.resolve(e.root, s, p).read_text()
+    assert size.strip().isdigit()
+    # Names inside the reports are the read-file stem, unrelated to sample or prefix.
+    checkm2 = L.CHECKM2.report.resolve(e.root, s, p).read_text().splitlines()[1]
+    name = checkm2.split("\t")[0]
+    assert name == lr.internal_name_example and s not in name
+    mlst = L.MLST.report.resolve(e.root, s, p).read_text().split("\t")
+    assert mlst[0] == lr.internal_file.format(genome_id="SCL30014")
+    assert not L.BRACKEN.report.resolve(e.root, s, p).exists()
+    assert not L.RGI.report.resolve(e.root, s, p).exists()
+    assert not L.MOBSUITE.directory.resolve(e.root, s, p).exists()
+
+
+def test_software_versions_keys(repo_root: Path) -> None:
+    e = _example(repo_root, "mgap-example")
+    data = yaml.safe_load(L.PIPELINE_INFO.software_versions.resolve(e.root).read_text())
     assert L.PIPELINE_INFO.pipeline_key in data[L.PIPELINE_INFO.workflow_key]
     for module in L.MODULES:
         process = getattr(module, "process", None)
         tool = getattr(module, "tool", None)
-        if process is None or _module_is_provisional(module):
+        if process is None or _module_is_provisional(module) or _module_is_nanopore_only(module):
             continue
         assert process in data, process
         assert tool in data[process], (process, tool)
-    amr = data[L.AMRFINDERPLUS.process]
-    assert L.AMRFINDERPLUS.database_key in amr
-    bakta = yaml.safe_load(L.BAKTA.versions.resolve(example, "SP10").read_text())
+    assert L.AMRFINDERPLUS.database_key in data[L.AMRFINDERPLUS.process]
+    bakta = yaml.safe_load(L.BAKTA.versions.resolve(e.root, "SP10").read_text())
     assert L.BAKTA.tool in bakta[L.BAKTA.process]
 
 
@@ -191,8 +357,10 @@ def _forbidden_fragments() -> tuple[set[str], set[str]]:
     for path in L.all_paths().values():
         segments = path.template.split("/")
         for i, segment in enumerate(segments):
-            pieces = [p for p in segment.split(L.GENOME_ID) if len(p) >= 3]
-            if i < len(segments) - 1 and segment != L.GENOME_ID and len(segment) >= 2:
+            pieces = [
+                p for part in segment.split(L.SAMPLE) for p in part.split(L.PREFIX) if len(p) >= 3
+            ]
+            if i < len(segments) - 1 and segment != L.SAMPLE and len(segment) >= 2:
                 directories.add(segment)
             fragments.update(pieces)
     return directories, fragments

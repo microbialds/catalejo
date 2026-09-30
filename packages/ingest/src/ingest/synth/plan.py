@@ -48,6 +48,12 @@ MLST_ONLY_SPECIES = 2  # Staphylococcus aureus: no GTDB-Tk output, no metadata s
 
 GENOME_NUMBER_WIDTH = 4
 
+# One complete genome per run carries a prefixed mgap sample name, as some
+# projects name nanopore samples (data/ont_example: directory ont_SCL30014,
+# file stem ont_SCL30014_, genome SCL30014).
+PREFIXED_SAMPLE = "ont_{genome_id}"
+PREFIXED_STEM = "{sample}_"
+
 
 @dataclass
 class Metadata:
@@ -68,6 +74,7 @@ class Metadata:
     assembly_accession: str = ""
     sra_accession: str = ""
     notes: str = ""
+    mgap_sample: str = ""
     extra: dict[str, str] = field(default_factory=dict[str, str])
 
 
@@ -76,6 +83,8 @@ class GenomePlan:
     genome_id: str
     species: SpeciesSpec
     index: int  # rank within its species
+    sample: str = ""  # mgap sample directory; genome_id unless prefixed
+    prefix: str = ""  # mgap file stem; the sample unless prefixed
     complete: bool = False
     fragmented: bool = False
     assembly_gap: bool = False
@@ -89,6 +98,7 @@ class GenomePlan:
     prophages: list[int] = field(default_factory=list[int])
     accessory: list[int] = field(default_factory=list[int])
     has_mobsuite: bool = True
+    has_rgi: bool = True
     has_typing: bool = True
     in_gtdbtk: bool = True
     conflict_species: str | None = None  # name GTDB-Tk and Kraken2 report instead
@@ -155,7 +165,7 @@ def plan_run(seed: int, n_species: int, n_genomes: int) -> RunPlan:
 
 def _plan_genome(seed: int, spec: SpeciesSpec, s_index: int, i: int, gid: str) -> GenomePlan:
     rng = sub_rng(seed, "plan", gid)
-    g = GenomePlan(genome_id=gid, species=spec, index=i)
+    g = GenomePlan(genome_id=gid, species=spec, index=i, sample=gid, prefix=gid)
     g.profile = _pick_profile(spec, gid, seed)
     g.complete = i == 0
     g.has_mobsuite = i % 3 != 2
@@ -173,6 +183,7 @@ def _plan_genome(seed: int, spec: SpeciesSpec, s_index: int, i: int, gid: str) -
     g.accessory = [k for k in range(24) if rng.random() < 0.5]
     g.completeness = round(rng.uniform(97.2, 100.0), 2)
     g.contamination = round(rng.uniform(0.05, 2.4), 2)
+    g.has_rgi = rng.random() < 0.8
 
     if s_index == MIXED_VERSION_SPECIES and i % 2 == 0:
         g.bakta_version, g.bakta_db = BAKTA_VERSION_OLD, BAKTA_DB_OLD
@@ -201,8 +212,10 @@ def _set_plasmids(
 
 def _force_kpn(g: GenomePlan, i: int) -> None:
     kpc = "pKPC"
-    if i == 0:  # complete genome with the carbapenemase plasmid
+    if i == 0:  # complete genome with the carbapenemase plasmid, prefixed sample name
         _set_plasmids(g, include=(kpc, "pCol"))
+        g.sample = PREFIXED_SAMPLE.format(genome_id=g.genome_id)
+        g.prefix = PREFIXED_STEM.format(sample=g.sample)
     elif i == 1:  # draft carrier with the three point mutations and a gap
         _set_plasmids(g, include=(kpc,))
         g.mutations = ["gyrA_S83I", "parC_S80I", "blaSHV_C-112T"]
@@ -278,6 +291,8 @@ def _plan_metadata(seed: int, g: GenomePlan, position: int) -> None:
     m.isolation_date = _date(rng.random(), year, rng.randint(1, 12), rng.randint(1, 28))
     if g.complete:
         m.platform = "hybrid" if g.species.code == "SEN" else "ont"
+    if g.sample != g.genome_id:
+        m.mgap_sample = g.sample
     if rng.random() < 0.5:
         m.biosample_accession = f"SAMN{rng.randrange(10**7, 10**8)}"
         m.sra_accession = f"SRR{rng.randrange(10**7, 10**8)}"

@@ -203,15 +203,20 @@ def build_manifest(
             "species_code": p.species.code,
             "species": p.species.name,
             "assembly_status": p.assembly_status,
-            "platform": p.metadata.platform or "illumina",
-            "assembler": L.LONG_READ.flye_tool if p.complete else L.SPADES.tool,
+            "platform": p.metadata.platform
+            or (L.PLATFORM_ONT if p.complete else L.PLATFORM_ILLUMINA),
+            "detected_platform": L.PLATFORM_ONT if p.complete else L.PLATFORM_ILLUMINA,
+            "assembler": L.LONG_READ.autocycler_tool if p.complete else L.SPADES.tool,
+            "mgap_sample": p.sample,
+            "file_prefix": p.prefix,
             "contigs": len(g.contigs),
-            "genome_size": g.size,
+            "total_length": g.size,
             "st": st_value(p),
             "mlst_scheme": p.species.mlst_scheme,
             "plasmids": list(p.plasmids),
             "plasmid_contigs": [c.bakta_id for c in g.contigs if c.is_plasmid],
             "has_mobsuite": p.has_mobsuite,
+            "has_rgi": p.has_rgi,
             "in_gtdbtk": p.in_gtdbtk,
             "bakta_database": p.bakta_db,
             "amrfinderplus_database": p.amrfinder_db,
@@ -367,6 +372,15 @@ def build_manifest(
         "access_groups": groups,
         "curated_sets": sets,
         "tombstone": {"genome_id": tombstone[0], "replaced_by": tombstone[1]},
+        "prefixed_sample_name": {
+            g.genome_id: {"mgap_sample": g.plan.sample, "file_prefix": g.plan.prefix}
+            for g in genomes
+            if g.plan.sample != g.genome_id
+        },
+        L.RGI.tool: {
+            "with": where(lambda g: g.plan.has_rgi),
+            "without": where(lambda g: not g.plan.has_rgi),
+        },
     }
     return {
         "generator": {

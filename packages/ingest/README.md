@@ -71,20 +71,23 @@ The stubs already accept the options of contract §8, as the help of `release bu
 uv run --project packages/ingest catalejo synth --out data/synth
 ```
 
-With the defaults (3 species, 60 genomes, seed 42) the command writes 60 genomes of *Klebsiella pneumoniae* (KPN, 28 genomes), *Salmonella enterica* (SEN, 18) and *Staphylococcus aureus* (SAU, 14), in about 1,500 files and 45 MB. The output directory holds the following.
+With the defaults (3 species, 60 genomes, seed 42) the command writes 60 genomes of *Klebsiella pneumoniae* (KPN, 28 genomes), *Salmonella enterica* (SEN, 18) and *Staphylococcus aureus* (SAU, 14), in about 2,500 files and 65 MB. The first genome of each species is complete and follows the nanopore layout, and the other 57 are Illumina drafts. The output directory holds the following.
 
 ```
 data/synth/
   .catalejo-synth          marker of a synth run
   results/                 the mgap-shaped results directory, passed to later commands as --mgap
-    <genome_id>/assemblies/            SPAdes drafts, or Flye and Dnaapler for complete genomes
-    <genome_id>/annotation/<tool>/     amrfinder, bakta, checkm2, genomad, mlst, rgi, mobsuite,
-                                       and kleborate, sistr or sccmec according to species
-    <genome_id>/qc/quast/
-    <genome_id>/read_processing/       bracken, kraken2
+    <sample>/                          the genome_id, or ont_KPN0001 with file stems ont_KPN0001_
+    <sample>/assemblies/               SPAdes files for drafts, autocycler/ and dnaapler/ for
+                                       complete genomes
+    <sample>/annotation/<tool>/        amrfinder, bakta, checkm2, genomad, mlst, the optional rgi
+                                       and mobsuite, and kleborate, sistr or sccmec by species
+    <sample>/qc/quast/
+    <sample>/read_processing/<tool>/   kraken2, with fastp and bracken for drafts or fastplong
+                                       for complete genomes
     gtdbtk/gtdbtk.bac120.summary.tsv
     pipeline_info/software_versions.yml
-  metadata.csv             contract §4.2
+  metadata.csv             contract §4.2, with the proposed mgap_sample column
   sets.csv                 contract §4.6
   tombstones.csv           contract §4.7
   groups.csv               contract §4.8
@@ -92,19 +95,23 @@ data/synth/
   synth_manifest.json      every planted item and the genomes carrying it, for tests
 ```
 
-The planted content covers the acceptance items of the requirements, among them resistance determinants and point mutations, a carbapenemase plasmid shared across genomes, prophage and plasmid regions, complete and draft genomes, mixed annotation versions, species conflicts and genomes with MOB-suite output next to genomes without it.
+The planted content covers the acceptance items of the requirements, among them resistance determinants and point mutations, a carbapenemase plasmid shared across genomes, prophage and plasmid regions, complete and draft genomes, a complete genome whose mgap sample name differs from its genome_id, mixed annotation versions, species conflicts and genomes with RGI and MOB-suite output next to genomes without them.
 
 The same arguments always produce byte-identical files, because every decision draws from a generator seeded by the run seed and the genome identifier and the gzip members carry no timestamp. `--out` must lie inside the repository or the system temporary directory. An existing output directory is replaced only when it is empty or holds the `.catalejo-synth` marker of an earlier run, and any other directory is refused with exit code 2. The marker is written first, so the output of an interrupted run can still be replaced.
 
 ## Expected mgap layout
 
-[src/ingest/mgap_layout.py](src/ingest/mgap_layout.py) is the single definition of every mgap path and column name. The parsers (milestone 1a, in `src/ingest/parsers/`) and the synthetic generator both import it, and a test fails if either spells an mgap path or column itself. The layout was derived from a real mgap 2.0.0 results directory with two Illumina SPAdes draft genomes. Entries for tools absent from that example, such as the long-read assemblers, SISTR, sccmec and GTDB-Tk, are marked `provisional=True` and follow the documented output names of each tool until an mgap run confirms them. `CONTRACT_DIFFERENCES` in the same module records where the example disagrees with contract §4.1.
+[src/ingest/mgap_layout.py](src/ingest/mgap_layout.py) is the single definition of every mgap path and column name. The parsers (milestone 1a, in `src/ingest/parsers/`) and the synthetic generator both import it, and a test fails if either spells an mgap path or column itself. The layout was derived from two real mgap 2.0.0 runs, an Illumina run with two SPAdes draft genomes and a nanopore run with one complete genome assembled by Autocycler and reoriented by Dnaapler.
 
-The tests that compare the module against the example read `data/mgap-example/`, which exists only on the maintainer's machine, and are skipped elsewhere.
+Path templates use two placeholders, `{sample}` for the per-genome directory of the results and `{prefix}` for the stem of most tool files, which `resolve_prefix()` discovers from the Bakta summary because a nanopore sample such as `ont_SCL30014` names its files `ont_SCL30014_`. `detect_platform()` tells a nanopore genome from an Illumina one by its assembly directory, and `parse_fna_header()` reads topology and completeness from the Bakta `.fna` headers on both platforms. RGI, MOB-suite and Bracken are optional modules that a run may skip.
+
+Entries that neither run confirms follow the documented output of each tool until an mgap run confirms them. They are GTDB-Tk, SISTR, sccmec and the per-genome AMRFinderPlus versions file, whose paths are marked `provisional=True`, together with the Bakta mappings of CRISPR arrays and the process names of the nanopore modules. `CONTRACT_DIFFERENCES` in the same module records where the two runs disagree with contract §4.1.
+
+The tests that compare the module against the two runs read `data/mgap-example/` and `data/ont_example/`, which exist only on the maintainer's machine, and are skipped elsewhere.
 
 ## Metadata, external inputs and releases
 
-The metadata table and the `metadata` commands arrive in milestone 1a, as defined in [contract §4.2 and §8.1](../../docs/data-contract.md#42-metadata-table).
+The metadata table and the `metadata` commands arrive in milestone 1a, as defined in [contract §4.2 and §8.1](../../docs/data-contract.md#42-metadata-table). Because an mgap sample name may differ from the genome_id, as `ont_SCL30014` does for SCL30014, `metadata init` will propose the genome_id with the `sample_name_rules` of [config/platform.yaml](../../config/platform.yaml), and the `mgap_sample` column records the sample name and stays empty when it equals the genome_id. The column is proposed in pull request 1 and awaits the maintainer's review, and `synth` already writes it.
 
 The external inputs of [contract §4.3 to §4.8](../../docs/data-contract.md#43-pangenome-inputs) arrive with milestones 1a for curated sets, tombstones and access groups, 4a for pangenomes and trees, and 6 for embeddings.
 

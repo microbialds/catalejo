@@ -73,6 +73,7 @@ def side_tables(run: RunPlan) -> SideTables:
         m = g.metadata
         values = {
             cols.genome_id: g.genome_id,
+            cols.mgap_sample: m.mgap_sample,
             cols.species: m.species,
             cols.source_type: m.source_type,
             cols.isolation_date: m.isolation_date,

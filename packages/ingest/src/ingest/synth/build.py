@@ -118,6 +118,24 @@ class Contig:
     bakta_id: str = ""
     assembly_name: str = ""
     index: int = 0  # 1-based rank in the assembly
+    plasmid_name: str = ""  # Bakta plasmid-name tag of a complete plasmid
+    rotation: int = 0  # offset of the Autocycler sequence before Dnaapler rotated it
+
+    @property
+    def autocycler_seq(self) -> str:
+        return (
+            self.seq[-self.rotation :] + self.seq[: -self.rotation] if self.rotation else self.seq
+        )
+
+    @property
+    def rotated_to(self) -> str | None:
+        """Gene Dnaapler rotated this replicon to: dnaA, or the plasmid's rep gene."""
+        first = self.features[0] if self.features else None
+        if first is None or first.start != 1:
+            return None
+        if self.replicon == "chromosome" or first.plasmid_role == "rep":
+            return first.gene
+        return None
 
     @property
     def length(self) -> int:
@@ -349,8 +367,10 @@ class Builder:
             c.index = k
             c.bakta_id = L.BAKTA.contig_name.format(index=k)
             if plan.complete:
-                c.coverage = round(rng.uniform(80, 160), 1)
-                c.assembly_name = L.LONG_READ.flye_contig_name.format(index=k)
+                c.coverage = round(rng.uniform(2.0, 9.0), 2)
+                c.assembly_name = str(k)
+                if c.is_plasmid:
+                    c.plasmid_name = L.BAKTA.plasmid_name.format(index=k - 1)
             else:
                 c.coverage = round(rng.uniform(18, 90) * (3 if c.is_plasmid else 1), 6)
                 c.assembly_name = L.SPADES.node_name.format(
@@ -361,7 +381,12 @@ class Builder:
         suffix = "".join(rng.choice(string.ascii_uppercase) for _ in range(4))
         _assign_identifiers(contigs, prefix, suffix, rng)
         genome = Genome(plan=plan, contigs=contigs, locus_prefix=prefix)
-        if not plan.complete:
+        if plan.complete:
+            # Autocycler's consensus before Dnaapler rotated each replicon to its
+            # dnaA or rep gene; Bakta annotates the rotated sequence.
+            for c in contigs:
+                c.rotation = rng.randrange(1, c.length)
+        else:
             genome.spades_contigs = _spades_contigs(contigs)
         return genome
 

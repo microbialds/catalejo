@@ -12,6 +12,18 @@ platform_name: Catalejo
 # `catalejo metadata validate` and `catalejo release check`.
 genome_id_pattern: "^[A-Z]{2,5}[0-9]{3,6}$"
 
+# Rules that propose a genome_id from an mgap sample directory name
+# (contract §3.1 and §4.2, mgap_sample). `catalejo metadata init` applies them
+# in order as regular expression substitutions and writes both columns for the
+# maintainer to review; a manual entry in metadata.csv always wins. Some
+# projects prefix nanopore samples with ont_ (ont_SCL30014 is SCL30014), and
+# mgap file stems may end in an underscore.
+sample_name_rules:
+  - pattern: "(?i)^ont_"
+    replace: ""
+  - pattern: "_+$"
+    replace: ""
+
 # Order in which species sources are consulted (contract §3.3). The first
 # source that yields a name wins, and disagreement with a later source sets
 # species_conflict.

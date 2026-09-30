@@ -15,6 +15,9 @@ class MetadataColumns:
     """Recognized columns of ``metadata.csv`` (contract §4.2), in file order."""
 
     genome_id: str = "genome_id"
+    # The sample directory in the mgap results when it differs from genome_id
+    # (proposed contract §4.2 row); empty means genome_id.
+    mgap_sample: str = "mgap_sample"
     species: str = "species"
     source_type: str = "source_type"
     isolation_date: str = "isolation_date"

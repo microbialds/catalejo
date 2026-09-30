@@ -100,3 +100,29 @@ def test_export_presets_follow_requirements() -> None:
     assert presets.rules.min_font_pt == 7
     assert presets.rules.min_line_pt == 0.5
     assert (presets.rules.dpi.standard, presets.rules.dpi.high) == (300, 600)
+
+
+@pytest.mark.parametrize(
+    ("sample", "genome_id"),
+    [
+        ("ont_SCL30014", "SCL30014"),
+        ("ont_SCL30014_", "SCL30014"),
+        ("ONT_SCL30014", "SCL30014"),
+        ("SCL29833", "SCL29833"),
+        ("SP10", "SP10"),
+        ("SCL29833_", "SCL29833"),
+    ],
+)
+def test_sample_name_rules(sample: str, genome_id: str) -> None:
+    assert config.load_platform().genome_id_from_sample(sample) == genome_id
+
+
+def test_sample_name_rule_must_compile(tmp_path: Path, repo_root: Path) -> None:
+    for name in config.CONFIG_FILES:
+        shutil.copy(repo_root / "config" / name, tmp_path / name)
+    path = tmp_path / config.PLATFORM_FILE
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    data["sample_name_rules"].append({"pattern": "(", "replace": ""})
+    path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    with pytest.raises(ValueError):
+        config.load_platform(tmp_path)

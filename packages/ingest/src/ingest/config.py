@@ -100,12 +100,28 @@ class UmapParameters(_Model):
 SpeciesSource = Literal["metadata", "gtdbtk", "mlst", "kraken2"]
 
 
+class SampleNameRule(_Model):
+    """One ordered substitution from an mgap sample name toward a genome_id."""
+
+    pattern: str
+    replace: str
+
+    @model_validator(mode="after")
+    def _check(self) -> SampleNameRule:
+        try:
+            re.compile(self.pattern)
+        except re.error as exc:
+            raise ValueError(f"sample_name_rules pattern {self.pattern!r}: {exc}") from exc
+        return self
+
+
 class PlatformConfig(_Model):
     """``config/platform.yaml`` (contract §3, §7, §8)."""
 
     version: int
     platform_name: str
     genome_id_pattern: str
+    sample_name_rules: list[SampleNameRule]
     species_precedence: list[SpeciesSource]
     thresholds: Thresholds
     qc: QcThresholds
@@ -113,7 +129,10 @@ class PlatformConfig(_Model):
 
     @model_validator(mode="after")
     def _check(self) -> PlatformConfig:
-        re.compile(self.genome_id_pattern)
+        try:
+            re.compile(self.genome_id_pattern)
+        except re.error as exc:
+            raise ValueError(f"genome_id_pattern: {exc}") from exc
         if sorted(self.species_precedence) != sorted({"metadata", "gtdbtk", "mlst", "kraken2"}):
             raise ValueError("species_precedence must list each of the four sources once")
         return self
@@ -121,6 +140,13 @@ class PlatformConfig(_Model):
     @property
     def genome_id_regex(self) -> re.Pattern[str]:
         return re.compile(self.genome_id_pattern)
+
+    def genome_id_from_sample(self, sample: str) -> str:
+        """Apply ``sample_name_rules`` in order (ont_SCL30014 gives SCL30014)."""
+        name = sample
+        for rule in self.sample_name_rules:
+            name = re.sub(rule.pattern, rule.replace, name)
+        return name
 
 
 # palette.yaml ----------------------------------------------------------------

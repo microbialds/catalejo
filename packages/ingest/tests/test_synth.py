@@ -16,9 +16,16 @@ import yaml
 from Bio.Seq import Seq
 
 from ingest import mgap_layout as L
+from ingest.config import load_platform
 from ingest.side_tables import GENOME_GROUPS, GROUPS, METADATA, SETS, TOMBSTONES
 from ingest.synth import MANIFEST, MARKER, RESULTS_DIR, SynthError, prepare_output, run_synth
 from ingest.synth.sequences import random_cds, sha1_16, sub_rng, translate
+
+
+def _at(path: L.MgapPath, results: Path, manifest: dict[str, Any], genome_id: str) -> Path:
+    """Resolve ``path`` for a genome through its mgap sample and file prefix."""
+    info = manifest["genomes"][genome_id]
+    return path.resolve(results, info["mgap_sample"], info["file_prefix"])
 
 
 def _digest(root: Path) -> dict[str, str]:
@@ -154,21 +161,23 @@ def test_default_run_is_fast_and_deterministic(tmp_path: Path) -> None:
 
 def test_layout_is_complete(small_results: Path, small_manifest: dict[str, Any]) -> None:
     for gid, info in small_manifest["genomes"].items():
-        complete = info["assembly_status"] == "complete"
+        sample, prefix = info["mgap_sample"], info["file_prefix"]
+        assert L.resolve_prefix(small_results, sample) == prefix
+        platform = L.detect_platform(small_results, sample)
+        assert platform == info["detected_platform"]
         for name, path in L.all_paths().items():
-            if not path.per_genome or path.optional:
+            if not path.per_genome or path.optional or path.provisional:
                 continue
-            is_long_read = name.startswith("LongReadLayout.")
-            is_spades = name.startswith("SpadesLayout.")
-            if is_long_read and not complete:
+            if path.platform is not None and path.platform != platform:
+                assert not path.resolve(small_results, sample, prefix).exists(), (gid, name)
                 continue
-            if is_long_read and path.template.endswith(".autocycler.fasta.gz"):
-                continue
-            if is_spades and complete:
-                continue
-            if name == "RgiLayout.json":
-                continue
-            assert path.resolve(small_results, gid).is_file(), (gid, name)
+            assert path.resolve(small_results, sample, prefix).exists(), (gid, name)
+        read_report = L.FASTPLONG.json if platform == L.PLATFORM_ONT else L.FASTP.json
+        assert read_report.resolve(small_results, sample, prefix).is_file()
+        bracken = L.BRACKEN.report.resolve(small_results, sample, prefix)
+        assert bracken.exists() == (platform == L.PLATFORM_ILLUMINA)
+        rgi = L.RGI.report.resolve(small_results, sample, prefix)
+        assert rgi.exists() == info["has_rgi"]
     assert L.PIPELINE_INFO.software_versions.resolve(small_results).is_file()
     assert L.GTDBTK.summary.resolve(small_results).is_file()
 
@@ -176,7 +185,10 @@ def test_layout_is_complete(small_results: Path, small_manifest: dict[str, Any])
 def test_tables_have_declared_headers(small_results: Path, small_manifest: dict[str, Any]) -> None:
     for gid in small_manifest["genomes"]:
         for name, table in L.all_tables().items():
-            path = table.path.resolve(small_results, gid if table.path.per_genome else None)
+            if table.path.per_genome:
+                path = _at(table.path, small_results, small_manifest, gid)
+            else:
+                path = table.path.resolve(small_results)
             if not path.exists():
                 continue
             lines = path.read_text(encoding="utf-8").splitlines()
@@ -184,7 +196,8 @@ def test_tables_have_declared_headers(small_results: Path, small_manifest: dict[
                 assert lines[0].split("\t") == list(table.columns), name
                 assert all(len(x.split("\t")) == len(table.columns) for x in lines), name
             elif table.header == L.HeaderStyle.AFTER_COMMENTS:
-                header = next(x for x in lines if not x.startswith(table.comment_prefix))
+                marker = table.header_prefix + table.columns[0]
+                header = next(x for x in lines if x.startswith(marker))
                 assert header[len(table.header_prefix) :].split("\t") == list(table.columns)
             elif table.header == L.HeaderStyle.ROW_LABELS:
                 assert [x.split("\t")[0] for x in lines] == list(table.columns)
@@ -192,10 +205,10 @@ def test_tables_have_declared_headers(small_results: Path, small_manifest: dict[
 
 def test_bakta_files_are_consistent(small_results: Path, small_manifest: dict[str, Any]) -> None:
     for gid in small_manifest["genomes"]:
-        fna = _fasta(L.BAKTA.fna.resolve(small_results, gid).read_text())
-        faa = _fasta(L.BAKTA.faa.resolve(small_results, gid).read_text())
-        ffn = _fasta(L.BAKTA.ffn.resolve(small_results, gid).read_text())
-        rows = _rows(L.BAKTA.tsv.resolve(small_results, gid))
+        fna = _fasta(_at(L.BAKTA.fna, small_results, small_manifest, gid).read_text())
+        faa = _fasta(_at(L.BAKTA.faa, small_results, small_manifest, gid).read_text())
+        ffn = _fasta(_at(L.BAKTA.ffn, small_results, small_manifest, gid).read_text())
+        rows = _rows(_at(L.BAKTA.tsv, small_results, small_manifest, gid))
         features = [r for r in rows if not r[0].startswith("#")]
         cds = [r for r in features if r[1] in (L.BAKTA.feature_types.cds, "sorf")]
         assert len(cds) == len(faa)
@@ -206,10 +219,10 @@ def test_bakta_files_are_consistent(small_results: Path, small_manifest: dict[st
             assert seq == ffn[locus]
             assert str(Seq(seq).translate(table="Bacterial", cds=True)) == faa[locus]
             assert 1 <= int(start) <= int(stop) <= len(fna[contig])
-        summary = L.BAKTA.summary.resolve(small_results, gid).read_text()
+        summary = _at(L.BAKTA.summary, small_results, small_manifest, gid).read_text()
         assert f"Length: {sum(len(s) for s in fna.values())}" in summary
         assert f"CDSs: {sum(1 for r in features if r[1] == 'cds')}" in summary
-        gbff = L.BAKTA.gbff.resolve(small_results, gid).read_text()
+        gbff = _at(L.BAKTA.gbff, small_results, small_manifest, gid).read_text()
         assert gbff.count("\nLOCUS ") + gbff.startswith("LOCUS ") == len(fna)
         assert gbff.count("/translation=") == len(faa)
 
@@ -218,14 +231,14 @@ def test_contig_names_match_between_tools(
     small_results: Path, small_manifest: dict[str, Any]
 ) -> None:
     for gid, info in small_manifest["genomes"].items():
-        fna = _fasta(L.BAKTA.fna.resolve(small_results, gid).read_text())
+        fna = _fasta(_at(L.BAKTA.fna, small_results, small_manifest, gid).read_text())
         if info["assembly_status"] == "draft":
-            with gzip.open(L.SPADES.scaffolds.resolve(small_results, gid), "rt") as fh:
+            with gzip.open(_at(L.SPADES.scaffolds, small_results, small_manifest, gid), "rt") as fh:
                 scaffolds = _fasta(fh.read())
             assert list(scaffolds.values()) == list(fna.values())
             assert all(L.SPADES.node_name_re.match(n) for n in scaffolds)
         if info["has_mobsuite"]:
-            report = _dicts(L.MOBSUITE.contig_report.resolve(small_results, gid))
+            report = _dicts(_at(L.MOBSUITE.contig_report, small_results, small_manifest, gid))
             column = L.MOBSUITE.contig_report_columns.contig_id
             assert sorted(r[column].split(" ")[0] for r in report) == sorted(fna)
 
@@ -244,12 +257,71 @@ def test_complete_and_draft_per_species(small_manifest: dict[str, Any]) -> None:
 
 
 def test_complete_genomes_are_circular(small_results: Path, small_manifest: dict[str, Any]) -> None:
-    for gid in small_manifest["plants"]["complete_genomes"].values():
-        fna = L.BAKTA.fna.resolve(small_results, gid[0]).read_text()
+    b, lr = L.BAKTA, L.LONG_READ
+    for (gid,) in small_manifest["plants"]["complete_genomes"].values():
+        fna = _at(b.fna, small_results, small_manifest, gid).read_text()
         headers = [x for x in fna.splitlines() if x.startswith(">")]
-        assert all(f"[topology={L.BAKTA.topology_circular}]" in h for h in headers)
-        info = _rows(L.LONG_READ.flye_info.resolve(small_results, gid[0]))
-        assert all(r[3] == L.LONG_READ.flye_circular_yes for r in info[1:])
+        tags = [L.parse_fna_header(h)[1] for h in headers]
+        assert all(t[b.tag_topology] == b.topology_circular for t in tags)
+        assert all(t[b.tag_completeness] == b.completeness_complete for t in tags)
+        assert tags[0][b.tag_location] == b.location_chromosome
+        assert all(b.tag_plasmid_name in t for t in tags[1:])
+        rotated = _at(lr.dnaapler_fasta, small_results, small_manifest, gid).read_text()
+        consensus = _at(lr.autocycler_fasta, small_results, small_manifest, gid).read_text()
+        for text in (rotated, consensus):
+            names = [x[1:] for x in text.splitlines() if x.startswith(">")]
+            assert len(names) == len(headers)
+            for name in names:
+                m = lr.fasta_header_re.match(name)
+                assert m and m.group("circular") == lr.circular_true
+        assert list(_fasta(rotated).values()) == list(_fasta(fna).values())
+        for a, c in zip(_fasta(consensus).values(), _fasta(fna).values(), strict=True):
+            assert a != c and len(a) == len(c) and c in a + a
+        gfa = _at(lr.dnaapler_gfa, small_results, small_manifest, gid).read_text().splitlines()
+        assert gfa[0] == lr.gfa_header
+        assert "\tRT:z:dnaA" in next(x for x in gfa if x.startswith("S\t1\t"))
+        assert lr.gfa_self_links[0].format(index=1) in gfa
+        size = _at(lr.genome_size, small_results, small_manifest, gid).read_text()
+        assert size.strip().isdigit()
+
+
+def test_draft_headers_are_linear(small_results: Path, small_manifest: dict[str, Any]) -> None:
+    b = L.BAKTA
+    for gid, info in small_manifest["genomes"].items():
+        if info["assembly_status"] != "draft":
+            continue
+        fna = _at(b.fna, small_results, small_manifest, gid).read_text()
+        for header in (x for x in fna.splitlines() if x.startswith(">")):
+            _, tags = L.parse_fna_header(header)
+            assert tags == {b.tag_gcode: str(b.gcode), b.tag_topology: b.topology_linear}
+
+
+def test_prefixed_sample_resolves(small_synth: Path, small_manifest: dict[str, Any]) -> None:
+    prefixed = small_manifest["plants"]["prefixed_sample_name"]
+    assert len(prefixed) == 1
+    ((gid, names),) = prefixed.items()
+    results = small_synth / RESULTS_DIR
+    sample, prefix = names["mgap_sample"], names["file_prefix"]
+    assert sample != gid and prefix == f"{sample}_"
+    assert small_manifest["genomes"][gid]["assembly_status"] == "complete"
+    assert not (results / gid).exists() and (results / sample).is_dir()
+    assert load_platform().genome_id_from_sample(sample) == gid
+    assert L.resolve_prefix(results, sample) == prefix
+    assert L.detect_platform(results, sample) == L.PLATFORM_ONT
+    for path in (
+        L.BAKTA.tsv,
+        L.AMRFINDERPLUS.report,
+        L.CHECKM2.report,
+        L.MLST.report,
+        L.GENOMAD.virus_summary,
+        L.LONG_READ.dnaapler_gfa,
+        L.LONG_READ.genome_size,
+    ):
+        assert path.resolve(results, sample, prefix).is_file(), path.template
+    metadata = _csv(small_synth / METADATA.file_name)
+    rows = {r["genome_id"]: r for r in metadata}
+    assert rows[gid][METADATA.columns.mgap_sample] == sample
+    assert sum(1 for r in metadata if r[METADATA.columns.mgap_sample]) == 1
 
 
 def test_carbapenemase_plasmid_is_identical(
@@ -261,17 +333,17 @@ def test_carbapenemase_plasmid_is_identical(
     neighborhoods: list[list[str]] = []
     for gid, site in carriers.items():
         assert site["contig_classification"] == "plasmid"
-        faa = _fasta(L.BAKTA.faa.resolve(small_results, gid).read_text())
+        faa = _fasta(_at(L.BAKTA.faa, small_results, small_manifest, gid).read_text())
         rows = [
             r
-            for r in _rows(L.BAKTA.tsv.resolve(small_results, gid))
+            for r in _rows(_at(L.BAKTA.tsv, small_results, small_manifest, gid))
             if r[0] == site["contig"] and r[1] == L.BAKTA.feature_types.cds
         ]
         index = next(i for i, r in enumerate(rows) if r[5] == site["locus_tag"])
         assert index >= 8 and len(rows) - index - 1 >= 8
         window = rows[index - 8 : index + 9]
         neighborhoods.append([sha1_16(faa[r[5]]) for r in window])
-        report = _dicts(L.AMRFINDERPLUS.report.resolve(small_results, gid))
+        report = _dicts(_at(L.AMRFINDERPLUS.report, small_results, small_manifest, gid))
         symbol = L.AMRFINDERPLUS.columns.element_symbol
         assert any(r[symbol] == "blaKPC-2" for r in report)
     assert all(n == neighborhoods[0] for n in neighborhoods)
@@ -285,15 +357,15 @@ def test_point_mutations_overlap_cds(small_results: Path, small_manifest: dict[s
     c = L.AMRFINDERPLUS.columns
     for symbol, carriers in point.items():
         for gid, site in carriers.items():
-            report = _dicts(L.AMRFINDERPLUS.report.resolve(small_results, gid))
-            mutations = _dicts(L.AMRFINDERPLUS.mutations.resolve(small_results, gid))
+            report = _dicts(_at(L.AMRFINDERPLUS.report, small_results, small_manifest, gid))
+            mutations = _dicts(_at(L.AMRFINDERPLUS.mutations, small_results, small_manifest, gid))
             for rows in (report, mutations):
                 row = next(r for r in rows if r[c.element_symbol] == symbol)
                 assert row[c.subtype] == L.AMRFINDERPLUS.subtype_point
                 assert (row[c.contig_id], int(row[c.start])) == (site["contig"], site["start"])
             bakta = [
                 r
-                for r in _rows(L.BAKTA.tsv.resolve(small_results, gid))
+                for r in _rows(_at(L.BAKTA.tsv, small_results, small_manifest, gid))
                 if r[0] == site["contig"] and r[1] == L.BAKTA.feature_types.cds
             ]
             assert any(int(r[2]) <= site["end"] and int(r[3]) >= site["start"] for r in bakta), (
@@ -311,7 +383,7 @@ def test_mutation_report_has_wildtype_rows(
     names = [
         r[c.element_name]
         for gid in small_manifest["genomes"]
-        for r in _dicts(L.AMRFINDERPLUS.mutations.resolve(small_results, gid))
+        for r in _dicts(_at(L.AMRFINDERPLUS.mutations, small_results, small_manifest, gid))
     ]
     assert any(n.endswith(L.AMRFINDERPLUS.wildtype_suffix) for n in names)
     assert any(n.endswith(L.AMRFINDERPLUS.unknown_suffix) for n in names)
@@ -321,7 +393,10 @@ def test_fallback_genome_has_nothing(small_results: Path, small_manifest: dict[s
     (gid,) = small_manifest["plants"]["no_determinants_no_plasmid"]
     for path in (L.AMRFINDERPLUS.report, L.AMRFINDERPLUS.mutations, L.RGI.report,
                  L.GENOMAD.plasmid_summary):  # fmt: skip
-        assert len(_rows(path.resolve(small_results, gid))) == 1, path.template
+        resolved = _at(path, small_results, small_manifest, gid)
+        if path.optional and not resolved.exists():
+            continue
+        assert len(_rows(resolved)) == 1, path.template
     assert not small_manifest["genomes"][gid]["plasmids"]
     assert small_manifest["genomes"][gid]["resistance_phrases"] == []
 
@@ -332,18 +407,21 @@ def test_mobsuite_present_for_some_only(
     mob = small_manifest["plants"]["mobsuite"]
     assert mob["with"] and mob["without"]
     for gid in mob["without"]:
-        assert not L.MOBSUITE.directory.resolve(small_results, gid).exists()
+        assert not _at(L.MOBSUITE.directory, small_results, small_manifest, gid).exists()
     for gid in mob["with"]:
-        assert L.MOBSUITE.contig_report.resolve(small_results, gid).is_file()
+        assert _at(L.MOBSUITE.contig_report, small_results, small_manifest, gid).is_file()
         has_plasmids = bool(small_manifest["genomes"][gid]["plasmids"])
-        assert L.MOBSUITE.mobtyper_results.resolve(small_results, gid).exists() == has_plasmids
+        assert (
+            _at(L.MOBSUITE.mobtyper_results, small_results, small_manifest, gid).exists()
+            == has_plasmids
+        )
 
 
 def test_regions_from_genomad(small_results: Path, small_manifest: dict[str, Any]) -> None:
     prophages = small_manifest["plants"]["prophages"]
     assert prophages
     for gid, regions in prophages.items():
-        rows = _dicts(L.GENOMAD.virus_summary.resolve(small_results, gid))
+        rows = _dicts(_at(L.GENOMAD.virus_summary, small_results, small_manifest, gid))
         names = {r[L.GENOMAD.virus_columns.seq_name] for r in rows}
         for region in regions:
             name = L.GENOMAD.provirus_name.format(
@@ -351,7 +429,7 @@ def test_regions_from_genomad(small_results: Path, small_manifest: dict[str, Any
             )
             assert name in names
     for gid, contigs in small_manifest["plants"]["genomad_plasmids"].items():
-        rows = _dicts(L.GENOMAD.plasmid_summary.resolve(small_results, gid))
+        rows = _dicts(_at(L.GENOMAD.plasmid_summary, small_results, small_manifest, gid))
         assert [r[L.GENOMAD.plasmid_columns.seq_name] for r in rows] == contigs
 
 
@@ -362,12 +440,14 @@ def test_mixed_annotation_versions(small_results: Path, small_manifest: dict[str
     assert len(mixed["amrfinderplus_database"]) == 2
     for version, genomes in mixed["bakta_database"].items():
         for gid in genomes:
-            txt = L.BAKTA.summary.resolve(small_results, gid).read_text()
+            txt = _at(L.BAKTA.summary, small_results, small_manifest, gid).read_text()
             assert f"Database: v{version}, full" in txt
     process = L.AMRFINDERPLUS.process
     for version, genomes in mixed["amrfinderplus_database"].items():
         for gid in genomes:
-            data = yaml.safe_load(L.AMRFINDERPLUS.versions.resolve(small_results, gid).read_text())
+            data = yaml.safe_load(
+                _at(L.AMRFINDERPLUS.versions, small_results, small_manifest, gid).read_text()
+            )
             assert data[process][L.AMRFINDERPLUS.database_key] == version
 
 
@@ -381,7 +461,7 @@ def test_species_assignment_plants(small_results: Path, small_manifest: dict[str
     (conflict, sources) = next(iter(plants["species_conflict"].items()))
     assert sources["metadata"] == "Klebsiella pneumoniae"
     assert classified[conflict][L.GTDBTK.columns.classification].endswith(sources["gtdbtk"])
-    bracken = _dicts(L.BRACKEN.report.resolve(small_results, conflict))
+    bracken = _dicts(_at(L.BRACKEN.report, small_results, small_manifest, conflict))
     assert bracken[0][L.BRACKEN.columns.name] == sources["kraken2"]
 
 
@@ -389,11 +469,11 @@ def test_typing_plants(small_results: Path, small_manifest: dict[str, Any]) -> N
     typing = small_manifest["plants"]["typing"]
     assert set(typing) == {L.KLEBORATE.tool, L.SISTR.tool, L.SCCMEC.tool}
     (absent,) = small_manifest["plants"]["typing_absent"]
-    assert not L.KLEBORATE.report.resolve(small_results, absent).exists()
+    assert not _at(L.KLEBORATE.report, small_results, small_manifest, absent).exists()
     for gid in typing[L.KLEBORATE.tool]:
-        assert L.KLEBORATE.report.resolve(small_results, gid).is_file()
+        assert _at(L.KLEBORATE.report, small_results, small_manifest, gid).is_file()
     (novel,) = small_manifest["plants"]["novel_st"]
-    mlst = _rows(L.MLST.report.resolve(small_results, novel))[0]
+    mlst = _rows(_at(L.MLST.report, small_results, small_manifest, novel))[0]
     assert mlst[2] == L.MLST.missing
 
 
@@ -416,6 +496,7 @@ def test_side_tables(small_synth: Path, small_manifest: dict[str, Any]) -> None:
     assert {r["genome_id"] for r in metadata} == genomes
     assert list(metadata[0])[: len(METADATA.columns.names())] == list(METADATA.columns.names())
     assert len(metadata[0]) > len(METADATA.columns.names())
+    assert METADATA.columns.mgap_sample in metadata[0]
     dates = {r[METADATA.columns.isolation_date] for r in metadata}
     assert {len(d) for d in dates} >= {4, 7, 10} or len(genomes) < 10
     assert any(r[METADATA.columns.species] for r in metadata)

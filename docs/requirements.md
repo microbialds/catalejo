@@ -1,6 +1,6 @@
 # Requirements
 
-Catalejo Genómico. Version 0.3, 2026-09-27. Status: draft for review.
+Catalejo Genómico. Version 0.4, 2026-09-29. Status: draft for review.
 
 This document states what the platform does, page by page, and the constraints it is built under. It is the companion of `docs/data-contract.md`, which defines the data the platform reads; where the two disagree, the contract wins and this document is corrected. The critic checklist (`docs/critic-checklist.md`) is derived from the acceptance items at the end of each page section, and the build plan takes its milestones from §14.
 
@@ -60,7 +60,7 @@ No instance stores user data. There are no accounts, profiles, saved objects or 
 
 ### 5.1 Shell
 
-Every page shares the shell shown on the final canvas boards. A 200 px left column holds the wordmark (Catalejo, with the tagline "microbial genome collection"), the navigation in two groups, Explore (Collection, Genome sets, Genomes, Genes) and Analyze (Phylogeny, Pangenome, Embeddings, Sequence search), and a footer with the release identifier, the genome count, the pipeline version and a link to the Methods page. The active page is marked by a left rule in the accent color.
+Every page shares the shell shown on the final canvas boards. A 200 px left column holds the wordmark (Catalejo, with the tagline "microbial genome collection"), the navigation in two groups, Explore (Collection, Genome sets, Genomes, Genes) and Analyze (Phylogeny, Pangenome, Embeddings, Sequence search), and a footer with the release identifier (a link to the Releases page), the genome count, the pipeline name and version from the manifest (contract §6.4), and a link to the Methods page. The active page is marked by a left rule in the accent color.
 
 A 56 px bar spans the top of every page and shows the current genome set (the count as a large numeral, the phrase "genomes in the current set", the active filters as chips, an "add filter" link), a search field on pages where search applies, and the actions "Share link" and "Save set".
 
@@ -90,6 +90,7 @@ Routes are stable and are part of what users cite. Query parameters encode the s
 | `/genes` | Genes page, search state |
 | `/genes/<namespace>/<name>` | Genes page for one gene; namespace is `symbol`, `element` or `cluster` |
 | `/trees` and `/trees/<tree_id>` | Phylogeny |
+| `/pangenome` | Pangenome, species chooser listing the species with a pangenome in the release, each opening `/pangenome/<species_code>` |
 | `/pangenome/<species_code>` | Pangenome |
 | `/embeddings` | Embeddings |
 | `/search` | Sequence search |

@@ -1,6 +1,6 @@
 # Data contract
 
-Version 0.6, 2026-09-25. Status: draft for review.
+Version 0.7, 2026-09-29. Status: draft for review.
 
 This document is the interface between the ingestion package (`packages/ingest`, Python) and the web application (`packages/web`, TypeScript). Both are built against it. Anything the web application reads is defined here; anything the ingestion package writes is defined here. A change to this document is a schema change and bumps `schema_version`.
 
@@ -66,17 +66,18 @@ Within a major schema version, columns may be added but never removed or retyped
 
 ### 3.1 Genome and isolate
 
-`genome_id` is the internal identifier assigned by the maintaining group and used as the sample name in mgap. It follows a configurable pattern, by default `^[A-Z]{2,5}[0-9]{3,6}$` (for example `SCL0421`). The pattern lives in `config/platform.yaml` and is validated at ingestion.
+`genome_id` is the identifier assigned by the maintaining group or received with the isolate (for example `SCL0421`). Collections take identifiers from many origins, so any form is accepted within a character set that is safe in paths and URLs. The default pattern, `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`, lives in `config/platform.yaml`, where a group may tighten it, and is validated at ingestion. The mgap sample name may differ from `genome_id` (for example a platform prefix such as `ont_SCL30014` for `SCL30014`); the metadata table maps one to the other (§4.2).
 
 Rules.
 
+- A `genome_id` is unique in the collection, compared without regard to case because release files are stored on file systems that may ignore case.
 - A `genome_id` is never reused. A genome removed from the collection leaves a tombstone (§5.16).
 - One isolate has one genome. If an isolate is re-sequenced or re-assembled, the new assembly keeps the same `genome_id`, `assembly_version` increments, and the previous assembly is retired. Everything derived from the genome is recomputed at the next release. The feature mapping in §3.4 links old and new feature IDs where coordinates allow; across a re-assembly most features will not map, which is expected.
 - `biosample_accession` and `assembly_accession` are optional and can be added at any release without changing `genome_id`.
 
 ### 3.2 Contig
 
-`contig_id` is the contig name as it appears in the assembly FASTA and in the Bakta output for that genome, unique within the genome. Contig names are stable across re-annotation because re-annotation does not touch the assembly. Across a re-assembly they change, which is covered by `assembly_version`.
+`contig_id` is the contig name in the Bakta nucleotide FASTA (`.fna`) for that genome, unique within the genome. Every annotation module reads that FASTA and reports the same names; where a module reports assembler names instead (RGI runs on the SPAdes scaffolds), they are mapped to Bakta names by sequence. Contig names are stable across re-annotation because re-annotation does not touch the assembly. Across a re-assembly they change, which is covered by `assembly_version`.
 
 ### 3.3 Species
 
@@ -87,11 +88,11 @@ Species is assigned once per genome at ingestion by the first source available i
 3. MLST scheme name, mapped through the species registry
 4. Kraken2/Bracken majority species from the mgap contamination step
 
-The assigned name must exist in `species_registry` (§5.1), which maps aliases and scheme names to one canonical binomial and a short `species_code` used in partition paths. A genome whose assigned name is absent from the registry fails validation. When two sources disagree, the higher-precedence source wins and `species_conflict` is set to true so the genome page can show a note. Because several MLST schemes cover a species complex (the *Klebsiella* scheme, for instance), a scheme may map to the complex's canonical name in the registry, and GTDB-Tk remains the way to resolve members of a complex when that distinction matters.
+The assigned name must exist in `species_registry` (§5.1), loaded from `config/species_registry.yaml` (§4.9), which maps aliases and scheme names to one canonical binomial and a short `species_code` used in partition paths. A genome whose assigned name is absent from the registry fails validation. When two sources disagree, the higher-precedence source wins and `species_conflict` is set to true so the genome page can show a note. Because several MLST schemes cover a species complex (the *Klebsiella* scheme, for instance), a scheme may map to the complex's canonical name in the registry, and GTDB-Tk remains the way to resolve members of a complex when that distinction matters.
 
 ### 3.4 Feature
 
-`feature_id` is a positional hash, the first 16 hexadecimal characters of SHA-1 over the string `genome_id|contig_id|start|end|strand`, with `start` and `end` as 1-based inclusive integers and `strand` as `+` or `-`. Re-annotation that predicts the same feature at the same coordinates yields the same identifier without any lookup.
+`feature_id` is a positional hash, the first 16 hexadecimal characters of SHA-1 over the string `genome_id|contig_id|start|end|strand`, with `start` and `end` as 1-based inclusive integers and `strand` as Bakta writes it (`+`, `-`, or `?` and `.` for origins and assembly gaps), entered in the hash unchanged. Re-annotation that predicts the same feature at the same coordinates yields the same identifier without any lookup.
 
 When coordinates change between releases, `release build` writes `feature_mapping` (§5.7) by reciprocal overlap on the same contig and strand. The overlap fraction is the length shared by the old and the new feature divided by the length of the shorter one; it is a coordinate measure, unrelated to sequence identity. A fraction of 1.0 means one feature lies entirely within the other, and the default threshold of 0.9 accepts a start-codon shift or a few codons of difference while rejecting a feature that was split or replaced. Unmapped features are recorded with a null target so the application can explain a stale link. The threshold is a parameter in `config/platform.yaml` and should be reviewed after the first re-annotation, by inspecting how many features fall between 0.5 and 0.9.
 
@@ -109,24 +110,29 @@ A gene can be referred to by its Bakta gene symbol (`feature.gene`), by the alle
 
 ### 4.1 mgap results directory
 
-The ingestion package reads an mgap output directory (gene2dis/mgap, `--outdir`). Paths below are relative to that directory and reflect the module layout of mgap at the time of writing; the parser for each module lives in `packages/ingest/src/ingest/parsers/<module>.py` and is the single place that knows the file names, so a change in mgap output touches one file.
+The ingestion package reads an mgap output directory (gene2dis/mgap, `--outdir`). Paths below are relative to that directory and reflect mgap 2.0.0 as observed on an Illumina run and a nanopore run. Each genome has one directory named by its mgap sample (`<s>`, §3.1), and most files inside it are named by a file prefix (`<p>`), which is discovered from the Bakta output and usually equals `<s>`. Every path and column name is defined once in `packages/ingest/src/ingest/mgap_layout.py`, which the parsers (`packages/ingest/src/ingest/parsers/<module>.py`) and the synthetic generator import, so a change in mgap output touches one file. Entries marked provisional have not yet been seen in an mgap run and follow the tool's documented output.
 
 | Module | Files read | Feeds |
 |---|---|---|
-| Assembly (Flye, SPAdes, Autocycler) and Dnaapler | assembly FASTA, assembler info or GFA for circularity | `genome`, `contig` |
-| CheckM2 | `quality_report.tsv` | `genome` (QC columns) |
-| Kraken2 / Bracken | report files | `genome` (`kraken2_top_taxon`, `kraken2_top_fraction`) |
-| MLST | `mlst.tsv` | `genome` (`mlst_scheme`, `st`), `typing` (alleles) |
-| GTDB-Tk | `gtdbtk.bac120.summary.tsv` | `genome` (`gtdb_classification`, `gtdb_closest_reference`) |
-| Bakta | `<genome_id>.tsv`, `<genome_id>.gff3`, `<genome_id>.gbff`, `<genome_id>.faa`, `<genome_id>.ffn`, `<genome_id>.txt` | `contig`, `feature`, per-genome files |
-| AMRFinderPlus | `<genome_id>.amrfinder.tsv` (with nucleotide input so contig coordinates are present) | `annotation_hit` (rows of type gene), `mutation` (rows of type point mutation) |
-| RGI | `<genome_id>.rgi.txt` | `annotation_hit` |
-| geNomad | `<genome_id>_summary/*_virus_summary.tsv`, `*_plasmid_summary.tsv` | `region` |
-| MOB-suite | `contig_report.txt`, `mobtyper_results.txt` | `contig` (plasmid columns) |
-| Kleborate, sccmec, SISTR | tool-specific TSV | `typing` |
+| Assembly, Illumina (SPAdes) | `<s>/assemblies/<p>.scaffolds.fa.gz`, `<p>.contigs.fa.gz`, `<p>.assembly.gfa.gz` | `genome` (`assembler`, `platform`) |
+| Assembly, nanopore (Autocycler, Dnaapler) | `<s>/assemblies/autocycler/<p>.fasta` and `<p>.gfa`, `<s>/assemblies/dnaapler/<p>.fasta` (uncompressed) | `genome` (`assembler`, `platform`) |
+| Bakta | `<s>/annotation/bakta/<p>.tsv`, `.gff3`, `.gbff`, `.faa`, `.ffn`, `.fna`, `.txt` | `contig` (names, lengths, and `topology` and completeness from the `.fna` header tags), `feature`, per-genome files, Bakta database version |
+| CheckM2 | `<s>/annotation/checkm2/<s>_checkm2_report.tsv` | `genome` (QC columns) |
+| QUAST | `<s>/qc/quast/<p>.tsv` | `genome` (assembly statistics, cross-check) |
+| Kraken2 / Bracken | `<s>/read_processing/kraken2/<p>.kraken2.report.txt`; `<s>/read_processing/bracken/<p>.tsv` when Bracken ran | `genome` (`kraken2_top_taxon`, `kraken2_top_fraction`) |
+| MLST | `<s>/annotation/mlst/<p>.tsv` (one line, no header) | `genome` (`mlst_scheme`, `st`), `typing` (alleles) |
+| GTDB-Tk (provisional) | `gtdbtk/gtdbtk.bac120.summary.tsv` | `genome` (`gtdb_classification`, `gtdb_closest_reference`) |
+| AMRFinderPlus | `<s>/annotation/amrfinder/<p>.tsv` and `<p>-mutations.tsv` (nucleotide input, so contig coordinates are present) | `annotation_hit` (rows other than point mutations), `mutation` (rows of subtype POINT, §5.6) |
+| RGI (optional) | `<s>/annotation/rgi/<p>.txt` | `annotation_hit` |
+| geNomad | `<s>/annotation/genomad/<s>_summary/<s>_virus_summary.tsv`, `<s>_plasmid_summary.tsv` | `region`, contig classification without MOB-suite (§10) |
+| MOB-suite (optional) | `<s>/annotation/mobsuite/contig_report.txt`, `mobtyper_results.txt` (the second only when a plasmid is found) | `contig` (plasmid columns) |
+| Kleborate | `<s>/annotation/kleborate/klebsiella_pneumo_complex_output.txt` | `typing` |
+| SISTR, sccmec (provisional) | `<s>/annotation/sistr/<p>.tab`, `<s>/annotation/sccmec/<p>.tsv` | `typing` |
 | Pipeline info | `pipeline_info/software_versions.yml` (nf-core convention) | `tool_version` |
 
-Tool and database versions are read from the pipeline info file and attached to each genome (`tool_version`), so that prevalence plots can warn when a genome set mixes annotation versions.
+Names written inside the reports (the CheckM2 `Name`, the MLST file column, the Kleborate `strain`) come from the assembly file and differ between platforms; parsers never key on them, since each per-genome report holds one genome.
+
+Tool and database versions are attached to each genome (`tool_version`), so that prevalence plots can warn when a genome set mixes annotation versions. They are read from per-genome sources first (the Bakta database from the Bakta `.txt` summary, a per-genome `versions.yml` where mgap writes one) and otherwise from the run's `pipeline_info/software_versions.yml`, whose `Workflow` entry also gives the pipeline version. A version absent from every source is null.
 
 ### 4.2 Metadata table
 
@@ -135,6 +141,7 @@ A CSV or TSV named `metadata.csv`, one row per genome. Only `genome_id` is manda
 | Column | Type | Vocabulary or format |
 |---|---|---|
 | `genome_id` | string | pattern from `config/platform.yaml` |
+| `mgap_sample` | string | sample directory name in the mgap results; defaults to `genome_id`. `metadata init` proposes `genome_id` from it with `sample_name_rules` in `config/platform.yaml` |
 | `species` | string | canonical name or alias in `species_registry`; overrides tool assignment |
 | `source_type` | string | controlled: `clinical`, `environmental`, `food`, `animal`, `other` |
 | `isolation_date` | date | ISO 8601, `YYYY`, `YYYY-MM` or `YYYY-MM-DD`; precision is preserved in `isolation_date_precision` |
@@ -203,6 +210,23 @@ The two-dimensional projection is computed by `release build` (UMAP, with `n_nei
 
 `groups.csv` with columns `group_id`, `name`, `description`, and `genome_groups.csv` with columns `genome_id`, `group_id`. A genome may belong to several groups. Every genome must belong to at least one group; `release build --group` filters on this table.
 
+### 4.9 Species registry
+
+`config/species_registry.yaml`, checked into the repository and kept across releases, with one entry per species.
+
+| Field | Content |
+|---|---|
+| `species_code` | 3 to 5 uppercase letters (§5.1) |
+| `canonical_name` | binomial |
+| `gtdb_name` | name as GTDB writes it, optional |
+| `ncbi_taxid` | optional |
+| `aliases` | alternative spellings and subspecies names |
+| `mlst_schemes` | MLST scheme names that map to this species |
+| `pangenome_eligible` | whether a pangenome and tree are expected |
+| `color_index` | position in the species sequence of `config/palette.yaml`, set once when the species is added and never changed; null for species beyond the eighth, which take the palette's `other` color |
+
+`ingest` loads the file into `species_registry` and resolves `color` from the palette. Adding a species is a change to this file.
+
 ---
 
 ## 5. Master catalog tables
@@ -220,7 +244,7 @@ The master catalog is one DuckDB file, `catalog/<release_id>.duckdb`, kept by th
 | `aliases` | VARCHAR[] | alternative spellings and subspecies names that map here |
 | `mlst_schemes` | VARCHAR[] | scheme names that map here |
 | `pangenome_eligible` | BOOLEAN | whether a pangenome and tree are expected |
-| `color` | VARCHAR | hex color from the species palette, assigned at registry time so it is stable across releases |
+| `color` | VARCHAR | hex color from the species palette, resolved at ingestion from `color_index` (§4.9), so it is stable across releases |
 
 ### 5.2 `genome`
 
@@ -237,7 +261,7 @@ The master catalog is one DuckDB file, `catalog/<release_id>.duckdb`, kept by th
 | `mlst_scheme`, `st` | VARCHAR, VARCHAR | `st` as text to allow `ST258-1LV` style values |
 | `platform` | VARCHAR | `illumina`, `ont`, `pacbio`, `hybrid` |
 | `assembler`, `assembler_version` | VARCHAR | |
-| `assembly_status` | VARCHAR | `complete` when every classified replicon is circular, else `draft` |
+| `assembly_status` | VARCHAR | `complete` when every classified replicon is circular, else `draft`; circularity from the Bakta `.fna` header tags |
 | `genome_size`, `contig_count`, `n50`, `gc_content` | BIGINT, INTEGER, BIGINT, FLOAT | |
 | `cds_count`, `rrna_count`, `trna_count` | INTEGER | from Bakta summary |
 | `checkm2_completeness`, `checkm2_contamination` | FLOAT | |
@@ -255,7 +279,7 @@ The master catalog is one DuckDB file, `catalog/<release_id>.duckdb`, kept by th
 | `contig_index` | INTEGER | order in the assembly FASTA |
 | `length` | BIGINT | |
 | `gc_content` | FLOAT | |
-| `topology` | VARCHAR | `circular`, `linear`, `unknown` |
+| `topology` | VARCHAR | `circular`, `linear`, `unknown`, from the Bakta `.fna` header tags |
 | `classification` | VARCHAR | `chromosome`, `plasmid`, `unclassified` from MOB-suite when run, else derived from geNomad (§10) |
 | `classification_source` | VARCHAR | `mobsuite` or `genomad` |
 | `mob_cluster_id` | VARCHAR | MOB-suite primary cluster, nullable; enables "same plasmid in N genomes" |
@@ -272,8 +296,8 @@ The master catalog is one DuckDB file, `catalog/<release_id>.duckdb`, kept by th
 | `feature_id` | VARCHAR, primary key | §3.4 |
 | `genome_id`, `contig_id` | VARCHAR | |
 | `start`, `end` | BIGINT | 1-based inclusive |
-| `strand` | VARCHAR | `+` or `-` |
-| `type` | VARCHAR | Bakta feature type (`cds`, `rRNA`, `tRNA`, `tmRNA`, `ncRNA`, `ncRNA-region`, `crispr`, `sorf`, `gap`, `oriC`, `oriV`, `oriT`) |
+| `strand` | VARCHAR | `+`, `-`, `?` or `.` as Bakta writes them |
+| `type` | VARCHAR | Bakta feature type as the Bakta `.tsv` names it (`cds`, `rRNA`, `tRNA`, `tmRNA`, `ncRNA`, `ncRNA-region`, `crispr`, `sorf`, `assembly_gap`, `oriC`, `oriV`, `oriT`) |
 | `locus_tag` | VARCHAR | Bakta locus tag, informative only |
 | `gene` | VARCHAR | gene symbol, nullable |
 | `product` | VARCHAR | |
@@ -310,12 +334,14 @@ Sequences are not stored in this table. Protein and nucleotide sequences are in 
 | `genome_id`, `contig_id` | VARCHAR | |
 | `feature_id` | VARCHAR | nullable when no overlapping feature exists |
 | `source_tool`, `source_db`, `source_db_version` | VARCHAR | `amrfinderplus`, `tbprofiler`, others |
-| `gene` | VARCHAR | reference gene symbol |
-| `variant` | VARCHAR | as reported (`S83I`, `c.-32T>C`) |
+| `gene` | VARCHAR | reference gene symbol; for AMRFinderPlus, the element symbol before its last underscore (`gyrA` in `gyrA_S83I`) |
+| `variant` | VARCHAR | as reported (`S83I`, `c.-32T>C`); for AMRFinderPlus, the part of the element symbol after its last underscore (`S83I`, `C-112T`) |
 | `variant_type` | VARCHAR | `substitution`, `deletion`, `insertion`, `promoter`, `other` |
 | `drug_class` | VARCHAR | nullable |
 | `start`, `end`, `strand` | BIGINT, BIGINT, VARCHAR | hit coordinates when reported, nullable |
 | `confidence` | VARCHAR | tool-specific, nullable |
+
+Point mutations from AMRFinderPlus come from its rows of subtype POINT. The mutations report also lists wild-type and unknown positions, which are not mutations and are not ingested.
 
 ### 5.7 `feature_mapping`
 
@@ -346,7 +372,7 @@ Written only when a previous release exists.
 |---|---|---|
 | `genome_id` | VARCHAR | |
 | `source_tool`, `tool_version` | VARCHAR | `mlst`, `kleborate`, `sistr`, `sccmec` |
-| `key` | VARCHAR | column name as the tool names it (`K_locus`, `serovar`, `SCCmec_type`, `gapA`) |
+| `key` | VARCHAR | column name as the tool names it (`K_locus`, `serovar`, `type`, `gapA`) |
 | `value` | VARCHAR | |
 | `display_group` | VARCHAR | `typing`, `virulence`, `resistance_score`, `allele`, used to decide which keys appear as chips on the genome page |
 
@@ -415,7 +441,7 @@ User-defined sets are never stored in the catalog; they exist as URL state or as
 
 ### 5.15 `tool_version`
 
-`genome_id`, `tool`, `version`, `database`, `database_version`. One row per tool per genome, read from the pipeline info file. `release build` also writes the distinct set of versions in the manifest so the Methods page can render it without scanning.
+`genome_id`, `tool`, `version`, `database`, `database_version`. One row per tool per genome, read as §4.1 states; the pipeline itself is recorded as tool `mgap`, and a version absent from every source is null. `release build` also writes the distinct set of versions in the manifest so the Methods page can render it without scanning.
 
 ### 5.16 `tombstone`
 
@@ -501,6 +527,7 @@ Under `genomes/<species_code>/<genome_id>/`.
   "group_id": null,
   "created": "2026-09-25T18:00:00Z",
   "platform_name": "Catalejo",
+  "pipeline": {"name": "gene2dis/mgap", "versions": ["2.0.0"]},
   "genome_count": 4812,
   "species": [{"species_code": "KPN", "canonical_name": "Klebsiella pneumoniae", "genome_count": 1638, "has_pangenome": true, "tree_ids": ["KPN-core-2026-09"]}],
   "tool_versions": [{"tool": "bakta", "versions": ["1.11.0"], "database_versions": ["5.1"]}],
@@ -512,6 +539,8 @@ Under `genomes/<species_code>/<genome_id>/`.
   "checks": {"validated": true, "validated_at": "2026-09-25T17:40:00Z", "warnings": 3}
 }
 ```
+
+`pipeline` names the workflow that produced the genomes and the distinct versions recorded for them in `tool_version` (tool `mgap`), for the release footer and the Methods page; `versions` is empty when no run recorded one.
 
 The application reads only the manifest at startup and opens tables on demand.
 
@@ -547,7 +576,7 @@ The Genes page aligns neighborhoods across a genome set by matching flanking fea
 
 > A {resistance_phrase} {st} isolate from {isolation_site}, collected in {year}, with {completeness}% completeness and {contamination}% contamination. It carries {top_determinant} on a {plasmid_size} {replicon} plasmid together with {n_other} other resistance determinants{mutation_clause}, and belongs to a group of {cluster_size} {st} genomes in this release.
 
-Fallback templates cover genomes with no plasmid, no resistance determinants, no ST, or a draft assembly. `resistance_phrase` is derived from rules in the same file (for example, any carbapenemase element yields "carbapenem-resistant"), and those rules are shown on the Methods page.
+Fallback templates cover genomes with no plasmid, no resistance determinants, no ST, or a draft assembly. `resistance_phrase` is derived from rules in the same file (for example, any carbapenemase element yields "carbapenem-resistant"), and those rules are shown on the Methods page. A sentence beginning with the article "A" takes "An" when the next word begins with a vowel sound (ESBL, ST); the rule lives in `config/summary_templates.yaml` with the templates.
 
 ### 7.5 Genome set exchange format
 
@@ -563,7 +592,7 @@ Both `filters` and `genome_ids` are present. On load in a later release the appl
 
 ## 8. Ingestion commands
 
-The package installs one command, `catalejo`. All commands read `config/platform.yaml`.
+The package installs one command, `catalejo`. All commands read `config/platform.yaml` and `config/species_registry.yaml`.
 
 ### 8.1 Metadata
 
@@ -619,7 +648,9 @@ Produces an mgap-shaped results directory with planted resistance determinants, 
 
 Failures
 
-- A `genome_id` that does not match the configured pattern, or appears in both `genome` and `tombstone`.
+- A `genome_id` that does not match the configured pattern, that equals another `genome_id` without regard to case, or that appears in both `genome` and `tombstone`.
+- A metadata `mgap_sample` absent from the mgap results, or one `mgap_sample` mapped by two genomes.
+- A species in `species_registry` whose `color_index` is shared with another species or lies outside the palette's species sequence.
 - A genome whose species is absent from `species_registry`.
 - A genome with no access group.
 - A feature with `end` beyond the contig length, or `start` greater than `end`.
@@ -644,6 +675,7 @@ Warnings
 
 - Whether VFDB hits come from Bakta cross-references or from a dedicated run; the `annotation_hit` table accepts either.
 - Tier 2 tables (protein index, vector index over cluster representatives) will be added as §5.19 onward without changing existing tables.
+- The synthetic generator (§8.5) takes species identities from `config/species_registry.yaml`, so synthetic genomes and the registry cannot disagree.
 
 ### Contig classification without MOB-suite
 

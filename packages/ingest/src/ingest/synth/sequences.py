@@ -11,6 +11,8 @@ import hashlib
 import random
 from functools import cache
 
+from ingest import identifiers
+
 BASES = "ACGT"
 STOP_CODONS = ("TAA", "TAG", "TGA")
 
@@ -105,8 +107,12 @@ def mutate_cds(cds: str, rng: random.Random, substitutions: int) -> str:
 
 
 def sha1_16(text: str) -> str:
-    """First 16 hex characters of SHA-1 (contract §3.4 and §5.4 hash form)."""
-    return hashlib.sha1(text.encode("utf-8")).hexdigest()[:16]
+    """First 16 hex characters of SHA-1 (contract §3.4 and §5.4 hash form).
+
+    Delegates to ``ingest.identifiers`` so synthetic and ingested identifiers
+    are computed by one function.
+    """
+    return identifiers.sha1_16(text)
 
 
 def md5_hex(seq: str) -> str:

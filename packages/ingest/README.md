@@ -1,6 +1,6 @@
 # catalejo-ingest
 
-The ingestion package of Catalejo Genómico. It installs the `catalejo` command, which will parse mgap results into the master catalog and build releases, and which at milestone 0 writes the synthetic data the tests and the critic run against. The data it reads and writes is defined in [docs/data-contract.md](../../docs/data-contract.md).
+The ingestion package of Catalejo Genómico. It installs the `catalejo` command, which parses mgap results into the master catalog, builds releases from it, and writes the synthetic data the tests and the critic run against. The data it reads and writes is defined in [docs/data-contract.md](../../docs/data-contract.md).
 
 ## Installation
 
@@ -13,25 +13,41 @@ uv run --project packages/ingest catalejo --help
 
 ## Command reference
 
-Every command of contract §8 exists. Only `synth` is implemented at milestone 0, and each of the others prints `not implemented until milestone <N>` to standard error and exits with code 2, so that a script calling it fails. The descriptions below are copied from the command's help, with the closing sentence "Not implemented until milestone N." of each stub moved to the last column.
+Every command of contract §8 exists. The commands of the Tier 0 pipeline are implemented as of milestone 1a, and each of the others prints `not implemented until milestone <N>` to standard error and exits with code 2, so that a script calling it fails. An implemented command prints what it did and exits with code 1 on any validation failure. The descriptions below are copied from the command's help.
 
 | Command | Help text | Milestone |
 |---|---|---|
 | `catalejo synth` | Write a synthetic mgap results directory and its side tables (contract §8.5). | implemented |
-| `catalejo metadata init` | Write metadata.csv from mgap results. | 1a |
-| `catalejo metadata validate` | Validate metadata.csv against contract §4.2. | 1a |
-| `catalejo ingest` | Build the master catalog from mgap results. | 1a |
-| `catalejo sets ingest` | Ingest curated genome sets. | 1a |
-| `catalejo groups ingest` | Ingest access groups and their members. | 1a |
-| `catalejo tombstones ingest` | Ingest tombstones. | 1a |
-| `catalejo release check` | Validate the catalog against contract §9. | 1a |
-| `catalejo release build` | Build the release layout of contract §6. | 1a |
+| `catalejo metadata init` | Write metadata.csv from mgap results, keeping manual entries (contract §4.2, §8.1). | implemented |
+| `catalejo metadata validate` | Validate metadata.csv against contract §4.2 and the input rules of §9. | implemented |
+| `catalejo ingest` | Build the master catalog from mgap results and metadata (contract §5, §8.2). | implemented |
+| `catalejo groups ingest` | Ingest access groups and their members into the catalog (contract §4.8, §5.17). | implemented |
+| `catalejo tombstones ingest` | Ingest tombstones and remove those genomes from the catalog (contract §4.7, §5.16). | implemented |
+| `catalejo sets ingest` | Ingest curated genome sets into the catalog (contract §4.6, §5.14). | implemented |
+| `catalejo release check` | Validate the catalog against contract §9; exit 1 on any failure. | implemented |
+| `catalejo release build` | Build the release layout of contract §6 from the catalog. | implemented |
 | `catalejo pangenome ingest` | Ingest a Panaroo pangenome directory. | 4a |
 | `catalejo pangenome map` | Map pangenome clusters to the previous release (§3.5). | 4a |
 | `catalejo tree ingest` | Ingest a tree directory. | 4a |
 | `catalejo release notes` | Generate NOTES.md against the previous release. | 5 |
 | `catalejo release publish` | Upload a release to object storage. | 5 |
 | `catalejo embeddings ingest` | Ingest an embedding file. | 6 |
+
+The Tier 0 sequence, as CI runs it on the synthetic data, reads as follows.
+
+```
+catalejo synth --species 10 --genomes 100 --out data/synth
+catalejo metadata init --mgap data/synth/results --existing data/synth/metadata.csv --out data/synth/metadata.csv
+catalejo ingest --mgap data/synth/results --metadata data/synth/metadata.csv --catalog data/catalog/synth.duckdb
+catalejo tombstones ingest --file data/synth/tombstones.csv --catalog data/catalog/synth.duckdb
+catalejo groups ingest --groups data/synth/groups.csv --members data/synth/genome_groups.csv --catalog data/catalog/synth.duckdb
+catalejo sets ingest --file data/synth/sets.csv --catalog data/catalog/synth.duckdb
+catalejo release check --catalog data/catalog/synth.duckdb --metadata data/synth/metadata.csv --mgap data/synth/results
+catalejo release build --catalog data/catalog/synth.duckdb --out releases/synth
+catalejo release check --catalog data/catalog/synth.duckdb --release releases/synth
+```
+
+On the default synthetic data the sequence takes about 12 seconds after `synth`, of which `ingest` takes 7 and `release build` 2. The catalog is 7.5 MB with 17 MB of per-genome files beside it, and the release is 32 MB in 660 files. `release check` passes with 28 warnings, which are the planted ones (species assigned from the MLST scheme only, one species conflict, mixed Bakta and AMRFinderPlus database versions in *Salmonella enterica*, pangenome-eligible species without a pangenome or tree, and a curated set of one genome).
 
 `catalejo --version` prints the package version. The help of `synth` reads as follows.
 
@@ -47,21 +63,6 @@ Every command of contract §8 exists. Only `synth` is implemented at milestone 0
 │    --genomes        <int range> [x>=1]  Number of genomes. [default: 60]               │
 │    --seed           <int>               Random seed. [default: 42]                     │
 │    --help                               Show this message and exit.                    │
-╰────────────────────────────────────────────────────────────────────────────────────────╯
-```
-
-The stubs already accept the options of contract §8, as the help of `release build` shows.
-
-```
- Usage: catalejo release build [OPTIONS]
-
- Build the release layout of contract §6. Not implemented until milestone 1a.
-
-╭─ Options ──────────────────────────────────────────────────────────────────────────────╮
-│ *  --catalog        <path>  Master catalog DuckDB file. [required]                     │
-│ *  --out            <path>  Release directory to write. [required]                     │
-│    --group          <str>   Build the release of one access group.                     │
-│    --help                   Show this message and exit.                                │
 ╰────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -101,7 +102,7 @@ The same arguments always produce byte-identical files, because every decision d
 
 ## Expected mgap layout
 
-[src/ingest/mgap_layout.py](src/ingest/mgap_layout.py) is the single definition of every mgap path and column name. The parsers (milestone 1a, in `src/ingest/parsers/`) and the synthetic generator both import it, and a test fails if either spells an mgap path or column itself. The layout was derived from two real mgap 2.0.0 runs, an Illumina run with two SPAdes draft genomes and a nanopore run with one complete genome assembled by Autocycler and reoriented by Dnaapler.
+[src/ingest/mgap_layout.py](src/ingest/mgap_layout.py) is the single definition of every mgap path and column name. The parsers in `src/ingest/parsers/` and the synthetic generator both import it, and a test fails if either spells an mgap path or column itself. The layout was derived from two real mgap 2.0.0 runs, an Illumina run with two SPAdes draft genomes and a nanopore run with one complete genome assembled by Autocycler and reoriented by Dnaapler.
 
 Path templates use two placeholders, `{sample}` for the per-genome directory of the results and `{prefix}` for the stem of most tool files, which `resolve_prefix()` discovers from the Bakta summary because a nanopore sample such as `ont_SCL30014` names its files `ont_SCL30014_`. `detect_platform()` tells a nanopore genome from an Illumina one by its assembly directory, and `parse_fna_header()` reads topology and completeness from the Bakta `.fna` headers on both platforms. RGI, MOB-suite and Bracken are optional modules that a run may skip.
 
@@ -109,15 +110,17 @@ Entries that neither run confirms follow the documented output of each tool unti
 
 The tests that compare the module against the two runs read `data/mgap-example/` and `data/ont_example/`, which exist only on the maintainer's machine, and are skipped elsewhere.
 
-## Metadata, external inputs and releases
+## Metadata, catalog and releases
 
-The metadata table and the `metadata` commands arrive in milestone 1a, as defined in [contract §4.2 and §8.1](../../docs/data-contract.md#42-metadata-table). Because an mgap sample name may differ from the genome_id, as `ont_SCL30014` does for SCL30014, `metadata init` will derive a candidate genome_id with the `sample_name_rules` of [config/platform.yaml](../../config/platform.yaml), and the `mgap_sample` column records the sample name and stays empty when it equals the genome_id. The column is part of data contract 0.7 (§3.1 and §4.2), and `synth` already writes it.
+`metadata init` lists the sample directories of an mgap results directory, proposes a genome_id for each with the `sample_name_rules` of [config/platform.yaml](../../config/platform.yaml) (`ont_SCL30014` becomes SCL30014), and fills `mgap_sample` and `platform`. It never fills `species`, because a filled value would always win over the tools and hide their conflicts. With `--existing` every non-empty cell of the existing file wins, unrecognized columns are kept, and rows for samples no longer in the results are kept with a warning. `metadata validate` applies the rules of contract §4.2 and the input rules of §9, and with `--mgap` it also checks that every `mgap_sample` exists in the results and is mapped by one genome only.
 
-The genome_id pattern in `config/platform.yaml` is open by default, as contract 0.7 §3.1 states. Any identifier made of letters, digits, dots, underscores and hyphens, starting with a letter or digit and at most 64 characters long, is accepted, so identifiers received with isolates such as `SP10` pass unchanged. A group may tighten the pattern. Identifiers must also be unique without regard to case, which `metadata validate` and `release check` will enforce from milestone 1a.
+`ingest` validates the metadata, parses every mgap module of contract §4.1 with the parsers in `src/ingest/parsers/`, joins each genome's output into catalog rows (`src/ingest/assemble.py`), assigns the species by the precedence of §3.3 and writes every table of §5 in one transaction into a new file that then replaces `catalog/<release_id>.duckdb`. The release_id is the file stem (`YYYY-MM` with an optional letter, or `synth`). The Bakta GenBank, GFF3, FASTA and protein files of each genome are copied, gzip-compressed, to `<release_id>.files/` beside the catalog, because the release needs them and the catalog holds no sequences. Counters and summary sentences are computed from the catalog by `src/ingest/summary.py` with the templates of `config/summary_templates.yaml`. Re-running `ingest` with the same inputs gives the same catalog, and access groups, tombstones and curated sets already in the catalog are carried over. `tombstones ingest` removes a tombstoned genome from every table except `tombstone` and `genome_group`, whose rows for that genome only say which group releases carry its tombstone. `groups ingest` keeps member rows for genomes in the catalog or in `tombstone` and leaves out any other genome with a warning, which is why the sequence above runs `tombstones ingest` first. Running `groups ingest` again after `tombstones ingest` gives the same catalog.
 
-The external inputs of [contract §4.3 to §4.8](../../docs/data-contract.md#43-pangenome-inputs) arrive with milestones 1a for curated sets, tombstones and access groups, 4a for pangenomes and trees, and 6 for embeddings.
+`release check` runs one function per rule of contract §9 (`src/ingest/validate.py`), repeats the input rules when given `--metadata` and `--mgap`, and checks the manifest checksums of a built release and of its group releases when given `--release`. `release build` refuses a catalog that fails the check and writes the tables, summaries, per-genome files, CGView maps and manifest of contract §6 and §7 (`src/ingest/release/`). With `--group` it writes the release of one access group under `<out>/<group_id>/`. A group release recomputes the summary sentences of its genomes, because the group size in "belongs to a group of N ST11 genomes in this release" counts the genomes of that release, while the catalog and the full release keep the collection-wide counts. A group release holds the tombstones of the genomes listed in that group, and the full release holds every tombstone. It replaces its output only when that holds a `.catalejo-release` marker or is empty, and two builds of the same catalog are byte-identical except for the two timestamps of the manifest, which `SOURCE_DATE_EPOCH` fixes.
 
-The release procedure of [contract §8.3](../../docs/data-contract.md#83-release) arrives in milestone 1a for `release check` and `release build` and in milestone 5 for `release notes` and `release publish`.
+The genome_id pattern in `config/platform.yaml` is open by default, as contract 0.7 §3.1 states. Any identifier made of letters, digits, dots, underscores and hyphens, starting with a letter or digit and at most 64 characters long, is accepted, so identifiers received with isolates such as `SP10` pass unchanged. A group may tighten the pattern. Identifiers must also be unique without regard to case, which `metadata validate` and `release check` enforce.
+
+Pangenomes and trees arrive with milestone 4a, embeddings with milestone 6, and `release notes` and `release publish` with milestone 5.
 
 ## Configuration
 
@@ -127,7 +130,7 @@ The package reads the files in [config/](../../config) through `src/ingest/confi
 
 ## DuckDB pin and the cross-read test
 
-DuckDB Python is pinned to 1.4.5, on the same engine minor version (1.4) as the `@duckdb/duckdb-wasm` package the application uses, and [config/versions.yaml](../../config/versions.yaml) records both. The cross-read test writes [tests/fixtures/crossread.parquet](../../tests/fixtures/crossread.parquet) and `crossread.expected.json` beside it with DuckDB Python, one column per type the contract uses, and the web package reads the same file with DuckDB-WASM and compares every value. Both files are committed, and CI fails when the test changes them.
+DuckDB Python is pinned to 1.4.5, on the same engine minor version (1.4) as the `@duckdb/duckdb-wasm` package the application uses, and [config/versions.yaml](../../config/versions.yaml) records both. The cross-read test writes [tests/fixtures/crossread.parquet](../../tests/fixtures/crossread.parquet) and `crossread.expected.json` beside it with DuckDB Python, one column per type the contract uses, and the web package reads the same file with DuckDB-WASM and compares every value. Both files are committed, and CI fails when the test changes them. In the same way `tests/test_release.py` regenerates [tests/fixtures/cgview.json](../../tests/fixtures/cgview.json), the map of one small synthetic genome, which the web package loads into CGView.js.
 
 ## Tests and checks
 

@@ -143,7 +143,12 @@ def run_synth(out: Path, n_species: int, n_genomes: int, seed: int) -> SynthSumm
         side_rows[name] = text.count("\n") - 1
 
     manifest = build_manifest(
-        run, genomes, tables.group_members, tables.set_members, tables.tombstone
+        run,
+        genomes,
+        tables.group_members,
+        tables.set_members,
+        tables.tombstone,
+        tables.tombstone_groups,
     )
     side.text(MANIFEST, json.dumps(manifest, indent=2, sort_keys=True, ensure_ascii=False) + "\n")
     plants: dict[str, Any] = manifest["plants"]
@@ -206,6 +211,7 @@ def build_manifest(
     groups: dict[str, list[str]],
     sets: dict[str, list[str]],
     tombstone: tuple[str, str],
+    tombstone_groups: list[str],
 ) -> dict[str, Any]:
     ids = [g.genome_id for g in genomes]
 
@@ -387,7 +393,11 @@ def build_manifest(
         "missing_isolation_site": where(lambda g: not g.plan.metadata.isolation_site),
         "access_groups": groups,
         "curated_sets": sets,
-        "tombstone": {"genome_id": tombstone[0], "replaced_by": tombstone[1]},
+        "tombstone": {
+            "genome_id": tombstone[0],
+            "replaced_by": tombstone[1],
+            "access_groups": tombstone_groups,
+        },
         "prefixed_sample_name": {
             g.genome_id: {"mgap_sample": g.plan.sample, "file_prefix": g.plan.prefix}
             for g in genomes

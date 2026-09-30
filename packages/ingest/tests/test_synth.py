@@ -561,7 +561,13 @@ def test_side_tables(small_synth: Path, small_manifest: dict[str, Any]) -> None:
     by_group: dict[str, set[str]] = {}
     for r in members:
         by_group.setdefault(r["group_id"], set()).add(r["genome_id"])
-    assert set().union(*by_group.values()) == genomes
+    tomb = small_manifest["plants"]["tombstone"]
+    # Every genome, and the tombstoned genome in the core group only (decision 7c).
+    assert set().union(*by_group.values()) == genomes | {tomb["genome_id"]}
+    assert [g for g, m in by_group.items() if tomb["genome_id"] in m] == ["core"]
+    assert tomb["access_groups"] == ["core"]
+    for group, listed in small_manifest["plants"]["access_groups"].items():
+        assert set(listed) == by_group[group] - {tomb["genome_id"]}
     first, second = by_group.values()
     assert first & second
 

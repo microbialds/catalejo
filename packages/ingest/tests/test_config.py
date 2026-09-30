@@ -159,7 +159,9 @@ def test_species_registry_loads() -> None:
     palette = config.load_palette()
     codes = [s.species_code for s in registry.species]
     assert codes[:3] == ["KPN", "SEN", "SAU"]
-    assert [s.color_index for s in registry.species] == [0, 1, 2, 3, 4, 5, 6, 7, None, None]
+    # SPY (Streptococcus pyogenes) was added by the maintainer for the real mgap example.
+    assert [s.color_index for s in registry.species] == [0, 1, 2, 3, 4, 5, 6, 7, None, None, None]
+    assert registry.by_mlst_scheme("spyogenes") is registry.get("SPY")
     assert registry.color("KPN", palette) == palette.species.sequence[0]
     assert registry.color("EFM", palette) == palette.species.sequence[7]
     assert registry.color("SPN", palette) == palette.species.other

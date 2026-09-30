@@ -13,20 +13,10 @@ from ingest.cli import NOT_IMPLEMENTED_EXIT, app
 runner = CliRunner()
 
 STUBS: list[tuple[list[str], str]] = [
-    (["metadata", "init", "--mgap", "results", "--out", "metadata.csv"], "1a"),
-    (["metadata", "init", "--mgap", "r", "--out", "m.csv", "--existing", "old.csv"], "1a"),
-    (["metadata", "validate", "metadata.csv"], "1a"),
-    (["ingest", "--mgap", "results", "--metadata", "m.csv", "--catalog", "c.duckdb"], "1a"),
     (["pangenome", "ingest", "--dir", "pangenomes/KPN", "--catalog", "c.duckdb"], "4a"),
     (["pangenome", "map", "--previous", "p.duckdb", "--catalog", "c.duckdb"], "4a"),
     (["tree", "ingest", "--dir", "trees/KPN-core", "--catalog", "c.duckdb"], "4a"),
     (["embeddings", "ingest", "--file", "e.parquet", "--catalog", "c.duckdb"], "6"),
-    (["sets", "ingest", "--file", "sets.csv", "--catalog", "c.duckdb"], "1a"),
-    (["groups", "ingest", "--groups", "g.csv", "--members", "gg.csv", "--catalog", "c"], "1a"),
-    (["tombstones", "ingest", "--file", "tombstones.csv", "--catalog", "c.duckdb"], "1a"),
-    (["release", "check", "--catalog", "c.duckdb"], "1a"),
-    (["release", "build", "--catalog", "c.duckdb", "--out", "releases/x"], "1a"),
-    (["release", "build", "--catalog", "c.duckdb", "--out", "r", "--group", "core"], "1a"),
     (["release", "notes", "--catalog", "c.duckdb", "--previous", "p.duckdb"], "5"),
     (["release", "publish", "--dir", "releases/x", "--bucket", "b", "--group", "core"], "5"),
 ]

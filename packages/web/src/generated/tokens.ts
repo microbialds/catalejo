@@ -81,6 +81,17 @@ export const tokens = {
     active_rule: '3px',
     panel_title_rule_gap: '6px',
   },
+  marks: {
+    speciesOutlines: [
+      {
+        speciesIndex: 6,
+        speciesColor: '#F0E442',
+        background: 'light',
+        outlineWidth: '0.5px',
+        outlineColor: '#1c1c1a',
+      },
+    ],
+  },
 } as const;
 
 export type Tokens = typeof tokens;

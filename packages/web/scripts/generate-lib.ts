@@ -103,6 +103,41 @@ function resolvedColors(loaded: Loaded): Record<string, string> {
   return out;
 }
 
+/**
+ * The marks rules of design-tokens.yaml with their colors resolved: each
+ * species outline names the species color it applies to and the outline
+ * color, so components never resolve palette references themselves.
+ */
+function resolvedMarks(loaded: Loaded): { speciesOutlines: Record<string, string | number>[] } {
+  const marks = section(loaded.tokens, 'marks', loaded.tokensFile);
+  const rules = marks.species_outlines;
+  if (!Array.isArray(rules))
+    throw new Error(`${loaded.tokensFile}: marks.species_outlines must be a list`);
+  return {
+    speciesOutlines: rules.map((rule, i) => {
+      if (!isMap(rule))
+        throw new Error(
+          `${loaded.tokensFile}: marks.species_outlines.${String(i)} must be a mapping`,
+        );
+      const where = `marks.species_outlines.${String(i)}`;
+      const index = Number(scalar(rule.species_index, `${where}.species_index`));
+      return {
+        speciesIndex: index,
+        speciesColor: resolvePaletteRef(
+          loaded.palette,
+          `palette:species.sequence.${String(index)}`,
+        ),
+        background: scalar(rule.background, `${where}.background`),
+        outlineWidth: scalar(rule.outline_width, `${where}.outline_width`),
+        outlineColor: resolvePaletteRef(
+          loaded.palette,
+          scalar(rule.outline_color, `${where}.outline_color`),
+        ),
+      };
+    }),
+  };
+}
+
 function paletteModule(loaded: Loaded): string {
   return [
     `// ${HEADER}`,
@@ -122,6 +157,7 @@ function tokensModule(loaded: Loaded): string {
     spacing: section(tokens, 'spacing', tokensFile),
     layout: section(tokens, 'layout', tokensFile),
     shape: section(tokens, 'shape', tokensFile),
+    marks: resolvedMarks(loaded),
   };
   return [
     `// ${HEADER}`,

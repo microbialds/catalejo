@@ -4,10 +4,11 @@ dev/
 # Claude Code local settings
 .claude/settings.local.json
 
-# Data, catalogs and releases never enter the repository
-data/
-catalog/
-releases/
+# Data, catalogs and releases never enter the repository. Anchored to the
+# root, so source directories such as packages/web/src/data/ are not ignored.
+/data/
+/catalog/
+/releases/
 *.duckdb
 *.duckdb.wal
 

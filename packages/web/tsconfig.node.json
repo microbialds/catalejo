@@ -32,6 +32,7 @@
     "scripts",
     "test",
     "e2e",
+    "src/globals.d.ts",
     "src/**/*.test.ts",
     "src/**/*.test.tsx"
   ]

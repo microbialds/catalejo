@@ -7,7 +7,7 @@ import tseslint from 'typescript-eslint';
 
 export default defineConfig(
   {
-    ignores: ['dist/', 'node_modules/', 'test-results/', 'playwright-report/'],
+    ignores: ['dist/', '.cache/', 'node_modules/', 'test-results/', 'playwright-report/'],
   },
   js.configs.recommended,
   tseslint.configs.strictTypeChecked,

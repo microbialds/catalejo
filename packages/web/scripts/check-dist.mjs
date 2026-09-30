@@ -1,12 +1,15 @@
 // Post-build check of packages/web/dist (requirements §9; web agent rules).
 //
-// 1. The DuckDB-WASM binaries and worker are bundled: dist holds a .wasm file
-//    and a DuckDB worker script.
-// 2. No built text file names a CDN or any external host other than Google
+// 1. The DuckDB-WASM engine is not part of the build. dist holds no .wasm
+//    file and no duckdb-browser-*.worker.js, because the engine files exceed
+//    the Cloudflare Pages limit of 25 MiB per file and are served from R2 at
+//    /assets/duckdb-wasm/<version>/ by functions/assets/[[path]].ts.
+// 2. No file in dist is larger than 25 MiB.
+// 3. dist holds _routes.json, which sends the engine and extension paths to
+//    the Pages Function.
+// 4. No built text file names a CDN or any external host other than Google
 //    Fonts. Every other host that appears in the bundle is listed below with
 //    the reason it is harmless (a string in a library, never requested).
-//    Binary .wasm files are not scanned: the DuckDB engine carries URL
-//    strings for its optional httpfs code path.
 //
 // Usage: node scripts/check-dist.mjs [distDir]
 import { readdirSync, readFileSync, statSync } from 'node:fs';
@@ -28,7 +31,6 @@ const TEXT_ONLY_URLS = new Map([
   ['https://react.dev/errors/', 'React production error messages name the error decoder page'],
   ['https://tailwindcss.com', 'Tailwind CSS license banner comment'],
   ['https://github.com/duckdb/duckdb-wasm.git', 'DuckDB-WASM package metadata (repository field)'],
-  ['https://github.com/emn178/js-sha256', 'license comment of js-sha256 inside the DuckDB worker'],
 ]);
 
 /** CDN names that must never appear, whatever the allow-lists say. */
@@ -61,10 +63,24 @@ const problems = [];
 /** @param {string} file */
 const relative = (file) => path.relative(dist, file);
 
-const wasm = files.filter((file) => file.endsWith('.wasm'));
-if (wasm.length === 0) problems.push('no .wasm file in dist (DuckDB-WASM must be bundled)');
-if (!files.some((file) => /duckdb.*worker.*\.js$/.test(path.basename(file)))) {
-  problems.push('no DuckDB worker script in dist');
+/** The Cloudflare Pages limit for one file. */
+const MAX_FILE_BYTES = 25 * 2 ** 20;
+
+for (const file of files) {
+  const name = path.basename(file);
+  if (name.endsWith('.wasm')) {
+    problems.push(`${relative(file)} is a .wasm file; the engine is served from R2`);
+  }
+  if (/^duckdb-browser-.*\.worker\.js$/.test(name)) {
+    problems.push(`${relative(file)} is a DuckDB worker; the engine is served from R2`);
+  }
+  const size = statSync(file).size;
+  if (size > MAX_FILE_BYTES) {
+    problems.push(`${relative(file)} is ${(size / 2 ** 20).toFixed(1)} MiB, over the 25 MiB limit`);
+  }
+}
+if (!files.some((file) => relative(file) === '_routes.json')) {
+  problems.push('no _routes.json at the root of dist (public/_routes.json)');
 }
 
 /** @type {Map<string, Set<string>>} */
@@ -98,10 +114,10 @@ if (problems.length > 0) {
   process.exit(1);
 }
 
-const sizes = wasm.map(
-  (file) => `${relative(file)} (${(statSync(file).size / 2 ** 20).toFixed(1)} MiB)`,
+const largest = files.reduce((max, file) => Math.max(max, statSync(file).size), 0);
+console.log(
+  `check-dist: ok; ${String(files.length)} files; largest ${(largest / 2 ** 20).toFixed(2)} MiB`,
 );
-console.log(`check-dist: ok; ${String(files.length)} files; wasm: ${sizes.join(', ')}`);
 console.log(
   `check-dist: hosts named in the bundle: ${[...hosts.keys()].sort().join(', ') || 'none'}`,
 );

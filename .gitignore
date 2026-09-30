@@ -28,6 +28,7 @@ packages/ingest/dist/
 node_modules/
 packages/web/dist/
 packages/web/.vite/
+packages/web/.cache/
 playwright-report/
 test-results/
 

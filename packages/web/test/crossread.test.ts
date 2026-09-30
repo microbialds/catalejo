@@ -4,14 +4,21 @@
 // the pinned @duckdb/duckdb-wasm in Node and requires every type and value to
 // match. It also requires the wasm engine and the writer named in the Parquet
 // footer to share the DuckDB major.minor of config/versions.yaml, so a
-// version drift in either package fails.
+// version drift in either package fails. The parquet extension comes from the
+// local repository (.cache/duckdb-extensions) through the same settings the
+// browser uses, so the test makes no request outside this machine.
 import { existsSync, readFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import path from 'node:path';
-import type * as DuckDBBlocking from '@duckdb/duckdb-wasm/blocking';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
 import { repoRoot } from './files';
+import {
+  type ExtensionRepository,
+  type NodeDatabase,
+  openNodeDatabase,
+  sqlString,
+  startExtensionRepository,
+} from './support/duckdbNode';
 
 interface Expected {
   writer: { duckdb_version: string };
@@ -25,15 +32,12 @@ const parquetFile = path.join(fixtureDir, 'crossread.parquet');
 const expectedFile = path.join(fixtureDir, 'crossread.expected.json');
 const versions = parse(readFileSync(path.join(repoRoot, 'config', 'versions.yaml'), 'utf8')) as {
   duckdb_engine_minor: string;
+  duckdb_extensions: { engine: string; platforms: string[]; names: string[] };
 };
 
 function majorMinor(text: string): string | undefined {
   const match = /v?(\d+)\.(\d+)\.\d+/.exec(text);
   return match ? `${match[1] ?? ''}.${match[2] ?? ''}` : undefined;
-}
-
-function sqlString(value: string): string {
-  return `'${value.replace(/'/g, "''")}'`;
 }
 
 interface ArrowVector {
@@ -69,40 +73,22 @@ function normalize(value: unknown, duckdbType: string): unknown {
 }
 
 describe('Parquet cross-read with @duckdb/duckdb-wasm', () => {
-  const require = createRequire(import.meta.url);
-  let db: DuckDBBlocking.DuckDBBindings | undefined;
-  let conn: DuckDBBlocking.DuckDBConnection | undefined;
+  let repository: ExtensionRepository | undefined;
+  let database: NodeDatabase | undefined;
 
   beforeAll(async () => {
-    const duckdb =
-      require('@duckdb/duckdb-wasm/dist/duckdb-node-blocking.cjs') as typeof DuckDBBlocking;
-    const dist = path.dirname(require.resolve('@duckdb/duckdb-wasm/dist/duckdb-mvp.wasm'));
-    const bundles = {
-      mvp: {
-        mainModule: path.join(dist, 'duckdb-mvp.wasm'),
-        mainWorker: path.join(dist, 'duckdb-node-mvp.worker.cjs'),
-      },
-      eh: {
-        mainModule: path.join(dist, 'duckdb-eh.wasm'),
-        mainWorker: path.join(dist, 'duckdb-node-eh.worker.cjs'),
-      },
-    };
-    db = await duckdb.createDuckDB(bundles, new duckdb.VoidLogger(), duckdb.NODE_RUNTIME);
-    await db.instantiate(() => undefined);
-    conn = db.connect();
+    repository = await startExtensionRepository();
+    database = await openNodeDatabase(repository.url);
   });
 
-  afterAll(() => {
-    conn?.close();
-    db?.reset();
+  afterAll(async () => {
+    database?.close();
+    await repository?.stop();
   });
 
   function query(sql: string): Record<string, unknown>[] {
-    if (!conn) throw new Error('DuckDB did not start');
-    return conn
-      .query(sql)
-      .toArray()
-      .map((row: { toJSON(): Record<string, unknown> }) => row.toJSON());
+    if (!database) throw new Error('DuckDB did not start');
+    return database.query(sql);
   }
 
   it('finds the fixture written by the ingest package', () => {
@@ -158,5 +144,15 @@ describe('Parquet cross-read with @duckdb/duckdb-wasm', () => {
         }
       });
     });
+  });
+
+  it('loaded extensions from the local repository only', () => {
+    const { engine, platforms, names } = versions.duckdb_extensions;
+    const allowed = platforms.flatMap((platform) =>
+      names.map((name) => `/${engine}/${platform}/${name}.duckdb_extension.wasm`),
+    );
+    const requests = repository?.requests() ?? [];
+    expect(requests.length).toBeGreaterThan(0);
+    for (const request of requests) expect(allowed).toContain(request);
   });
 });

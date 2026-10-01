@@ -431,6 +431,11 @@ describe('genome table (C5, G2, G11)', () => {
     );
   });
 
+  // A new table page is drawn at low priority (a transition), so on a slow CI
+  // runner it can take longer than Testing Library's default 1 s wait. The
+  // assertions are unchanged; only the time allowed to settle is longer.
+  const pageWait = { timeout: 5000 };
+
   it('pages and sorts in the query', async () => {
     const calls: Calls = { summarize: [], sql: [] };
     await rendered('/', calls);
@@ -438,7 +443,7 @@ describe('genome table (C5, G2, G11)', () => {
     expect(calls.sql.at(-1)).toMatch(/ORDER BY t\.genome_id ASC LIMIT 50 OFFSET 0$/);
     expect(within(main()).getByText(strings.tablePageOf('1', '2'))).toBeTruthy();
     fireEvent.click(within(main()).getByRole('button', { name: strings.tableNext }));
-    await within(table()).findByRole('link', { name: 'KPN0051' });
+    await within(table()).findByRole('link', { name: 'KPN0051' }, pageWait);
     expect(calls.sql.at(-1)).toMatch(/LIMIT 50 OFFSET 50$/);
     fireEvent.click(
       within(table()).getByRole('button', { name: strings.tableSortBy(strings.tableColumnAmr) }),
@@ -447,7 +452,7 @@ describe('genome table (C5, G2, G11)', () => {
       expect(calls.sql.at(-1)).toMatch(
         /ORDER BY t\.amr_gene_count DESC NULLS LAST, t\.genome_id ASC LIMIT 50 OFFSET 0$/,
       );
-    });
+    }, pageWait);
   });
 
   it('adds a chooser column', async () => {
@@ -468,13 +473,13 @@ describe('genome table (C5, G2, G11)', () => {
       within(table()).getByRole('checkbox', { name: strings.tableSelectRow('KPN0002') }),
     );
     fireEvent.click(within(main()).getByRole('button', { name: strings.tableNext }));
-    await within(table()).findByRole('link', { name: 'KPN0051' });
+    await within(table()).findByRole('link', { name: 'KPN0051' }, pageWait);
     fireEvent.click(
       within(table()).getByRole('checkbox', { name: strings.tableSelectRow('KPN0060') }),
     );
     expect(within(main()).getByText(strings.tableSelected('2'))).toBeTruthy();
     fireEvent.click(within(main()).getByRole('button', { name: strings.tablePrevious }));
-    await within(table()).findByRole('link', { name: 'KPN0001' });
+    await within(table()).findByRole('link', { name: 'KPN0001' }, pageWait);
     const kept = within(table()).getByRole<HTMLInputElement>('checkbox', {
       name: strings.tableSelectRow('KPN0002'),
     });

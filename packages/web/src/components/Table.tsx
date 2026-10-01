@@ -5,10 +5,9 @@
 // the sort through aria-sort. Cells are given by the caller, which sets
 // identifiers and counts in monospace and species names in italic sans;
 // every link in a cell is in the quiet tier (§5.4), underlined on hover and
-// focus only. Body rows are memoized and keyed by position: a row redraws
-// when its row object or the columns change, a new page updates the rows in
-// place, and a row given as a function draws its cells in its own render
-// (requirements §9, checklist C4).
+// focus only. Body rows are keyed by their identifier and memoized: a row
+// redraws when its row object or the columns change, and a row given as a
+// function draws its cells in its own render (requirements §9, checklist C4).
 import { memo, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import { strings } from '../strings';
@@ -133,10 +132,8 @@ export function Table({
           </tr>
         </thead>
         <tbody>
-          {rows.map((row, index) => (
-            // Rows are keyed by position, so a new page updates the rows in
-            // place instead of mounting new ones; they hold no state.
-            <BodyRow key={index} row={row} columns={cellColumns} />
+          {rows.map((row) => (
+            <BodyRow key={row.id} row={row} columns={cellColumns} />
           ))}
         </tbody>
       </table>

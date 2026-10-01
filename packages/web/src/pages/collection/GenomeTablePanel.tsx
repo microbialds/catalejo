@@ -244,12 +244,17 @@ export function GenomeTablePanel({ expansion }: { expansion: PanelExpansion }) {
         (context) => genomePageSql(context, sort, page),
         'low',
       );
-      return rows.map(genomeRow);
+      // The rows carry their page, which the pager states (see below).
+      return { page, rows: rows.map(genomeRow) };
     },
     [filters, sort, page],
   );
   const result = useEngineQuery(`table:${setKey}:${sortKey}:${String(page)}`, run, LOW_PRIORITY);
   const rowsState = useSettled(result);
+  // The rows on screen and the page they are: while a new page loads, the
+  // previous rows stay with their own page number, never mixed with the new.
+  const shown = rowsState.value;
+  const shownPage = shown?.page ?? page;
   const render = useCellRenderer();
 
   const columns = useMemo(
@@ -270,7 +275,7 @@ export function GenomeTablePanel({ expansion }: { expansion: PanelExpansion }) {
   const table = useTable({
     features,
     columns,
-    data: rowsState.value ?? EMPTY,
+    data: shown?.rows ?? EMPTY,
     getRowId: (row) => row.genome_id,
     manualSorting: true,
     manualPagination: true,
@@ -344,7 +349,7 @@ export function GenomeTablePanel({ expansion }: { expansion: PanelExpansion }) {
   // One row object per genome, kept while the page, the selection, the
   // visible columns and the links stay the same; each draws its cells when
   // the table renders it.
-  const pageData = rowsState.value ?? EMPTY;
+  const pageData = shown?.rows ?? EMPTY;
   const visibleIds = visibleColumns.map((column) => column.id).join(' ');
   const rows = useMemo<TableRow[]>(() => {
     const definitions = visibleIds
@@ -475,7 +480,7 @@ export function GenomeTablePanel({ expansion }: { expansion: PanelExpansion }) {
           </Button>
         </div>
       )}
-      {rowsState.value === undefined ? (
+      {shown === undefined ? (
         <p
           className="text-control text-text-secondary"
           {...(rowsState.failed ? { role: 'alert' } : {})}
@@ -504,7 +509,7 @@ export function GenomeTablePanel({ expansion }: { expansion: PanelExpansion }) {
           {strings.tablePrevious}
         </Button>
         <span className="font-mono text-control text-text-secondary">
-          {strings.tablePageOf(formatCount(page + 1), formatCount(pages))}
+          {strings.tablePageOf(formatCount(shownPage + 1), formatCount(pages))}
         </span>
         <Button
           variant="link"

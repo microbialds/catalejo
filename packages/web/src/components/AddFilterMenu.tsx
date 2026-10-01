@@ -8,9 +8,9 @@
 // replaces the field's values, so a value can also be cleared here. A field
 // the release cannot evaluate is shown disabled with a tooltip (§5.7); the
 // pangenome cluster field stays disabled while no species has a pangenome.
-// Escape or a click outside closes the panel.
+// Escape or a click outside closes the panel (components/useDismiss.ts).
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
-import type { KeyboardEvent, ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { useManifest } from '../data/manifest';
 import type { Manifest } from '../data/manifest';
 import type { FilterOption, SetEngine } from '../data/setEngine';
@@ -23,6 +23,7 @@ import type { FilterEntry, FilterKey, ListKey } from '../set/filters';
 import { useGenomeSet } from '../set/store';
 import { strings } from '../strings';
 import { Button, buttonClass } from './Button';
+import { useDismiss } from './useDismiss';
 
 const MAX_SHOWN = 200;
 const NARROW_FROM = 8;
@@ -469,32 +470,17 @@ export function AddFilterMenu() {
   const panel = useRef<HTMLDivElement>(null);
   const panelId = useId();
 
-  const close = useCallback(() => {
+  const dismiss = useCallback(() => {
     setOpen(false);
     setField(null);
-    trigger.current?.focus();
   }, []);
-
-  useEffect(() => {
-    if (!open) return;
-    const onPointer = (event: PointerEvent) => {
-      if (root.current !== null && !root.current.contains(event.target as Node)) {
-        setOpen(false);
-        setField(null);
-      }
-    };
-    // Escape closes the panel wherever the focus is, including the page body
-    // after the field list is replaced by a picker.
-    const onKey = (event: globalThis.KeyboardEvent) => {
-      if (event.key === 'Escape' && !event.defaultPrevented) close();
-    };
-    document.addEventListener('pointerdown', onPointer);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('pointerdown', onPointer);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [open, close]);
+  const close = useCallback(() => {
+    dismiss();
+    trigger.current?.focus();
+  }, [dismiss]);
+  // Escape closes the panel wherever the focus is, including the page body
+  // after the field list is replaced by a picker; a click outside closes it.
+  useDismiss(open, { root, trigger, onClose: dismiss });
 
   // The focus moves into the panel when it opens and when a picker replaces
   // the field list.
@@ -506,15 +492,8 @@ export function AddFilterMenu() {
     target?.focus();
   }, [open, field]);
 
-  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === 'Escape' && open) {
-      event.preventDefault();
-      close();
-    }
-  };
-
   return (
-    <div ref={root} className="relative" onKeyDown={onKeyDown}>
+    <div ref={root} className="relative">
       <button
         ref={trigger}
         type="button"

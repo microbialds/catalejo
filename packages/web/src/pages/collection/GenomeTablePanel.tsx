@@ -9,8 +9,10 @@
 // genome identifier across pages and sorts
 // and cleared when the set changes; "Use as set" asks, in the page, for a
 // confirmation that states the new count, then replaces the set with the
-// selected identifiers.
-import { useMemo, useRef, useState } from 'react';
+// selected identifiers. The "Columns" chooser closes on Escape, which returns
+// the focus to its button, and on a pointer down outside it
+// (components/useDismiss.ts).
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import type { ReactNode } from 'react';
 import {
@@ -38,6 +40,7 @@ import {
 } from '../../collection/genomeTable';
 import type { GenomeColumn, GenomeRow } from '../../collection/genomeTable';
 import { Button } from '../../components/Button';
+import { useDismiss } from '../../components/useDismiss';
 import { Link } from '../../components/Link';
 import { Panel } from '../../components/Panel';
 import type { PanelExpansion } from '../../components/Panel';
@@ -188,6 +191,14 @@ export function GenomeTablePanel({ expansion }: { expansion: PanelExpansion }) {
   const [confirming, setConfirming] = useState(false);
   const useAsSetButton = useRef<HTMLButtonElement>(null);
   const [chooserOpen, setChooserOpen] = useState(false);
+  const chooserRoot = useRef<HTMLDivElement>(null);
+  const chooserButton = useRef<HTMLButtonElement>(null);
+  const closeChooser = useCallback(() => {
+    setChooserOpen(false);
+  }, []);
+  // Escape closes the column chooser and returns the focus to "Columns"; a
+  // pointer down outside it closes it (requirements §9).
+  useDismiss(chooserOpen, { root: chooserRoot, trigger: chooserButton, onClose: closeChooser });
   const sortingState = sorting.key === setKey ? sorting.value : [];
   const page = pageIndex.key === setKey ? pageIndex.value : 0;
   const selected = selection.key === setKey ? selection.value : {};
@@ -320,8 +331,9 @@ export function GenomeTablePanel({ expansion }: { expansion: PanelExpansion }) {
   return (
     <Panel title={strings.panelGenomes} name={strings.panelGenomes} expansion={expansion}>
       <div className="flex flex-wrap items-center gap-x-panel-gap gap-y-2 pb-2">
-        <div className="relative">
+        <div ref={chooserRoot} className="relative">
           <Button
+            ref={chooserButton}
             variant="secondary"
             className="py-0.5"
             aria-expanded={chooserOpen}

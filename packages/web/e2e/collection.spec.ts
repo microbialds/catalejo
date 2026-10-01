@@ -5,6 +5,7 @@
 // with DuckDB-WASM's Node build (e2e/support/synth.ts), never from the page.
 import { expect, test } from '@playwright/test';
 import type { Locator, Page } from '@playwright/test';
+import { GENOME_COLUMNS } from '../src/collection/genomeTable';
 import { formatCount } from '../src/format';
 import { exportPresets, platformConfig } from '../src/generated/platform';
 import { palette } from '../src/generated/palette';
@@ -311,6 +312,31 @@ test('C5 the table sorts, pages by 50, selects rows and "Use as set" yields them
   expect(await tableIds(page)).toEqual(
     ids(`SELECT genome_id FROM ${GENOME} ORDER BY genome_id LIMIT 50`),
   );
+
+  // The column chooser (§6.1) closes on Escape, returning the focus to its
+  // button, and on a pointer down outside it (§9), so it never keeps
+  // covering the first rows.
+  const genomesPanel = panel(page, strings.panelGenomes);
+  const columns = genomesPanel.getByRole('button', { name: strings.tableColumns, exact: true });
+  const chooser = genomesPanel.getByRole('group', { name: strings.tableColumnsLabel, exact: true });
+  await columns.click();
+  await expect(chooser).toBeVisible();
+  await expect(chooser.getByRole('checkbox')).toHaveCount(GENOME_COLUMNS.length);
+  await chooser.getByRole('checkbox').nth(1).focus();
+  await page.keyboard.press('Escape');
+  await expect(chooser).toBeHidden();
+  await expect(columns).toBeFocused();
+  await expect(columns).toHaveAttribute('aria-expanded', 'false');
+  await columns.click();
+  await expect(chooser).toBeVisible();
+  await genomesPanel.getByRole('heading', { name: strings.panelGenomes, exact: true }).click();
+  await expect(chooser).toBeHidden();
+  const firstRow = table.getByRole('checkbox', {
+    name: strings.tableSelectRow((await tableIds(page))[0] ?? ''),
+    exact: true,
+  });
+  await firstRow.check();
+  await firstRow.uncheck();
 
   // Sorting: counts sort descending first, then ascending.
   const sortName = strings.tableSortBy(strings.tableColumnAmr);

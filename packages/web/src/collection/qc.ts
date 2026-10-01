@@ -63,6 +63,16 @@ export function qcScale(domain: QcDomain, box: PlotBox): QcScale {
   };
 }
 
+/**
+ * A coordinate for a 1 px hairline: the middle of the pixel the value falls
+ * in, so the stroke covers exactly one row or column of pixels and paints the
+ * full ink color instead of two antialiased rows of gray (requirements §7,
+ * hairline borders; checklist G3).
+ */
+export function crisp(value: number): number {
+  return Math.floor(value) + 0.5;
+}
+
 export function roundTenth(value: number): number {
   return Math.round(value * 10) / 10;
 }

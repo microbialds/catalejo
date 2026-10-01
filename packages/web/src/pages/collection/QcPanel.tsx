@@ -1,18 +1,22 @@
 // Assembly QC scatter (requirements §6.1; checklist C3; collection board,
 // second panel row; maintainer decision for the marks). X is CheckM2
 // completeness, Y contamination; the thresholds of config/platform.yaml are
-// dashed ink lines. Passing genomes are solid dots in chrome text_secondary,
-// failing ones hollow with an ink stroke, both drawn as is with no opacity
-// (requirements §5.4; checklist G3), and the subtitle states how many are
-// flagged and how many lack CheckM2 values (not drawn). Dragging on the plot
-// draws a hollow rectangle with an ink stroke; on release its left
-// completeness and top contamination become the completeness_min and
-// contamination_max filters (collection/qc.ts). The keyboard alternative is
-// the add filter menu, which the description of the plot names.
+// dashed ink lines. Axes and thresholds are 1 px ink hairlines on half-pixel
+// coordinates with crisp edges, so they paint the ink itself and not an
+// antialiased gray (requirements §7; checklist G3). Passing genomes are solid
+// dots in chrome text_secondary, failing ones hollow with an ink stroke, both
+// drawn as is with no opacity (requirements §5.4; checklist G3), and the
+// subtitle states how many are flagged and how many lack CheckM2 values (not
+// drawn). Dragging on the plot draws a hollow rectangle with an ink stroke;
+// on release its left completeness and top contamination become the
+// completeness_min and contamination_max filters (collection/qc.ts). The
+// keyboard alternative is the add filter menu, which the description of the
+// plot names.
 import { useId, useState } from 'react';
 import type { PointerEvent } from 'react';
 import {
   brushBounds,
+  crisp,
   isFailing,
   qcDomain,
   qcScale,
@@ -34,6 +38,8 @@ import { useElementWidth } from './useElementWidth';
 
 const MARGIN = { left: 30, right: 10, top: 4, bottom: 16 };
 const MIN_BRUSH = 3;
+const HAIRLINE = 1;
+const THRESHOLD_DASH = '4 3';
 const ink = palette.chrome.ink;
 const secondary = palette.chrome.text_secondary;
 const mono = tokens.typography.families.mono;
@@ -100,6 +106,12 @@ export function QcPanel({
 
   const bottom = box.top + box.height;
   const right = box.left + box.width;
+  // Axes and thresholds are 1 px ink hairlines on half-pixel coordinates.
+  const left = box.left;
+  const axisX = crisp(box.left);
+  const axisY = crisp(bottom);
+  const thresholdX = crisp(scale.x(completenessMin));
+  const thresholdY = crisp(scale.y(contaminationMax));
   const xTicks = [domain.completeness[0], completenessMin, domain.completeness[1]];
   const yTicks = [contaminationMax, domain.contamination[1]];
 
@@ -135,40 +147,24 @@ export function QcPanel({
                 setBrush(null);
               }}
             >
-              <line
-                x1={box.left}
-                y1={bottom}
-                x2={right}
-                y2={bottom}
-                stroke={ink}
-                strokeWidth={0.8}
-              />
-              <line
-                x1={box.left}
-                y1={box.top}
-                x2={box.left}
-                y2={bottom}
-                stroke={ink}
-                strokeWidth={0.8}
-              />
-              <line
-                x1={box.left}
-                x2={right}
-                y1={scale.y(contaminationMax)}
-                y2={scale.y(contaminationMax)}
-                stroke={ink}
-                strokeWidth={0.8}
-                strokeDasharray="4 3"
-              />
-              <line
-                x1={scale.x(completenessMin)}
-                x2={scale.x(completenessMin)}
-                y1={box.top}
-                y2={bottom}
-                stroke={ink}
-                strokeWidth={0.8}
-                strokeDasharray="4 3"
-              />
+              <g stroke={ink} strokeWidth={HAIRLINE} shapeRendering="crispEdges">
+                <line x1={left} y1={axisY} x2={right} y2={axisY} />
+                <line x1={axisX} y1={box.top} x2={axisX} y2={bottom} />
+                <line
+                  x1={left}
+                  x2={right}
+                  y1={thresholdY}
+                  y2={thresholdY}
+                  strokeDasharray={THRESHOLD_DASH}
+                />
+                <line
+                  x1={thresholdX}
+                  x2={thresholdX}
+                  y1={box.top}
+                  y2={bottom}
+                  strokeDasharray={THRESHOLD_DASH}
+                />
+              </g>
               <g>
                 {summary.drawn.map((point) => {
                   const cx = scale.x(point.completeness ?? 0);
@@ -220,7 +216,8 @@ export function QcPanel({
                   height={Math.abs(brush.y1 - brush.y0)}
                   fill="none"
                   stroke={ink}
-                  strokeWidth={0.8}
+                  strokeWidth={HAIRLINE}
+                  shapeRendering="crispEdges"
                 />
               )}
             </svg>

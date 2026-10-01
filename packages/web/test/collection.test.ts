@@ -24,6 +24,7 @@ import {
 } from '../src/collection/heatmap';
 import {
   brushBounds,
+  crisp,
   qcDomain,
   qcScale,
   qcSummary,
@@ -364,6 +365,23 @@ describe('QC scatter and brush (C3)', () => {
       contaminationMax: 7.8,
     });
     expect(roundTenth(95.04999)).toBe(95);
+  });
+
+  it('puts hairlines on half-pixel coordinates so a 1 px stroke paints one pixel row', () => {
+    expect(crisp(84)).toBe(84.5);
+    expect(crisp(30)).toBe(30.5);
+    expect(crisp(37.3)).toBe(37.5);
+    expect(crisp(37.9)).toBe(37.5);
+    const scale = qcScale(
+      { completeness: [80, 100], contamination: [0, 10] },
+      { left: 30, top: 4, width: 271.4, height: 80 },
+    );
+    // Threshold lines land between scale steps; snapped, both ends share one pixel row.
+    const y = crisp(scale.y(platformConfig.qc.contaminationMax));
+    const x = crisp(scale.x(platformConfig.qc.completenessMin));
+    expect(y % 1).toBe(0.5);
+    expect(x % 1).toBe(0.5);
+    expect(Math.abs(y - scale.y(platformConfig.qc.contaminationMax))).toBeLessThanOrEqual(0.5);
   });
 
   it('replaces earlier completeness and contamination filters in one change', () => {

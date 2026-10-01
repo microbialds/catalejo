@@ -355,6 +355,26 @@ describe('collection page', () => {
     expect(within(qc).getByText(strings.qcBrushDescription)).toBeTruthy();
   });
 
+  it('draws the QC axes and thresholds as crisp 1 px ink hairlines, thresholds dashed (§7, G3)', async () => {
+    await rendered();
+    const plot = within(panel(strings.panelQc)).getByRole('img', { name: strings.qcChartName });
+    const lines = [...plot.querySelectorAll('line')];
+    expect(lines).toHaveLength(4);
+    const group = lines[0]?.parentElement;
+    expect(group?.getAttribute('stroke')).toBe(palette.chrome.ink);
+    expect(group?.getAttribute('stroke-width')).toBe('1');
+    expect(group?.getAttribute('shape-rendering')).toBe('crispEdges');
+    for (const line of lines) {
+      expect(line.parentElement).toBe(group);
+      expect(line.getAttribute('stroke-width')).toBeNull();
+      // Horizontal lines sit on a half-pixel row, vertical ones on a half-pixel column.
+      const horizontal = line.getAttribute('y1') === line.getAttribute('y2');
+      const across = Number(line.getAttribute(horizontal ? 'y1' : 'x1'));
+      expect(across % 1).toBe(0.5);
+    }
+    expect(lines.filter((line) => line.getAttribute('stroke-dasharray') !== null)).toHaveLength(2);
+  });
+
   it('expands every panel full-width with the export menu (C6)', async () => {
     await rendered();
     for (const name of [

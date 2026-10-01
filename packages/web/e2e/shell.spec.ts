@@ -1,7 +1,7 @@
-// Requirements §5.1, §7, §9: the placeholder shell renders both navigation
-// groups in order, marks Collection at / with the accent rule, sets the
-// wordmark in Source Serif 4, and requests nothing outside the origin except
-// Google Fonts.
+// Requirements §5.1, §5.7, §7, §9: the shell renders both navigation groups
+// in order (the Analyze items disabled on the synthetic release), marks
+// Collection at / with the accent rule, sets the wordmark in Source Serif 4,
+// and requests nothing outside the origin except Google Fonts.
 import { expect, test } from '@playwright/test';
 import { strings } from '../src/strings';
 import { tokens } from '../src/generated/tokens';
@@ -31,12 +31,16 @@ test('shell navigation, wordmark font and same-origin requests', async ({ page, 
     strings.pageGenomes,
     strings.pageGenes,
   ]);
-  await expect(groups.nth(1).getByRole('link')).toHaveText([
+  // The synthetic release declares no tree, pangenome, embedding model or
+  // sequence search, so every Analyze item is disabled, not a link (§5.7).
+  const analyze = groups.nth(1).locator('li > [aria-disabled="true"]');
+  await expect(analyze).toHaveText([
     strings.pagePhylogeny,
     strings.pagePangenome,
     strings.pageEmbeddings,
     strings.pageSequenceSearch,
   ]);
+  await expect(groups.nth(1).getByRole('link')).toHaveCount(0);
 
   const active = nav.locator('a[aria-current="page"]');
   await expect(active).toHaveCount(1);

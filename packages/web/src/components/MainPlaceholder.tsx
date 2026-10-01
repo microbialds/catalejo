@@ -1,16 +1,11 @@
 // Main area placeholder (milestone 0). Names the page for the current route
 // (requirements §5.3) and states that it arrives in a later milestone.
 import { pageTitle } from '../navigation';
+import { useRouter } from '../router';
 import { strings } from '../strings';
+import { PageStatement } from './PageStatement';
 
-export function MainPlaceholder({ pathname }: { pathname: string }) {
-  const title = pageTitle(pathname);
-  return (
-    <main className="flex min-w-0 flex-col gap-2 px-page-padding-x py-page-padding-y">
-      {title !== undefined && (
-        <h1 className="font-serif text-panel-title font-semibold">{title}</h1>
-      )}
-      <p className="text-text-secondary">{strings.placeholderStatement}</p>
-    </main>
-  );
+export function MainPlaceholder() {
+  const { pathname } = useRouter();
+  return <PageStatement title={pageTitle(pathname)} statement={strings.placeholderStatement} />;
 }

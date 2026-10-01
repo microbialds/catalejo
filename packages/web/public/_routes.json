@@ -1,5 +1,5 @@
 {
   "version": 1,
-  "include": ["/assets/duckdb-wasm/*", "/assets/duckdb-extensions/*"],
+  "include": ["/assets/duckdb-wasm/*", "/assets/duckdb-extensions/*", "/data/*"],
   "exclude": []
 }

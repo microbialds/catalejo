@@ -5,8 +5,8 @@
 //    the Cloudflare Pages limit of 25 MiB per file and are served from R2 at
 //    /assets/duckdb-wasm/<version>/ by functions/assets/[[path]].ts.
 // 2. No file in dist is larger than 25 MiB.
-// 3. dist holds _routes.json, which sends the engine and extension paths to
-//    the Pages Function.
+// 3. dist holds _routes.json, which sends the engine and extension paths
+//    and the release data path /data/ to the Pages Functions.
 // 4. No built text file names a CDN or any external host other than Google
 //    Fonts. Every other host that appears in the bundle is listed below with
 //    the reason it is harmless (a string in a library, never requested).

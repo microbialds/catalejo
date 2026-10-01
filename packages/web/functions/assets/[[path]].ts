@@ -10,8 +10,8 @@
 //
 // public/_routes.json limits the Function to those two prefixes, so Vite's
 // own build assets under /assets/ stay static. Any other /assets/ path that
-// reaches the Function anyway is passed to context.next(). Milestone 1b adds
-// /data/* to _routes.json for the release proxy.
+// reaches the Function anyway is passed to context.next(). _routes.json also
+// sends /data/* to the release proxy in functions/data/[[path]].ts.
 //
 // In development the Vite plugin in vite/duckdbAssets.ts serves the same
 // paths from node_modules and from .cache/duckdb-extensions.

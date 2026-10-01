@@ -57,7 +57,7 @@ export function QcPanel({
   failed: boolean;
   expansion: PanelExpansion;
 }) {
-  const { filters, setFilters } = useGenomeSet();
+  const { updateFilters } = useGenomeSet();
   const [measure, width] = useElementWidth(330);
   const [brush, setBrush] = useState<BrushRect | null>(null);
   const descriptionId = useId();
@@ -101,7 +101,7 @@ export function QcPanel({
     const rect = { ...brush, x1: x, y1: y };
     setBrush(null);
     if (Math.abs(rect.x1 - rect.x0) < MIN_BRUSH && Math.abs(rect.y1 - rect.y0) < MIN_BRUSH) return;
-    setFilters(withBrush(filters, brushBounds(rect, scale)));
+    updateFilters((current) => withBrush(current, brushBounds(rect, scale)));
   };
 
   const bottom = box.top + box.height;

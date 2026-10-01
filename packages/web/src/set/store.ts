@@ -37,6 +37,12 @@ export interface GenomeSetStore {
   lastEntry: FilterEntry | undefined;
   /** Replaces the filters. */
   setFilters: (next: GenomeFilters) => void;
+  /**
+   * Replaces the filters with a function of the latest ones. Stable across
+   * renders, so that a view drawing an earlier store (see `SetView`) still
+   * applies its change to the current set.
+   */
+  updateFilters: (update: (current: GenomeFilters) => GenomeFilters) => void;
   /** Adds one value to a list key. */
   addValue: (key: ListKey, value: string) => void;
   /** Removes one value of a list key, or the whole key without a value. */
@@ -102,12 +108,24 @@ export function SetProvider({ children }: { children: ReactNode }) {
     [navigate, pathname, search],
   );
 
+  // The latest set is the one in the address bar, which the router follows.
+  const updateFilters = useCallback(
+    (update: (current: GenomeFilters) => GenomeFilters) => {
+      const { pathname: path, search: query, hash } = window.location;
+      navigate(`${path}${hash}`, {
+        replaceQuery: encodeFilters(update(decodeFilters(query)), query),
+      });
+    },
+    [navigate],
+  );
+
   const store = useMemo<GenomeSetStore>(
     () => ({
       filters,
       entries,
       lastEntry,
       setFilters: commit,
+      updateFilters,
       addValue: (field, value) => {
         commit(withValue(filters, field, value));
       },
@@ -135,8 +153,20 @@ export function SetProvider({ children }: { children: ReactNode }) {
       },
       queryFor: (next) => encodeFilters(next, search),
     }),
-    [filters, entries, lastEntry, commit, search],
+    [filters, entries, lastEntry, commit, updateFilters, search],
   );
+  return createElement(SetContext, { value: store }, children);
+}
+
+/**
+ * Provides a given store to the components below: a page can keep its heavy
+ * views on an earlier store while the data of the current set loads, so that
+ * they redraw after the facet rail and the counters (requirements §6.1, §9;
+ * checklist C4). Such views read `filters` for display only and change the
+ * set through `updateFilters` or through actions that do not depend on the
+ * current filters.
+ */
+export function SetView({ store, children }: { store: GenomeSetStore; children: ReactNode }) {
   return createElement(SetContext, { value: store }, children);
 }
 

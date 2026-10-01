@@ -30,11 +30,11 @@ export function YearPanel({
   failed: boolean;
   expansion: PanelExpansion;
 }) {
-  const { filters, setFilters } = useGenomeSet();
+  const { updateFilters } = useGenomeSet();
   const chart =
     groups !== undefined && rows !== undefined ? buildYearChart(groups, rows) : undefined;
   const pick = (year: number) => {
-    setFilters(withKey(filters, 'year', { min: year, max: year }));
+    updateFilters((current) => withKey(current, 'year', { min: year, max: year }));
   };
   const step = yearLabelStep(chart?.columns.length ?? 0, MAX_LABELS);
   const subtitle =

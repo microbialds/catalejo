@@ -59,7 +59,7 @@ export function HeatmapPanel({
   mixed: boolean;
   expansion: PanelExpansion;
 }) {
-  const { filters, setFilters, queryFor } = useGenomeSet();
+  const { updateFilters, queryFor } = useGenomeSet();
   const heatmap =
     groups !== undefined && rows !== undefined ? buildHeatmap(groups, rows) : undefined;
   const wide = expansion.expanded;
@@ -141,9 +141,9 @@ export function HeatmapPanel({
                           aria-label={name}
                           title={name}
                           onClick={() => {
-                            setFilters(
+                            updateFilters((current) =>
                               withValue(
-                                withSpecies(filters, row.group.codes),
+                                withSpecies(current, row.group.codes),
                                 'drug_class',
                                 cell.drugClass,
                               ),

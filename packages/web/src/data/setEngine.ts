@@ -13,6 +13,9 @@
 // The in-memory tables are created once per engine, on the first request
 // that needs them; the engine is created once per manifest (see
 // ./setEngineContext.ts). The whole-release count never opens the database.
+// The species attributes (summaries/counts_by_species) and the CheckM2 points
+// (summaries/qc) are copied into memory as well, so that a filter change runs
+// its aggregates without reading a release file again (requirements §6.1, C4).
 import { palette } from '../generated/palette';
 import { filtersKey, isWholeRelease } from '../set/filters';
 import type { FilterKey, GenomeFilters } from '../set/filters';
@@ -21,7 +24,7 @@ import { buildPredicate, clusterSpecies } from '../set/predicate';
 import type { PredicateSources, PresenceSource } from '../set/predicate';
 import type { Manifest } from './manifest';
 import { sqlString } from './release';
-import type { ReleaseSource, Row } from './release';
+import type { QueryPriority, ReleaseSource, Row } from './release';
 import { readSearchRows } from './searchIndex';
 import type { SearchRow } from './searchIndex';
 
@@ -54,6 +57,8 @@ export const ENGINE_TABLES = {
   amrClass: 'set_amr_class',
   mutation: 'set_mutation',
   setMember: 'set_member',
+  species: 'set_species',
+  qc: 'set_qc',
 } as const;
 
 // Rows of the species-grain summaries (contract §6.2), also produced for a
@@ -176,8 +181,15 @@ export interface SetEngine {
   setGenomeIds(filters: GenomeFilters): Promise<string[]>;
   /** The species codes present in the set, sorted. */
   setSpecies(filters: GenomeFilters): Promise<string[]>;
-  /** Any aggregate over the set, from SQL built against the context. */
-  aggregate<T = Row>(filters: GenomeFilters, build: AggregateBuilder): Promise<T[]>;
+  /**
+   * Any aggregate over the set, from SQL built against the context; a view
+   * that renders behind the facet rail asks at low priority.
+   */
+  aggregate<T = Row>(
+    filters: GenomeFilters,
+    build: AggregateBuilder,
+    priority?: QueryPriority,
+  ): Promise<T[]>;
   /** The species-grain summaries of the release, loaded once. */
   releaseSummaries(): Promise<SetSummary>;
   /** The species-grain view of a set: summaries for the whole release, else genome grain. */
@@ -187,7 +199,7 @@ export interface SetEngine {
   /** Genomes with a plasmid contig and with a prophage region. */
   mobileCounts(filters: GenomeFilters): Promise<MobileCounts>;
   /** CheckM2 points of a set (summaries/qc.parquet). */
-  qcPoints(filters: GenomeFilters): Promise<QcPoint[]>;
+  qcPoints(filters: GenomeFilters, priority?: QueryPriority): Promise<QcPoint[]>;
   /** Values offered by the "add filter" menu for a field. */
   filterOptions(key: FilterKey): Promise<FilterOption[]>;
   /** Whether a field can be evaluated on this release. */
@@ -287,6 +299,8 @@ export function setupStatements(
     amrClassByGenome?: string | undefined;
     mutation?: string | undefined;
     setMember?: string | undefined;
+    countsBySpecies?: string | undefined;
+    qc?: string | undefined;
   },
   tables = ENGINE_TABLES,
 ): string[] {
@@ -314,6 +328,19 @@ export function setupStatements(
       (relations.setMember !== undefined
         ? `SELECT DISTINCT set_id, genome_id FROM ${relations.setMember}`
         : empty(`NULL::VARCHAR AS set_id, NULL::VARCHAR AS genome_id`)),
+    `CREATE OR REPLACE TABLE ${tables.species} AS ` +
+      (relations.countsBySpecies !== undefined
+        ? `SELECT species_code, canonical_name, color FROM ${relations.countsBySpecies}`
+        : empty(
+            `NULL::VARCHAR AS species_code, NULL::VARCHAR AS canonical_name, NULL::VARCHAR AS color`,
+          )),
+    `CREATE OR REPLACE TABLE ${tables.qc} AS ` +
+      (relations.qc !== undefined
+        ? `SELECT * FROM ${relations.qc}`
+        : empty(
+            `NULL::VARCHAR AS genome_id, NULL::VARCHAR AS species_code, NULL::FLOAT AS completeness, ` +
+              `NULL::FLOAT AS contamination, NULL::VARCHAR AS flag`,
+          )),
   );
   return statements;
 }
@@ -323,42 +350,71 @@ export function setRelation(where: string, tables = ENGINE_TABLES): string {
   return `(SELECT g.* FROM ${tables.genomeFacts} AS g WHERE ${where})`;
 }
 
+/** The parts of the species-grain view of a set, in the `part` column. */
+const SUMMARY_PARTS = {
+  bySpecies: 'species',
+  bySpeciesYear: 'year',
+  bySpeciesSt: 'st',
+  bySource: 'source',
+  byPlatform: 'platform',
+  amrClassBySpecies: 'amr_class',
+} as const;
+
 /**
- * The species-grain queries over a set (contract §6.2 column lists), run
- * against genome_facts and set_amr_class. `speciesAttributes` is a relation
- * with species_code, canonical_name and color.
+ * The species-grain view of a set (contract §6.2 column lists) in one
+ * statement over genome_facts and set_amr_class, so that a filter change
+ * costs one round trip to the database (requirements §6.1, checklist C4).
+ * Each part selects its own columns, `UNION ALL BY NAME` leaves the others
+ * null, and the order is that of each summary file within its part.
+ * `speciesAttributes` is a relation with species_code, canonical_name and
+ * color.
  */
-export function summaryQueries(set: string, speciesAttributes: string, tables = ENGINE_TABLES) {
+export function summaryQuery(set: string, speciesAttributes: string, tables = ENGINE_TABLES) {
+  const part = (key: keyof typeof SUMMARY_PARTS) => `'${SUMMARY_PARTS[key]}' AS part`;
+  const count = `CAST(count(*) AS INTEGER) AS genome_count`;
+  return (
+    `WITH s AS MATERIALIZED ${set}, ` +
+    `n AS (SELECT species_code, count(*) AS genomes FROM s GROUP BY 1) ` +
+    `SELECT ${part('bySpecies')}, s.species_code, a.canonical_name, a.color, ${count}, ` +
+    `CAST(count(*) FILTER (WHERE s.assembly_status = 'complete') AS INTEGER) AS complete_count, ` +
+    `CAST(count(DISTINCT s.st) AS INTEGER) AS st_count, ` +
+    `CAST(coalesce(sum(s.amr_gene_count), 0) AS BIGINT) AS amr_hit_count, ` +
+    `CAST(coalesce(sum(s.plasmid_contig_count), 0) AS BIGINT) AS plasmid_contig_count ` +
+    `FROM s LEFT JOIN ${speciesAttributes} AS a USING (species_code) ` +
+    `GROUP BY s.species_code, a.canonical_name, a.color ` +
+    `UNION ALL BY NAME ` +
+    `SELECT ${part('bySpeciesYear')}, species_code, year, ${count} FROM s GROUP BY ALL ` +
+    `UNION ALL BY NAME ` +
+    `SELECT ${part('bySpeciesSt')}, species_code, mlst_scheme, st, ${count} FROM s GROUP BY ALL ` +
+    `UNION ALL BY NAME ` +
+    `SELECT ${part('bySource')}, species_code, source_type, country, ${count} FROM s GROUP BY ALL ` +
+    `UNION ALL BY NAME ` +
+    `SELECT ${part('byPlatform')}, species_code, platform, assembly_status, ${count} ` +
+    `FROM s GROUP BY ALL ` +
+    `UNION ALL BY NAME ` +
+    `SELECT ${part('amrClassBySpecies')}, c.species_code, c.drug_class, ` +
+    `CAST(count(DISTINCT c.genome_id) AS INTEGER) AS genome_count, ` +
+    `CAST(count(DISTINCT c.genome_id) AS DOUBLE) / any_value(n.genomes) AS fraction, ` +
+    `CAST(sum(c.hit_count) AS BIGINT) AS hit_count ` +
+    `FROM ${tables.amrClass} AS c JOIN s USING (genome_id) JOIN n ON n.species_code = c.species_code ` +
+    `GROUP BY c.species_code, c.drug_class ` +
+    `ORDER BY part, species_code, year NULLS LAST, mlst_scheme NULLS LAST, st NULLS LAST, ` +
+    `source_type NULLS LAST, country NULLS LAST, platform NULLS LAST, assembly_status NULLS LAST, ` +
+    `drug_class`
+  );
+}
+
+/** The rows of `summaryQuery`, split into the six summaries. */
+export function splitSummary(rows: readonly Row[]): SetSummary {
+  const of = (key: keyof typeof SUMMARY_PARTS) =>
+    rows.filter((row) => row.part === SUMMARY_PARTS[key]);
   return {
-    bySpecies:
-      `SELECT s.species_code, a.canonical_name, a.color, ` +
-      `CAST(count(*) AS INTEGER) AS genome_count, ` +
-      `CAST(count(*) FILTER (WHERE s.assembly_status = 'complete') AS INTEGER) AS complete_count, ` +
-      `CAST(count(DISTINCT s.st) AS INTEGER) AS st_count, ` +
-      `CAST(coalesce(sum(s.amr_gene_count), 0) AS BIGINT) AS amr_hit_count, ` +
-      `CAST(coalesce(sum(s.plasmid_contig_count), 0) AS BIGINT) AS plasmid_contig_count ` +
-      `FROM ${set} AS s LEFT JOIN ${speciesAttributes} AS a USING (species_code) ` +
-      `GROUP BY s.species_code, a.canonical_name, a.color ORDER BY s.species_code`,
-    bySpeciesYear:
-      `SELECT species_code, year, CAST(count(*) AS INTEGER) AS genome_count FROM ${set} ` +
-      `GROUP BY ALL ORDER BY species_code, year NULLS LAST`,
-    bySpeciesSt:
-      `SELECT species_code, mlst_scheme, st, CAST(count(*) AS INTEGER) AS genome_count ` +
-      `FROM ${set} GROUP BY ALL ORDER BY species_code, mlst_scheme NULLS LAST, st NULLS LAST`,
-    bySource:
-      `SELECT species_code, source_type, country, CAST(count(*) AS INTEGER) AS genome_count ` +
-      `FROM ${set} GROUP BY ALL ORDER BY species_code, source_type NULLS LAST, country NULLS LAST`,
-    byPlatform:
-      `SELECT species_code, platform, assembly_status, CAST(count(*) AS INTEGER) AS genome_count ` +
-      `FROM ${set} GROUP BY ALL ORDER BY species_code, platform NULLS LAST, assembly_status NULLS LAST`,
-    amrClassBySpecies:
-      `WITH s AS ${set}, n AS (SELECT species_code, count(*) AS genomes FROM s GROUP BY 1) ` +
-      `SELECT c.species_code, c.drug_class, ` +
-      `CAST(count(DISTINCT c.genome_id) AS INTEGER) AS genome_count, ` +
-      `CAST(count(DISTINCT c.genome_id) AS DOUBLE) / any_value(n.genomes) AS fraction, ` +
-      `CAST(sum(c.hit_count) AS BIGINT) AS hit_count ` +
-      `FROM ${tables.amrClass} AS c JOIN s USING (genome_id) JOIN n ON n.species_code = c.species_code ` +
-      `GROUP BY c.species_code, c.drug_class ORDER BY c.species_code, c.drug_class`,
+    bySpecies: of('bySpecies').map(speciesCountRow),
+    bySpeciesYear: of('bySpeciesYear').map(speciesYearRow),
+    bySpeciesSt: of('bySpeciesSt').map(speciesStRow),
+    bySource: of('bySource').map(sourceRow),
+    byPlatform: of('byPlatform').map(platformRow),
+    amrClassBySpecies: of('amrClassBySpecies').map(amrClassRow),
   };
 }
 
@@ -419,13 +475,17 @@ export function createSetEngine(source: ReleaseSource, manifest: Manifest): SetE
   let ready: Promise<void> | undefined;
   const setup = (): Promise<void> => {
     ready ??= (async () => {
-      const [genome, amrClassByGenome, mutation, setMember] = await Promise.all([
-        source.relation(RELEASE_FILES.genome),
-        optional(RELEASE_FILES.amrClassByGenome),
-        optional(RELEASE_FILES.mutation),
-        optional(RELEASE_FILES.setMember),
-      ]);
-      for (const statement of setupStatements({ genome, amrClassByGenome, mutation, setMember })) {
+      const [genome, amrClassByGenome, mutation, setMember, countsBySpecies, qc] =
+        await Promise.all([
+          source.relation(RELEASE_FILES.genome),
+          optional(RELEASE_FILES.amrClassByGenome),
+          optional(RELEASE_FILES.mutation),
+          optional(RELEASE_FILES.setMember),
+          optional(RELEASE_FILES.countsBySpecies),
+          optional(RELEASE_FILES.qc),
+        ]);
+      const relations = { genome, amrClassByGenome, mutation, setMember, countsBySpecies, qc };
+      for (const statement of setupStatements(relations)) {
         await source.query(statement);
       }
     })().catch((error: unknown) => {
@@ -462,7 +522,11 @@ export function createSetEngine(source: ReleaseSource, manifest: Manifest): SetE
     return buildPredicate(filters, await predicateSources(filters));
   };
 
-  const aggregate = async <T = Row>(filters: GenomeFilters, build: AggregateBuilder) => {
+  const aggregate = async <T = Row>(
+    filters: GenomeFilters,
+    build: AggregateBuilder,
+    priority: QueryPriority = 'high',
+  ) => {
     const where = await whereOf(filters);
     const sql = await build({
       set: setRelation(where),
@@ -470,7 +534,7 @@ export function createSetEngine(source: ReleaseSource, manifest: Manifest): SetE
       tables: ENGINE_TABLES,
       relation: (path) => source.relation(path),
     });
-    return (await source.query(sql)) as T[];
+    return (await source.query(sql, priority)) as T[];
   };
 
   const counts = new Memo<number>();
@@ -517,27 +581,9 @@ export function createSetEngine(source: ReleaseSource, manifest: Manifest): SetE
 
   const summarizeGenomes = async (filters: GenomeFilters): Promise<SetSummary> => {
     const where = await whereOf(filters);
-    const attributes = `(SELECT species_code, canonical_name, color FROM ${await source.relation(
-      RELEASE_FILES.countsBySpecies,
-    )})`;
-    const queries = summaryQueries(setRelation(where), attributes);
-    const [bySpecies, bySpeciesYear, bySpeciesSt, bySource, byPlatform, amrClass] =
-      await Promise.all([
-        source.query(queries.bySpecies),
-        source.query(queries.bySpeciesYear),
-        source.query(queries.bySpeciesSt),
-        source.query(queries.bySource),
-        source.query(queries.byPlatform),
-        source.query(queries.amrClassBySpecies),
-      ]);
-    return {
-      bySpecies: bySpecies.map(speciesCountRow),
-      bySpeciesYear: bySpeciesYear.map(speciesYearRow),
-      bySpeciesSt: bySpeciesSt.map(speciesStRow),
-      bySource: bySource.map(sourceRow),
-      byPlatform: byPlatform.map(platformRow),
-      amrClassBySpecies: amrClass.map(amrClassRow),
-    };
+    return splitSummary(
+      await source.query(summaryQuery(setRelation(where), ENGINE_TABLES.species)),
+    );
   };
 
   const engine: SetEngine & { summarizeGenomes: typeof summarizeGenomes } = {
@@ -584,15 +630,19 @@ export function createSetEngine(source: ReleaseSource, manifest: Manifest): SetE
       );
       return { plasmidContig: num(rows[0]?.plasmid ?? 0), prophage: num(rows[0]?.prophage ?? 0) };
     },
-    qcPoints: async (filters) => {
-      const qc = await source.relation(RELEASE_FILES.qc);
-      const rows = isWholeRelease(filters)
-        ? await source.query(`SELECT * FROM ${qc} ORDER BY genome_id`)
-        : await aggregate(
-            filters,
-            ({ set }) =>
-              `SELECT q.* FROM ${qc} AS q WHERE q.genome_id IN (SELECT genome_id FROM ${set}) ORDER BY q.genome_id`,
-          );
+    qcPoints: async (filters, priority = 'high') => {
+      if (isWholeRelease(filters)) {
+        const qc = await source.relation(RELEASE_FILES.qc);
+        const rows = await source.query(`SELECT * FROM ${qc} ORDER BY genome_id`, priority);
+        return rows.map(qcPoint);
+      }
+      const rows = await aggregate(
+        filters,
+        ({ set, tables }) =>
+          `SELECT q.* FROM ${tables.qc} AS q ` +
+          `WHERE q.genome_id IN (SELECT genome_id FROM ${set}) ORDER BY q.genome_id`,
+        priority,
+      );
       return rows.map(qcPoint);
     },
     filterOptions: async (key) => {

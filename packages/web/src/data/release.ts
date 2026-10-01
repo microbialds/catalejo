@@ -120,6 +120,13 @@ export function arrowRows(table: ArrowTableLike): Row[] {
 }
 
 /**
+ * The order of queued queries: high (the default) before low. The facet
+ * rail's counts are high; the genome table's page and the QC points, which
+ * render behind them, are low (requirements §6.1, §9; checklist C4).
+ */
+export type QueryPriority = 'high' | 'low';
+
+/**
  * The part of a release the set engine and the search read: SQL over
  * registered files. The browser implementation is `createBrowserSource`; the
  * tests build one over the Node engine.
@@ -129,8 +136,11 @@ export interface ReleaseSource {
   has(path: string): boolean;
   /** The SQL relation for a release file, `read_parquet('<name>')`. */
   relation(path: string): Promise<string>;
-  /** Rows of a query, with BIGINT values as numbers where safe. */
-  query(sql: string): Promise<Row[]>;
+  /**
+   * Rows of a query, with BIGINT values as numbers where safe. A low-priority
+   * query waits until no high-priority query is queued.
+   */
+  query(sql: string, priority?: QueryPriority): Promise<Row[]>;
 }
 
 const registered = new WeakMap<AsyncDuckDB, Map<string, Promise<string>>>();
@@ -170,21 +180,36 @@ export function openParquet(db: AsyncDuckDB, path: string, origin?: string): Pro
 export function createBrowserSource(db: AsyncDuckDB, manifest: Manifest): ReleaseSource {
   const files = new Set(manifest.files.map((file) => file.path));
   let connection: Promise<AsyncDuckDBConnection> | undefined;
-  // DuckDB runs one statement at a time per connection; chaining keeps the
-  // order of statements that create tables before the queries that read them.
-  let queue: Promise<unknown> = Promise.resolve();
+  // DuckDB runs one statement at a time per connection. Queries wait in two
+  // first-in first-out queues, and the next one is taken from the high queue
+  // while it holds any. Statements that create tables are high and are
+  // awaited before the queries that read them are issued.
+  const queues: Record<QueryPriority, (() => Promise<void>)[]> = { high: [], low: [] };
+  let running = false;
+  const drain = async () => {
+    if (running) return;
+    running = true;
+    for (;;) {
+      const next = queues.high.shift() ?? queues.low.shift();
+      if (next === undefined) break;
+      await next();
+    }
+    running = false;
+  };
   return {
     has: (path) => files.has(path),
     relation: (path) => openParquet(db, path),
-    query: (sql) => {
-      const run = async () => {
-        connection ??= db.connect();
-        const table = await (await connection).query(sql);
-        return arrowRows(table);
-      };
-      const result = queue.then(run, run);
-      queue = result.catch(() => undefined);
-      return result;
-    },
+    query: (sql, priority = 'high') =>
+      new Promise<Row[]>((resolve, reject) => {
+        queues[priority].push(async () => {
+          try {
+            connection ??= db.connect();
+            resolve(arrowRows(await (await connection).query(sql)));
+          } catch (error) {
+            reject(error instanceof Error ? error : new Error(String(error)));
+          }
+        });
+        void drain();
+      }),
   };
 }

@@ -4,8 +4,10 @@
 // first render, and the genome-grain aggregation for any other set. The
 // facet rail also reads the release summaries for its list of values, the
 // mobile element counts come from `mobileCounts`, and the QC scatter from
-// summaries/qc.parquet through `qcPoints`. The requests of one filter change
-// start together, and while they run the previous results stay on screen.
+// summaries/qc.parquet through `qcPoints`. The requests the facet rail needs
+// start together on a filter change; the QC points follow the charts' view of
+// the set (see ../Collection.tsx), so they queue after the rail's counts.
+// While requests run the previous results stay on screen.
 import { useMemo, useState } from 'react';
 import type { QcPoint, SetEngine, SetSummary, MobileCounts } from '../../data/setEngine';
 import { useEngineQuery } from '../../data/setEngineContext';
@@ -42,8 +44,11 @@ export interface CollectionData {
   summary: Settled<SetSummary>;
   release: Settled<SetSummary>;
   mobile: Settled<MobileCounts>;
-  qc: Settled<QcPoint[]>;
 }
+
+// The rail's counts render ahead of everything else; the QC points behind.
+const URGENT = { priority: 'urgent' } as const;
+const LOW_PRIORITY = { priority: 'low' } as const;
 
 export function useCollectionData(filters: GenomeFilters): CollectionData {
   const key = filtersKey(filters);
@@ -52,11 +57,16 @@ export function useCollectionData(filters: GenomeFilters): CollectionData {
     () => (engine: SetEngine) => engine.mobileCounts(filters),
     [filters],
   );
-  const qcPoints = useMemo(() => (engine: SetEngine) => engine.qcPoints(filters), [filters]);
   return {
-    summary: useSettled(useEngineQuery(`summary:${key}`, summarize)),
+    summary: useSettled(useEngineQuery(`summary:${key}`, summarize, URGENT)),
     release: useSettled(useEngineQuery('summary:release', releaseSummaries)),
-    mobile: useSettled(useEngineQuery(`mobile:${key}`, mobileCounts)),
-    qc: useSettled(useEngineQuery(`qc:${key}`, qcPoints)),
+    mobile: useSettled(useEngineQuery(`mobile:${key}`, mobileCounts, URGENT)),
   };
+}
+
+/** The CheckM2 points of a set, rendered at low priority behind the facet rail. */
+export function useQcPoints(filters: GenomeFilters): Settled<QcPoint[]> {
+  const key = filtersKey(filters);
+  const qcPoints = useMemo(() => (engine: SetEngine) => engine.qcPoints(filters, 'low'), [filters]);
+  return useSettled(useEngineQuery(`qc:${key}`, qcPoints, LOW_PRIORITY));
 }

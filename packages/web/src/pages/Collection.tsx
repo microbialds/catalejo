@@ -11,7 +11,15 @@
 // the other panels of the group share the row below it in equal columns, so
 // none is squeezed beside it. An empty set never reaches this page: the shell
 // shows the empty-set message instead (§5.2).
-import { useState } from 'react';
+//
+// The facet rail and the counters update first after a filter change (§6.1,
+// §9; checklist C4). The charts and the genome table draw a view, the store
+// and the summary of the last set whose summary has settled, which follows
+// the current set at deferred priority; the panels are memoized. So the click
+// renders the rail and the set bar only, the set's queries run without the
+// charts and the table redrawing in between, and the counts reach the rail in
+// an urgent render before the charts and the table follow.
+import { memo, useDeferredValue, useMemo, useState } from 'react';
 import { mixesAssemblies } from '../collection/facets';
 import { speciesGroups } from '../collection/species';
 import { CounterStrip } from '../components/CounterStrip';
@@ -21,18 +29,32 @@ import type { PanelExpansion } from '../components/Panel';
 import type { ExportKind } from '../components/ExportMenu';
 import { annotationVersionWarning } from '../data/annotationVersions';
 import { useManifest } from '../data/manifest';
+import type { Manifest } from '../data/manifest';
 import { countersOf } from '../data/setEngine';
-import { useGenomeSet } from '../set/store';
+import type { SetSummary } from '../data/setEngine';
+import { SetView, useGenomeSet } from '../set/store';
+import type { GenomeSetStore } from '../set/store';
 import { strings } from '../strings';
-import { SequenceTypePanel, SpeciesPanel } from './collection/BarPanels';
-import { useCollectionData } from './collection/data';
-import { Facets } from './collection/Facets';
-import { GenomeTablePanel } from './collection/GenomeTablePanel';
-import { HeatmapPanel } from './collection/HeatmapPanel';
-import { QcPanel } from './collection/QcPanel';
-import { YearPanel } from './collection/YearPanel';
+import * as bars from './collection/BarPanels';
+import { useCollectionData, useQcPoints } from './collection/data';
+import * as facets from './collection/Facets';
+import * as table from './collection/GenomeTablePanel';
+import * as heatmap from './collection/HeatmapPanel';
+import * as qcPanel from './collection/QcPanel';
+import * as year from './collection/YearPanel';
 
 export type CollectionPanelId = 'species' | 'st' | 'heatmap' | 'year' | 'qc' | 'table';
+
+// A panel re-renders only when its own props or the store change.
+const SpeciesPanel = memo(bars.SpeciesPanel);
+const SequenceTypePanel = memo(bars.SequenceTypePanel);
+const HeatmapPanel = memo(heatmap.HeatmapPanel);
+const YearPanel = memo(year.YearPanel);
+const QcPanel = memo(qcPanel.QcPanel);
+const GenomeTablePanel = memo(table.GenomeTablePanel);
+const Facets = memo(facets.Facets);
+
+const PANEL_IDS: readonly CollectionPanelId[] = ['species', 'st', 'heatmap', 'year', 'qc', 'table'];
 
 const TOP_ROW: readonly CollectionPanelId[] = ['species', 'st', 'heatmap'];
 const SECOND_ROW: readonly CollectionPanelId[] = ['year', 'qc'];
@@ -50,21 +72,68 @@ function rowClass(
   return ids.length - 1 > 1 ? `${rowBase} grid-cols-2` : `${rowBase} grid-cols-1`;
 }
 
+/** The species of a summary that have genomes in the set. */
+function speciesIn(summary: SetSummary): string[] {
+  return summary.bySpecies.filter((row) => row.genome_count > 0).map((row) => row.species_code);
+}
+
+function warningOf(manifest: Manifest | undefined, summary: SetSummary | undefined) {
+  return manifest === undefined || summary === undefined
+    ? null
+    : annotationVersionWarning(manifest, speciesIn(summary));
+}
+
+/** What the charts and the table draw: a store and the summary of its set. */
+interface View {
+  store: GenomeSetStore;
+  summary: SetSummary | undefined;
+}
+
 export function Collection() {
   const manifest = useManifest();
-  const { filters } = useGenomeSet();
-  const { summary, release, mobile, qc } = useCollectionData(filters);
+  const store = useGenomeSet();
+  const { filters } = store;
+  const { summary, release, mobile } = useCollectionData(filters);
   const [expanded, setExpanded] = useState<CollectionPanelId | null>(null);
 
-  const expansion = (id: CollectionPanelId, exportKind: ExportKind = 'figure'): PanelExpansion => ({
-    expanded: expanded === id,
-    onToggle: () => {
-      setExpanded(expanded === id ? null : id);
-    },
-    exportKind,
-  });
+  // One stable expansion object per panel, so that memoized panels skip renders.
+  const expansions = useMemo(() => {
+    const make = (id: CollectionPanelId): PanelExpansion => {
+      const exportKind: ExportKind = id === 'table' ? 'table' : 'figure';
+      return {
+        expanded: expanded === id,
+        onToggle: () => {
+          setExpanded((current) => (current === id ? null : id));
+        },
+        exportKind,
+      };
+    };
+    return Object.fromEntries(PANEL_IDS.map((id) => [id, make(id)])) as Record<
+      CollectionPanelId,
+      PanelExpansion
+    >;
+  }, [expanded]);
 
   const value = summary.value;
+  // The view moves to the current set once its summary has settled (derived
+  // state), and the charts and the table follow it at deferred priority.
+  const [held, setHeld] = useState<View>({ store, summary: value });
+  if (!summary.pending && (held.store !== store || held.summary !== value)) {
+    setHeld({ store, summary: value });
+  }
+  const view = useDeferredValue(held);
+  // A newer set is loading while the view still moves to an older one: the
+  // view stays where it is, and that redraw is skipped (C4).
+  if (summary.pending && view !== held) setHeld(view);
+  const chartValue = view.summary;
+  const qc = useQcPoints(view.store.filters);
+  const chartGroups = useMemo(
+    () => (chartValue === undefined ? undefined : speciesGroups(chartValue.bySpecies)),
+    [chartValue],
+  );
+  const chartWarning = useMemo(() => warningOf(manifest, chartValue), [manifest, chartValue]);
+  const chartMixed = chartValue !== undefined && mixesAssemblies(chartValue);
+
   const totals = value === undefined ? undefined : countersOf(value.bySpecies);
   const counters: Counter[] = [
     {
@@ -93,14 +162,7 @@ export function Collection() {
       value: totals?.plasmidContigs,
     },
   ];
-  const groups = value === undefined ? undefined : speciesGroups(value.bySpecies);
-  const speciesInSet = (value?.bySpecies ?? [])
-    .filter((row) => row.genome_count > 0)
-    .map((row) => row.species_code);
-  const warning =
-    manifest === undefined || value === undefined
-      ? null
-      : annotationVersionWarning(manifest, speciesInSet);
+  const warning = useMemo(() => warningOf(manifest, value), [manifest, value]);
 
   return (
     <div className="flex min-w-0 grow">
@@ -116,36 +178,46 @@ export function Collection() {
       <div className="flex min-w-0 grow flex-col gap-panel-gap px-page-padding-x py-page-padding-y">
         <h1 className="sr-only">{strings.pageCollection}</h1>
         <CounterStrip label={strings.countersLabel} counters={counters} />
-        <div
-          className={rowClass(
-            TOP_ROW,
-            expanded,
-            'grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.3fr)]',
-          )}
-        >
-          <SpeciesPanel groups={groups} failed={summary.failed} expansion={expansion('species')} />
-          <SequenceTypePanel summary={value} failed={summary.failed} expansion={expansion('st')} />
-          <HeatmapPanel
-            groups={groups}
-            rows={value?.amrClassBySpecies}
-            failed={summary.failed}
-            warning={warning}
-            mixed={value !== undefined && mixesAssemblies(value)}
-            expansion={expansion('heatmap')}
-          />
-        </div>
-        <div
-          className={rowClass(SECOND_ROW, expanded, 'grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]')}
-        >
-          <YearPanel
-            groups={groups}
-            rows={value?.bySpeciesYear}
-            failed={summary.failed}
-            expansion={expansion('year')}
-          />
-          <QcPanel points={qc.value} failed={qc.failed} expansion={expansion('qc')} />
-        </div>
-        <GenomeTablePanel expansion={expansion('table', 'table')} />
+        <SetView store={view.store}>
+          <div
+            className={rowClass(
+              TOP_ROW,
+              expanded,
+              'grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.3fr)]',
+            )}
+          >
+            <SpeciesPanel
+              groups={chartGroups}
+              failed={summary.failed}
+              expansion={expansions.species}
+            />
+            <SequenceTypePanel
+              summary={chartValue}
+              failed={summary.failed}
+              expansion={expansions.st}
+            />
+            <HeatmapPanel
+              groups={chartGroups}
+              rows={chartValue?.amrClassBySpecies}
+              failed={summary.failed}
+              warning={chartWarning}
+              mixed={chartMixed}
+              expansion={expansions.heatmap}
+            />
+          </div>
+          <div
+            className={rowClass(SECOND_ROW, expanded, 'grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]')}
+          >
+            <YearPanel
+              groups={chartGroups}
+              rows={chartValue?.bySpeciesYear}
+              failed={summary.failed}
+              expansion={expansions.year}
+            />
+            <QcPanel points={qc.value} failed={qc.failed} expansion={expansions.qc} />
+          </div>
+          <GenomeTablePanel expansion={expansions.table} />
+        </SetView>
       </div>
     </div>
   );

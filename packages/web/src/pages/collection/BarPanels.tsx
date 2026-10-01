@@ -74,7 +74,7 @@ export function SpeciesPanel({
   failed: boolean;
   expansion: PanelExpansion;
 }) {
-  const { filters, setFilters } = useGenomeSet();
+  const { updateFilters } = useGenomeSet();
   const wide = expansion.expanded;
   const max = Math.max(0, ...(groups ?? []).map((group) => group.genomeCount));
   return (
@@ -103,7 +103,7 @@ export function SpeciesPanel({
               max={max}
               wide={wide}
               onClick={() => {
-                setFilters(withSpecies(filters, group.codes));
+                updateFilters((current) => withSpecies(current, group.codes));
               }}
             />
           ))}
@@ -126,7 +126,7 @@ export function SequenceTypePanel({
   failed: boolean;
   expansion: PanelExpansion;
 }) {
-  const { filters, setFilters, queryFor } = useGenomeSet();
+  const { filters, updateFilters, queryFor } = useGenomeSet();
   const code = summary === undefined ? undefined : stPanelSpecies(filters, summary.bySpecies);
   const species = summary?.bySpecies.find((row) => row.species_code === code);
   const panel =
@@ -189,7 +189,7 @@ export function SequenceTypePanel({
                 max={max}
                 wide={false}
                 onClick={() => {
-                  setFilters(withStBar(filters, code, bar));
+                  updateFilters((current) => withStBar(current, code, bar));
                 }}
               />
             );

@@ -12,6 +12,12 @@
 // selected identifiers. The "Columns" chooser closes on Escape, which returns
 // the focus to its button, and on a pointer down outside it
 // (components/useDismiss.ts).
+//
+// The panel reads the store of the page's view (see ../Collection.tsx) and
+// renders its results at low priority, behind the facet rail (§6.1, §9;
+// checklist C4). The rows are memoized and each draws its cells in its own
+// render, so that a change of the count or of the pending state does not
+// redraw the page of rows, and drawing a new page gives way to a click.
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import type { ReactNode } from 'react';
@@ -46,7 +52,7 @@ import { Panel } from '../../components/Panel';
 import type { PanelExpansion } from '../../components/Panel';
 import { SpeciesName, Swatch } from '../../components/Species';
 import { Table } from '../../components/Table';
-import type { TableColumn } from '../../components/Table';
+import type { TableColumn, TableRow } from '../../components/Table';
 import type { SetEngine } from '../../data/setEngine';
 import { useEngineQuery, useSetCount } from '../../data/setEngineContext';
 import { formatCount } from '../../format';
@@ -54,6 +60,7 @@ import { QUIET_LINK } from '../../linkTier';
 import { palette } from '../../generated/palette';
 import { vocabularyLabel } from '../../set/fields';
 import { filtersKey } from '../../set/filters';
+import type { GenomeFilters } from '../../set/filters';
 import { useGenomeSet } from '../../set/store';
 import { strings } from '../../strings';
 import { useSettled } from './data';
@@ -68,6 +75,11 @@ const features = tableFeatures({
 const helper = createColumnHelper<typeof features, GenomeRow>();
 
 const EMPTY: GenomeRow[] = [];
+const NO_SELECTION: RowSelectionState = {};
+const COLUMN_BY_ID = new Map(GENOME_COLUMNS.map((column) => [column.id, column]));
+
+// The table's results render at low priority, behind the facet rail (C4).
+const LOW_PRIORITY = { priority: 'low' } as const;
 
 const initialVisibility: ColumnVisibilityState = Object.fromEntries(
   GENOME_COLUMNS.map((column) => [column.id, column.defaultVisible]),
@@ -100,76 +112,83 @@ function percent(value: number | null): ReactNode {
 
 function useCellRenderer() {
   const { queryFor } = useGenomeSet();
-  return (column: GenomeColumn, row: GenomeRow): ReactNode => {
-    switch (column.id) {
-      case 'genome_id':
-        return (
-          <Link
-            to={`/genomes/${encodeURIComponent(row.genome_id)}`}
-            className={`font-mono ${QUIET_LINK}`}
-          >
-            {row.genome_id}
-          </Link>
-        );
-      case 'species_code': {
-        const name = row.canonical_name ?? row.species_code;
-        return (
-          <Link
-            to="/"
-            query={queryFor({ species_code: [row.species_code] })}
-            className={`inline-flex items-center gap-1.5 ${QUIET_LINK}`}
-          >
-            <Swatch color={row.color ?? palette.species.other} />
-            <SpeciesName name={name} short className="text-base" />
-          </Link>
-        );
-      }
-      case 'st':
-        return row.st === null ? (
-          missing()
-        ) : (
-          <Link
-            to="/"
-            query={queryFor({ species_code: [row.species_code], st: [row.st] })}
-            className={`font-mono ${QUIET_LINK}`}
-          >
-            {strings.chipSt(row.st)}
-          </Link>
-        );
-      case 'source_type':
-        return row.source_type === null
-          ? missing()
-          : vocabularyLabel('source_type', row.source_type);
-      case 'year':
-        return mono(row.year === null ? null : String(row.year));
-      case 'amr_gene_count':
-        return count(row.amr_gene_count);
-      case 'plasmid_contig_count':
-        return count(row.plasmid_contig_count);
-      case 'checkm2_completeness':
-        return percent(row.checkm2_completeness);
-      case 'country':
-        return mono(row.country);
-      case 'platform':
-        return row.platform === null ? missing() : vocabularyLabel('platform', row.platform);
-      case 'assembly_status':
-        return row.assembly_status === null
-          ? missing()
-          : vocabularyLabel('assembly_status', row.assembly_status);
-      case 'checkm2_contamination':
-        return percent(row.checkm2_contamination);
-      case 'genome_size': {
-        const text = row.genome_size === null ? null : (row.genome_size / 1e6).toFixed(2);
-        return mono(text === null ? null : strings.valueMegabases(text));
-      }
-      case 'contig_count':
-        return count(row.contig_count);
-      case 'n50':
-        return count(row.n50);
-      case 'gc_content':
-        return percent(row.gc_content);
+  return useCallback(
+    (column: GenomeColumn, row: GenomeRow): ReactNode => cell(queryFor, column, row),
+    [queryFor],
+  );
+}
+
+function cell(
+  queryFor: (filters: GenomeFilters) => string,
+  column: GenomeColumn,
+  row: GenomeRow,
+): ReactNode {
+  switch (column.id) {
+    case 'genome_id':
+      return (
+        <Link
+          to={`/genomes/${encodeURIComponent(row.genome_id)}`}
+          className={`font-mono ${QUIET_LINK}`}
+        >
+          {row.genome_id}
+        </Link>
+      );
+    case 'species_code': {
+      const name = row.canonical_name ?? row.species_code;
+      return (
+        <Link
+          to="/"
+          query={queryFor({ species_code: [row.species_code] })}
+          className={`inline-flex items-center gap-1.5 ${QUIET_LINK}`}
+        >
+          <Swatch color={row.color ?? palette.species.other} />
+          <SpeciesName name={name} short className="text-base" />
+        </Link>
+      );
     }
-  };
+    case 'st':
+      return row.st === null ? (
+        missing()
+      ) : (
+        <Link
+          to="/"
+          query={queryFor({ species_code: [row.species_code], st: [row.st] })}
+          className={`font-mono ${QUIET_LINK}`}
+        >
+          {strings.chipSt(row.st)}
+        </Link>
+      );
+    case 'source_type':
+      return row.source_type === null ? missing() : vocabularyLabel('source_type', row.source_type);
+    case 'year':
+      return mono(row.year === null ? null : String(row.year));
+    case 'amr_gene_count':
+      return count(row.amr_gene_count);
+    case 'plasmid_contig_count':
+      return count(row.plasmid_contig_count);
+    case 'checkm2_completeness':
+      return percent(row.checkm2_completeness);
+    case 'country':
+      return mono(row.country);
+    case 'platform':
+      return row.platform === null ? missing() : vocabularyLabel('platform', row.platform);
+    case 'assembly_status':
+      return row.assembly_status === null
+        ? missing()
+        : vocabularyLabel('assembly_status', row.assembly_status);
+    case 'checkm2_contamination':
+      return percent(row.checkm2_contamination);
+    case 'genome_size': {
+      const text = row.genome_size === null ? null : (row.genome_size / 1e6).toFixed(2);
+      return mono(text === null ? null : strings.valueMegabases(text));
+    }
+    case 'contig_count':
+      return count(row.contig_count);
+    case 'n50':
+      return count(row.n50);
+    case 'gc_content':
+      return percent(row.gc_content);
+  }
 }
 
 interface Keyed<T> {
@@ -180,7 +199,7 @@ interface Keyed<T> {
 export function GenomeTablePanel({ expansion }: { expansion: PanelExpansion }) {
   const { filters, replaceWithIds } = useGenomeSet();
   const setKey = filtersKey(filters);
-  const total = useSetCount(filters);
+  const total = useSetCount(filters, LOW_PRIORITY);
 
   // Sorting, the page and the selection belong to one set: a new set starts
   // on the first page with nothing selected (derived during render).
@@ -201,19 +220,35 @@ export function GenomeTablePanel({ expansion }: { expansion: PanelExpansion }) {
   useDismiss(chooserOpen, { root: chooserRoot, trigger: chooserButton, onClose: closeChooser });
   const sortingState = sorting.key === setKey ? sorting.value : [];
   const page = pageIndex.key === setKey ? pageIndex.value : 0;
-  const selected = selection.key === setKey ? selection.value : {};
+  const selected = selection.key === setKey ? selection.value : NO_SELECTION;
   const pagination: PaginationState = { pageIndex: page, pageSize: TABLE_PAGE_SIZE };
+  // As a row's selection toggle does in TanStack Table: true when on, absent when off.
+  const toggleRow = useCallback(
+    (id: string, on: boolean) => {
+      setSelection((current) => {
+        const kept = Object.entries(current.key === setKey ? current.value : NO_SELECTION).filter(
+          ([other]) => other !== id,
+        );
+        return { key: setKey, value: Object.fromEntries(on ? [...kept, [id, true]] : kept) };
+      });
+    },
+    [setKey],
+  );
 
   const sort = sortingState[0];
   const sortKey = sort === undefined ? '' : `${sort.id}:${sort.desc ? 'desc' : 'asc'}`;
   const run = useMemo(
     () => async (engine: SetEngine) => {
-      const rows = await engine.aggregate(filters, (context) => genomePageSql(context, sort, page));
+      const rows = await engine.aggregate(
+        filters,
+        (context) => genomePageSql(context, sort, page),
+        'low',
+      );
       return rows.map(genomeRow);
     },
     [filters, sort, page],
   );
-  const result = useEngineQuery(`table:${setKey}:${sortKey}:${String(page)}`, run);
+  const result = useEngineQuery(`table:${setKey}:${sortKey}:${String(page)}`, run, LOW_PRIORITY);
   const rowsState = useSettled(result);
   const render = useCellRenderer();
 
@@ -266,7 +301,6 @@ export function GenomeTablePanel({ expansion }: { expansion: PanelExpansion }) {
   const selectedIds = Object.keys(selected).filter((id) => selected[id] === true);
   const pages = pageCount(total ?? 0);
   const visibleColumns = table.getVisibleLeafColumns();
-  const byId = new Map(GENOME_COLUMNS.map((column) => [column.id, column]));
 
   const pageRows = table.getRowModel().rows;
   const pageSelected = pageRows.filter((row) => row.getIsSelected()).length;
@@ -292,7 +326,7 @@ export function GenomeTablePanel({ expansion }: { expansion: PanelExpansion }) {
       className: 'w-6',
     },
     ...visibleColumns.map((column) => {
-      const definition = byId.get(column.id as GenomeColumn['id']);
+      const definition = COLUMN_BY_ID.get(column.id as GenomeColumn['id']);
       const header = definition?.header ?? column.id;
       return {
         id: column.id,
@@ -307,26 +341,38 @@ export function GenomeTablePanel({ expansion }: { expansion: PanelExpansion }) {
     }),
   ];
 
-  const rows = pageRows.map((row) => ({
-    id: row.id,
-    selected: row.getIsSelected(),
-    cells: [
-      <input
-        key="select"
-        type="checkbox"
-        className="m-0 size-3.25 accent-ink align-middle"
-        aria-label={strings.tableSelectRow(row.original.genome_id)}
-        checked={row.getIsSelected()}
-        onChange={(event) => {
-          row.toggleSelected(event.target.checked);
-        }}
-      />,
-      ...visibleColumns.map((column) => {
-        const definition = byId.get(column.id as GenomeColumn['id']);
-        return definition === undefined ? null : render(definition, row.original);
-      }),
-    ],
-  }));
+  // One row object per genome, kept while the page, the selection, the
+  // visible columns and the links stay the same; each draws its cells when
+  // the table renders it.
+  const pageData = rowsState.value ?? EMPTY;
+  const visibleIds = visibleColumns.map((column) => column.id).join(' ');
+  const rows = useMemo<TableRow[]>(() => {
+    const definitions = visibleIds
+      .split(' ')
+      .map((id) => COLUMN_BY_ID.get(id as GenomeColumn['id']));
+    return pageData.map((original) => {
+      const isSelected = selected[original.genome_id] === true;
+      return {
+        id: original.genome_id,
+        selected: isSelected,
+        cells: () => [
+          <input
+            key="select"
+            type="checkbox"
+            className="m-0 size-3.25 accent-ink align-middle"
+            aria-label={strings.tableSelectRow(original.genome_id)}
+            checked={isSelected}
+            onChange={(event) => {
+              toggleRow(original.genome_id, event.target.checked);
+            }}
+          />,
+          ...definitions.map((definition) =>
+            definition === undefined ? null : render(definition, original),
+          ),
+        ],
+      };
+    });
+  }, [pageData, selected, visibleIds, render, toggleRow]);
 
   return (
     <Panel title={strings.panelGenomes} name={strings.panelGenomes} expansion={expansion}>
@@ -347,7 +393,7 @@ export function GenomeTablePanel({ expansion }: { expansion: PanelExpansion }) {
             <fieldset className="absolute top-full left-0 z-20 mt-1 flex w-48 flex-col gap-1 border border-border-strong bg-panel p-2">
               <legend className="sr-only">{strings.tableColumnsLabel}</legend>
               {table.getAllLeafColumns().map((column) => {
-                const definition = byId.get(column.id as GenomeColumn['id']);
+                const definition = COLUMN_BY_ID.get(column.id as GenomeColumn['id']);
                 return (
                   <label key={column.id} className="flex items-center gap-2 text-control">
                     <input

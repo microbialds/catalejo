@@ -7,7 +7,8 @@
 // the species and the class as filters. The panel carries the annotation
 // version note when the set mixes database versions, and the §5.5 footnote
 // when it mixes platforms or assembly statuses. Below the compact breakpoint
-// the grid is replaced by a note that it needs a wider screen.
+// the grid is replaced by a note that it needs a wider screen. A species
+// row header links to the collection filtered by that species (§5.9).
 import type { CSSProperties } from 'react';
 import {
   buildHeatmap,
@@ -18,6 +19,7 @@ import {
 } from '../../collection/heatmap';
 import { withSpecies } from '../../collection/species';
 import type { ChartGroup } from '../../collection/species';
+import { Link } from '../../components/Link';
 import { Panel } from '../../components/Panel';
 import type { PanelExpansion } from '../../components/Panel';
 import { SpeciesName } from '../../components/Species';
@@ -45,7 +47,7 @@ export function HeatmapPanel({
   mixed: boolean;
   expansion: PanelExpansion;
 }) {
-  const { filters, setFilters } = useGenomeSet();
+  const { filters, setFilters, queryFor } = useGenomeSet();
   const heatmap =
     groups !== undefined && rows !== undefined ? buildHeatmap(groups, rows) : undefined;
   const wide = expansion.expanded;
@@ -99,7 +101,13 @@ export function HeatmapPanel({
               <div key={row.group.key} role="row" className="contents">
                 <span role="rowheader" className="min-w-0 truncate">
                   {row.group.isSpecies ? (
-                    <SpeciesName name={row.group.label} short={!wide} className="text-base" />
+                    <Link
+                      to="/"
+                      query={queryFor({ species_code: row.group.codes })}
+                      className="text-ink no-underline hover:text-accent"
+                    >
+                      <SpeciesName name={row.group.label} short={!wide} className="text-base" />
+                    </Link>
                   ) : (
                     <span className="text-control">{row.group.label}</span>
                   )}

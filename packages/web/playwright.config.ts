@@ -1,6 +1,8 @@
 // Playwright against the development server, which serves the synthetic
 // release at /data/ (requirements §13). Chromium at the two desktop widths the
-// critic checks (requirements §5.10).
+// critic checks for every page, and at 390 px for the specs of the pages the
+// critic also checks there, the shell and the collection page (requirements
+// §5.10). A test that applies to one width only skips the others by name.
 import { defineConfig, devices } from '@playwright/test';
 
 const port = 5173;
@@ -22,6 +24,11 @@ export default defineConfig({
     {
       name: 'chromium-1024',
       use: { ...devices['Desktop Chrome'], viewport: { width: 1024, height: 768 } },
+    },
+    {
+      name: 'chromium-390',
+      testMatch: ['**/global.spec.ts', '**/collection.spec.ts'],
+      use: { ...devices['Desktop Chrome'], viewport: { width: 390, height: 844 } },
     },
   ],
   webServer: {

@@ -112,6 +112,16 @@ describe('filter chips', () => {
     expect(filters.species_code).toBeUndefined();
     expect(filters.set).toEqual(['index-isolate']);
   });
+
+  it('links an element name to its Genes page, keeping the set (§5.9)', () => {
+    renderApp(path, synth);
+    const chips = within(setBar()).getByRole('list', { name: strings.activeFiltersLabel });
+    const link = within(chips).getByRole('link', { name: "aac(6')-Ib-cr5" });
+    const href = new URL(link.getAttribute('href') ?? '', 'http://localhost');
+    expect(href.pathname).toBe(`/genes/element/${encodeURIComponent("aac(6')-Ib-cr5")}`);
+    expect(decodeFilters(href.search)).toEqual(decodeFilters(window.location.search));
+    expect(within(chips).getAllByRole('link')).toHaveLength(1);
+  });
 });
 
 describe('empty set (requirements §5.2)', () => {

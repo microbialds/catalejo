@@ -6,12 +6,14 @@
 // "Other"); clicking a species makes the species filter that species, and
 // clicking "Other" makes it all the species in it. The ST panel draws the top
 // STs of one species (collection/sequenceTypes.ts) in that species' color, or
-// a statement when the species has no ST scheme.
+// a statement when the species has no ST scheme. The species name in the ST
+// panel title links to the collection filtered by that species (§5.9).
 import type { ReactNode } from 'react';
 import { stPanel, stPanelSpecies, withStBar } from '../../collection/sequenceTypes';
 import type { StBar } from '../../collection/sequenceTypes';
 import { markStyle, withSpecies } from '../../collection/species';
 import type { ChartGroup } from '../../collection/species';
+import { Link } from '../../components/Link';
 import { Panel } from '../../components/Panel';
 import type { PanelExpansion } from '../../components/Panel';
 import { SpeciesName } from '../../components/Species';
@@ -118,7 +120,7 @@ export function SequenceTypePanel({
   failed: boolean;
   expansion: PanelExpansion;
 }) {
-  const { filters, setFilters } = useGenomeSet();
+  const { filters, setFilters, queryFor } = useGenomeSet();
   const code = summary === undefined ? undefined : stPanelSpecies(filters, summary.bySpecies);
   const species = summary?.bySpecies.find((row) => row.species_code === code);
   const panel =
@@ -137,9 +139,13 @@ export function SequenceTypePanel({
           {species !== undefined && (
             <>
               {' '}
-              <span className="font-normal whitespace-nowrap text-text-secondary">
+              <Link
+                to="/"
+                query={queryFor({ species_code: [species.species_code] })}
+                className="font-normal whitespace-nowrap text-text-secondary no-underline hover:text-accent"
+              >
                 <SpeciesName name={species.canonical_name} short={!expansion.expanded} />
-              </span>
+              </Link>
             </>
           )}
         </>

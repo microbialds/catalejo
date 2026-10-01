@@ -106,7 +106,7 @@ function PickerFrame({
       }}
     >
       <div className="flex items-baseline justify-between gap-2 border-b border-rule-light pb-1.5">
-        <span className="font-serif text-facet-title font-semibold">{fieldLabels[field]}</span>
+        <span className="font-sans text-facet-title font-bold">{fieldLabels[field]}</span>
         <Button variant="link" onClick={onBack}>
           {strings.filterBack}
         </Button>

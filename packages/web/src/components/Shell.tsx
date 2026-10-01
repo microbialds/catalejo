@@ -24,6 +24,7 @@ import { useManifest } from '../data/manifest';
 import { useSetCount } from '../data/setEngineContext';
 import { formatCount, formatPipeline } from '../format';
 import { LayoutContext } from '../layout';
+import { CHROME_LINK } from '../linkTier';
 import type { LayoutState } from '../layout';
 import { methodsHref, releasesHref } from '../navigation';
 import { useRouter } from '../router';
@@ -44,7 +45,7 @@ const MENU_ID = 'shell-menu';
 function Wordmark() {
   return (
     <div className="flex flex-col gap-0.5 px-nav-item-padding-x pb-5.5 max-compact:pb-0">
-      <span className="font-serif text-wordmark leading-tight font-semibold tracking-tight text-ink">
+      <span className="font-sans text-wordmark leading-tight font-bold tracking-tight text-ink">
         {strings.wordmark}
       </span>
       <span className="text-small tracking-tagline text-text-secondary">{strings.tagline}</span>
@@ -66,7 +67,7 @@ export function ReleaseFooter() {
         {manifest === undefined ? (
           <span className="font-mono text-ink">{pending}</span>
         ) : (
-          <Link to={releasesHref} className="font-mono no-underline">
+          <Link to={releasesHref} className={`font-mono ${CHROME_LINK}`}>
             {manifest.release_id}
           </Link>
         )}
@@ -78,7 +79,7 @@ export function ReleaseFooter() {
           {manifest === undefined ? pending : formatPipeline(manifest.pipeline)}
         </span>
       </span>
-      <Link to={methodsHref} className="self-start no-underline">
+      <Link to={methodsHref} className={`self-start ${CHROME_LINK}`}>
         {strings.footerMethods}
       </Link>
     </footer>
@@ -163,7 +164,7 @@ function ShellLayout({ children }: { children: ReactNode }) {
             <Wordmark />
             <button
               type="button"
-              className="mr-nav-item-padding-x rounded-control border border-control-border bg-panel px-3 py-1.75 text-control font-medium text-ink compact:hidden"
+              className="mr-nav-item-padding-x rounded-control border border-control-border bg-panel px-3 py-1.75 text-control font-bold text-ink compact:hidden"
               aria-expanded={menuOpen}
               aria-controls={MENU_ID}
               onClick={toggleMenu}

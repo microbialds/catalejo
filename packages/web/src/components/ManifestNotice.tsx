@@ -8,7 +8,7 @@ import { strings } from '../strings';
 export function ManifestNotice({ statement }: { statement: string }) {
   return (
     <main className="flex min-h-screen flex-col gap-3 bg-background px-page-padding-x py-page-padding-y text-base text-ink">
-      <span className="font-serif text-wordmark leading-tight font-semibold tracking-tight">
+      <span className="font-sans text-wordmark leading-tight font-bold tracking-tight">
         {strings.wordmark}
       </span>
       <p role="alert">{statement}</p>

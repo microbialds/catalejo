@@ -1,7 +1,7 @@
 // Requirements §5.4, §5.5, §6.1 and checklist C3, C5, C7, C8: the pure rules
 // of the collection page. The "Other" grouping of chart species (with the
 // synthetic release's tie), the sequence type panel's species and its
-// no-scheme statement, the heatmap's stepped ramp, the brush-to-filter
+// no-scheme statement, the heatmap's seven-step scale, the brush-to-filter
 // mapping, the year columns, the facet values, and the SQL of the paged and
 // sorted genome table.
 import { describe, expect, it } from 'vitest';
@@ -14,9 +14,10 @@ import {
   pageCount,
 } from '../src/collection/genomeTable';
 import {
+  HEAT_SCALE,
   HEAT_STEPS,
   buildHeatmap,
-  heatOpacity,
+  heatFill,
   heatPercent,
   heatStep,
   heatTextOnInk,
@@ -229,25 +230,39 @@ describe('sequence type panel (requirements §6.1; C8)', () => {
   });
 });
 
-describe('heatmap ramp (maintainer decision)', () => {
-  it('has six steps, zero for none', () => {
-    expect(HEAT_STEPS).toBe(6);
+describe('heatmap scale (palette.sequential.heatmap)', () => {
+  it('maps a fraction above zero to one of the seven steps, zero to none', () => {
+    expect(HEAT_SCALE).toEqual(palette.sequential.heatmap);
+    expect(HEAT_STEPS).toBe(7);
     expect(heatStep(0)).toBe(0);
     expect(heatStep(0.01)).toBe(1);
-    expect(heatStep(1 / 6 - 1e-9)).toBe(1);
-    expect(heatStep(1 / 6)).toBe(2);
-    expect(heatStep(0.49)).toBe(3);
+    expect(heatStep(1 / 7 - 1e-9)).toBe(1);
+    expect(heatStep(1 / 7)).toBe(2);
+    expect(heatStep(0.49)).toBe(4);
     expect(heatStep(0.5)).toBe(4);
-    expect(heatStep(0.99)).toBe(6);
-    expect(heatStep(1)).toBe(6);
-    expect(heatOpacity(0)).toBe(0);
-    expect(heatOpacity(6)).toBe(1);
-    expect(heatOpacity(3)).toBe(0.5);
+    expect(heatStep(4 / 7)).toBe(5);
+    expect(heatStep(6 / 7 - 1e-9)).toBe(6);
+    expect(heatStep(6 / 7)).toBe(7);
+    expect(heatStep(0.99)).toBe(7);
+    expect(heatStep(1)).toBe(7);
   });
 
-  it('uses white text from 50% upward and integer percents', () => {
-    expect(heatTextOnInk(0.49)).toBe(false);
-    expect(heatTextOnInk(0.5)).toBe(true);
+  it('fills each step solid with its palette color and leaves zero on the panel', () => {
+    expect(heatFill(0)).toBeUndefined();
+    expect([1, 2, 3, 4, 5, 6, 7].map(heatFill)).toEqual([...palette.sequential.heatmap]);
+  });
+
+  it('sets on-ink text on the last three steps and integer percents', () => {
+    expect([0, 1, 2, 3, 4, 5, 6, 7].map(heatTextOnInk)).toEqual([
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+    ]);
     expect(heatPercent(0.284)).toBe(28);
     expect(heatPercent(0.995)).toBe(100);
   });

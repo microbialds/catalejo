@@ -1,10 +1,11 @@
 // Assembly QC scatter (requirements §6.1; checklist C3; collection board,
 // second panel row; maintainer decision for the marks). X is CheckM2
 // completeness, Y contamination; the thresholds of config/platform.yaml are
-// dashed ink lines (never the accent). Passing genomes are filled in
-// secondary text gray, failing ones hollow with an ink stroke, and the
-// subtitle states how many are flagged and how many lack CheckM2 values
-// (not drawn). Dragging on the plot draws a rectangle; on release its left
+// dashed ink lines. Passing genomes are solid dots in chrome text_secondary,
+// failing ones hollow with an ink stroke, both drawn as is with no opacity
+// (requirements §5.4; checklist G3), and the subtitle states how many are
+// flagged and how many lack CheckM2 values (not drawn). Dragging on the plot
+// draws a hollow rectangle with an ink stroke; on release its left
 // completeness and top contamination become the completeness_min and
 // contamination_max filters (collection/qc.ts). The keyboard alternative is
 // the add filter menu, which the description of the plot names.
@@ -183,14 +184,7 @@ export function QcPanel({
                       strokeWidth={0.9}
                     />
                   ) : (
-                    <circle
-                      key={point.genome_id}
-                      cx={cx}
-                      cy={cy}
-                      r={2}
-                      fill={secondary}
-                      fillOpacity={0.6}
-                    />
+                    <circle key={point.genome_id} cx={cx} cy={cy} r={2} fill={secondary} />
                   );
                 })}
               </g>
@@ -224,8 +218,7 @@ export function QcPanel({
                   y={Math.min(brush.y0, brush.y1)}
                   width={Math.abs(brush.x1 - brush.x0)}
                   height={Math.abs(brush.y1 - brush.y0)}
-                  fill={ink}
-                  fillOpacity={0.06}
+                  fill="none"
                   stroke={ink}
                   strokeWidth={0.8}
                 />

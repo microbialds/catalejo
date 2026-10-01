@@ -195,7 +195,7 @@ export function GlobalSearch() {
                 <div key={group.kind} role="group" aria-labelledby={headingId}>
                   <div
                     id={headingId}
-                    className="flex justify-between px-3 pt-2 pb-1 text-micro font-semibold tracking-label text-text-label uppercase"
+                    className="flex justify-between px-3 pt-2 pb-1 text-micro font-bold tracking-label text-text-label"
                   >
                     <span>{kindLabels[group.kind]}</span>
                     <span className="font-mono">
@@ -223,7 +223,7 @@ export function GlobalSearch() {
                           <span className={`truncate ${termClass[entry.kind]}`}>{entry.term}</span>
                           {entry.kind === 'st' &&
                             entry.speciesCodes.map((code) => (
-                              <span key={code} className="truncate font-serif text-ink italic">
+                              <span key={code} className="truncate font-sans text-ink italic">
                                 {speciesName(manifest, code)}
                               </span>
                             ))}

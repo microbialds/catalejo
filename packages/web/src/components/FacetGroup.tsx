@@ -1,6 +1,7 @@
-// Facet group (requirements §6.1, §7; collection board, facet rail). An
-// uppercase letterspaced label over rows of checkbox, value and count; counts
-// in monospace, right-aligned. A row is checked while its value is an active
+// Facet group (requirements §6.1, §7; collection board, facet rail). A
+// sentence case bold label over rows of checkbox, value and count; counts
+// in monospace, right-aligned. A link inside the group (the annotation
+// version note's Methods link) is in the quiet tier of the facet rail (§5.4). A row is checked while its value is an active
 // filter, and toggling it adds or removes the filter. Values with no genome
 // in the current set stay listed (values within a field are alternatives,
 // §5.2) with the value in faint text.
@@ -10,10 +11,8 @@ import { strings } from '../strings';
 
 export function FacetGroup({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <fieldset className="flex min-w-0 flex-col gap-2">
-      <legend className="mb-2 text-small font-semibold tracking-label text-text-label uppercase">
-        {label}
-      </legend>
+    <fieldset className="flex min-w-0 flex-col gap-2 [&_a]:link-quiet">
+      <legend className="mb-2 text-small font-bold tracking-label text-text-label">{label}</legend>
       {children}
     </fieldset>
   );
@@ -22,7 +21,7 @@ export function FacetGroup({ label, children }: { label: string; children: React
 export interface FacetOptionProps {
   checked: boolean;
   onToggle: (checked: boolean) => void;
-  /** The value as shown (a species name in italic serif, a class label). */
+  /** The value as shown (a species name in italic sans, a class label). */
   label: ReactNode;
   /** The value as plain text, for the accessible name. */
   name: string;

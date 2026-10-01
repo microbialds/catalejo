@@ -2,7 +2,9 @@
 // chart and on the resistance heatmap when the species of the current set
 // carry more than one Bakta or AMRFinderPlus database version, with the
 // versions involved and a link to the Methods page. The versions come from
-// data/annotationVersions.ts; this component only states them.
+// data/annotationVersions.ts; this component only states them. The Methods
+// link is running text (§5.4), underlined at rest, except in the facet rail,
+// whose group makes it quiet.
 import type { AnnotationVersionWarning } from '../data/annotationVersions';
 import { methodsHref } from '../navigation';
 import { strings } from '../strings';
@@ -15,9 +17,7 @@ export function AnnotationVersionNote({ warning }: { warning: AnnotationVersionW
   return (
     <p role="note" className="text-small text-text-secondary">
       {strings.annotationVersionWarning(list(warning.bakta), list(warning.amrfinderplus))}{' '}
-      <Link to={methodsHref} className="no-underline">
-        {strings.annotationVersionMethods}
-      </Link>
+      <Link to={methodsHref}>{strings.annotationVersionMethods}</Link>
     </p>
   );
 }

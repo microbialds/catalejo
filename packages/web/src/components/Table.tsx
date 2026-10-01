@@ -1,9 +1,11 @@
-// Table (requirements §7, components; §5.10; collection board, table). A
-// heavy ink top rule, light row rules, uppercase letterspaced column headers
-// in secondary text, 30 px rows, and horizontal scroll inside its container
-// so the page never scrolls sideways. Sortable headers are buttons that
-// state the sort through aria-sort. Cells are given by the caller, which sets
-// identifiers and counts in monospace and species names in italic serif.
+// Table (requirements §7, components; §5.4, §5.10; collection board, table).
+// A heavy ink top rule, light row rules, sentence case bold column headers in
+// secondary text, 30 px rows, and horizontal scroll inside its container so
+// the page never scrolls sideways. Sortable headers are buttons that state
+// the sort through aria-sort. Cells are given by the caller, which sets
+// identifiers and counts in monospace and species names in italic sans;
+// every link in a cell is in the quiet tier (§5.4), underlined on hover and
+// focus only.
 import type { ReactNode } from 'react';
 import { strings } from '../strings';
 
@@ -47,7 +49,7 @@ export function Table({
   busy?: boolean;
 }) {
   return (
-    <div className="min-w-0 overflow-x-auto">
+    <div className="min-w-0 overflow-x-auto [&_a]:link-quiet">
       <table
         aria-label={label}
         aria-busy={busy}
@@ -62,7 +64,7 @@ export function Table({
                   key={column.id}
                   scope="col"
                   {...(sort === false ? {} : { 'aria-sort': ARIA_SORT[sort] })}
-                  className={`px-1 text-small font-semibold tracking-label whitespace-nowrap text-text-secondary uppercase ${
+                  className={`px-1 text-small font-bold tracking-label whitespace-nowrap text-text-secondary ${
                     column.numeric === true ? 'text-right' : 'text-left'
                   } ${column.className ?? ''}`}
                 >
@@ -71,7 +73,7 @@ export function Table({
                   ) : (
                     <button
                       type="button"
-                      className="inline-flex items-baseline gap-1 font-semibold tracking-label uppercase hover:text-ink"
+                      className="inline-flex items-baseline gap-1 font-bold tracking-label hover:text-ink"
                       {...(column.sortName === undefined ? {} : { 'aria-label': column.sortName })}
                       onClick={column.onSort}
                     >

@@ -88,9 +88,7 @@ describe('filter chips', () => {
     const items = within(chips).getAllByRole('listitem');
     expect(items).toHaveLength(5);
     const species = within(chips).getByText('Klebsiella pneumoniae');
-    expect(species.className.split(/\s+/)).toEqual(
-      expect.arrayContaining(['font-serif', 'italic']),
-    );
+    expect(species.className.split(/\s+/)).toEqual(expect.arrayContaining(['font-sans', 'italic']));
     const element = within(chips).getByText("aac(6')-Ib-cr5");
     expect(element.className.split(/\s+/)).toEqual(expect.arrayContaining(['font-mono', 'italic']));
     expect(within(chips).getByText(strings.chipCompleteness('95'))).toBeTruthy();

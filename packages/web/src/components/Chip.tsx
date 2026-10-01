@@ -1,9 +1,11 @@
 // Filter chip (requirements §5.1, §7; collection board, set bar). A hairline
 // outlined label with 2 px corners on the panel color; the field label in
-// secondary text, then the value set by type (species italic serif, genes
+// secondary text, then the value set by type (species italic sans, genes
 // and elements italic monospace, identifiers monospace), then a text remove
 // control whose accessible name states the filter. A value with a page of its
-// own (an element or a pangenome cluster, §5.9) links to it, keeping the set.
+// own (an element or a pangenome cluster, §5.9) links to it, keeping the set;
+// the link is in the quiet tier (§5.4), underlined on hover and focus.
+import { QUIET_LINK } from '../linkTier';
 import type { ChipLabel } from '../set/fields';
 import { valueClass } from '../set/fields';
 import { strings } from '../strings';
@@ -24,7 +26,7 @@ export function Chip({ label, to, onRemove }: ChipProps) {
       {to === undefined ? (
         <span className={value}>{label.value}</span>
       ) : (
-        <Link to={to} className={`${value} text-ink no-underline hover:text-accent`}>
+        <Link to={to} className={`${value} ${QUIET_LINK}`}>
           {label.value}
         </Link>
       )}

@@ -3,7 +3,7 @@
 // the manifest alone, so the menu renders before the engine starts), and the
 // label of each chip, with the labels of the controlled vocabularies (source
 // type, platform, assembly status) and the short forms used in the
-// collection charts. Species names are set in italic serif, gene, element
+// collection charts. Species names are set in italic sans, gene, element
 // and mutation names in italic monospace, other identifiers in monospace.
 import type { Manifest } from '../data/manifest';
 import { formatCount } from '../format';
@@ -147,7 +147,7 @@ export function curatedSetName(manifest: Manifest | undefined, setId: string): s
   return manifest?.curated_sets.find((set) => set.set_id === setId)?.name ?? setId;
 }
 
-/** How a value is set: species italic serif, genes italic monospace, ids monospace. */
+/** How a value is set: species italic sans, genes italic monospace, ids monospace. */
 export type ValueStyle = 'species' | 'gene' | 'identifier' | 'plain';
 
 export interface ChipLabel {
@@ -236,7 +236,7 @@ export function chipLabel(entry: FilterEntry, manifest: Manifest | undefined): C
 export function valueClass(style: ValueStyle): string {
   switch (style) {
     case 'species':
-      return 'font-serif italic';
+      return 'font-sans italic';
     case 'gene':
       return 'font-mono italic';
     case 'identifier':

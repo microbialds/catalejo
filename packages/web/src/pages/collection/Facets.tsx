@@ -1,6 +1,6 @@
 // Facet rail of the collection page (requirements §6.1 Layout and Controls,
 // §5.6; checklist C2, C4, G13; collection board, left rail). Species (with
-// swatch, italic serif names), source, mobile elements (plasmid contig,
+// swatch, italic sans names), source, mobile elements (plasmid contig,
 // prophage region), AMR class (palette order, the first few with "All N
 // classes" to expand), platform and assembly status. Each row shows the
 // genomes of the current set with the value; checking it adds the filter and

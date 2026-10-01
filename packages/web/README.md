@@ -29,7 +29,7 @@ Each script runs as `pnpm --dir packages/web <script>` from the repository root.
 | `extensions` | Fills `.cache/duckdb-extensions/` with the pinned DuckDB extensions                              |
 | `preview`    | Serves the built `dist/` on port 4173, after running `extensions`                                |
 
-The Playwright tests run in Chromium at widths of 1440 and 1024 pixels.
+The Playwright tests run in Chromium at widths of 1440 and 1024 pixels, and at 390 pixels for the shell and the collection page.
 
 ## Development server and release data
 
@@ -48,6 +48,8 @@ In production the Pages Function in [functions/data/[[path]].ts](functions/data/
 Colors come from [config/palette.yaml](../../config/palette.yaml) and the typography, color roles, spacing, layout and shape from [config/design-tokens.yaml](../../config/design-tokens.yaml). [scripts/generate.ts](scripts/generate.ts) compiles both into `src/generated/palette.ts`, `src/generated/tokens.ts` and `src/generated/tokens.css`, which are committed and must not be edited by hand. `test/generated.test.ts` fails when the committed files differ from a fresh generation, and CI also checks that the generated directory is unchanged after the tests. After changing either YAML file, run `pnpm --dir packages/web generate` and commit the result.
 
 `test/palette.test.ts` scans `src/` and `index.html` for hex colors, color functions and named colors, using the detector in `test/guards/colorLiterals.ts`, so every color reaches a component through the generated palette.
+
+The interface is set in B612, with B612 Mono for identifiers, counts and numerals, both loaded from Google Fonts through the stylesheet link in `index.html`, which `test/generated.test.ts` compares with the design tokens. `test/design.test.ts` uses the detector in `test/guards/designRules.ts` to fail when `src/` uses the serif face, a weight other than 400 and 700, an uppercase label, or an opacity below 1, since every mark is drawn in a palette color as is. Links are ink and follow the two tiers of requirements §5.4, underlined at rest in running text and on hover and focus in tables, chips, pills, counters and the facet rail through the `link-quiet` utility of `src/index.css`. The tier of the navigation items, the footer links and the text controls drawn as links is set in one place, `CHROME_LINK` in `src/linkTier.ts`.
 
 ## Strings
 

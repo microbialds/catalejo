@@ -30,7 +30,7 @@ export interface ChartGroup {
   key: string;
   /** Full label: the canonical name, or "Other". */
   label: string;
-  /** Whether the label is a species name (italic serif). */
+  /** Whether the label is a species name (italic sans). */
   isSpecies: boolean;
   color: string;
   /** The species codes the group stands for. */

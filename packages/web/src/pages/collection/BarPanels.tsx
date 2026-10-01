@@ -7,7 +7,8 @@
 // clicking "Other" makes it all the species in it. The ST panel draws the top
 // STs of one species (collection/sequenceTypes.ts) in that species' color, or
 // a statement when the species has no ST scheme. The species name in the ST
-// panel title links to the collection filtered by that species (§5.9).
+// panel title links to the collection filtered by that species (§5.9), in
+// the quiet link tier (§5.4).
 import type { ReactNode } from 'react';
 import { stPanel, stPanelSpecies, withStBar } from '../../collection/sequenceTypes';
 import type { StBar } from '../../collection/sequenceTypes';
@@ -20,6 +21,7 @@ import { SpeciesName } from '../../components/Species';
 import type { SetSummary } from '../../data/setEngine';
 import { formatCount } from '../../format';
 import { palette } from '../../generated/palette';
+import { QUIET_LINK } from '../../linkTier';
 import { useGenomeSet } from '../../set/store';
 import { strings } from '../../strings';
 import { PanelStatus } from './PanelStatus';
@@ -146,7 +148,7 @@ export function SequenceTypePanel({
               <Link
                 to="/"
                 query={queryFor({ species_code: [species.species_code] })}
-                className="font-normal whitespace-nowrap text-text-secondary no-underline hover:text-accent"
+                className={`font-regular whitespace-nowrap text-text-secondary ${QUIET_LINK}`}
               >
                 <SpeciesName name={species.canonical_name} short={!expansion.expanded} />
               </Link>

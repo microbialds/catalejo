@@ -1,6 +1,8 @@
 // Shell navigation (requirements §5.1, §5.3, §5.7, §7; collection board, left
-// column). Two groups of text links, Explore and Analyze; the active page has
-// a 3 px left rule in the accent color, semibold ink on the paper background.
+// column). Two groups of text links, Explore and Analyze, under sentence case
+// group labels; the active page has a 3 px left rule in the accent color
+// (ink) and bold ink text on the chassis background. The links take the
+// chrome link tier of linkTier.ts.
 // An item whose product the manifest does not declare is not a link: it is a
 // focusable, aria-disabled entry with a tooltip (title and a visible element
 // on hover and focus) stating that the release does not include the product.
@@ -10,14 +12,15 @@ import { absentProductTooltip, activeItem, hasProduct, navigation } from '../nav
 import type { NavItem } from '../navigation';
 import { useRouter } from '../router';
 import { strings } from '../strings';
+import { CHROME_LINK } from '../linkTier';
 import { Link } from './Link';
 
-const itemBase = 'block py-nav-item-padding-y no-underline';
+const itemBase = 'block py-nav-item-padding-y';
 const itemIdle = `${itemBase} px-nav-item-padding-x text-nav-ink`;
 const itemActive = [
   itemBase,
   'pr-nav-item-padding-x pl-[calc(var(--spacing-nav-item-padding-x)-var(--shape-active-rule))]',
-  'border-l-(length:--shape-active-rule) border-accent bg-background font-semibold text-ink',
+  'border-l-(length:--shape-active-rule) border-accent bg-background font-bold text-ink',
 ].join(' ');
 const itemDisabled = `${itemBase} peer cursor-default px-nav-item-padding-x text-text-faint`;
 const disabledActive = `${itemActive} peer cursor-default`;
@@ -61,7 +64,7 @@ export function Navigation() {
           <div key={group.id} role="group" aria-labelledby={labelId}>
             <span
               id={labelId}
-              className={`block px-nav-item-padding-x pb-1.5 text-micro font-semibold uppercase tracking-label text-text-label ${index > 0 ? 'pt-4' : ''}`}
+              className={`block px-nav-item-padding-x pb-1.5 text-micro font-bold tracking-label text-text-label ${index > 0 ? 'pt-4' : ''}`}
             >
               {group.label}
             </span>
@@ -81,7 +84,7 @@ export function Navigation() {
                     ) : (
                       <Link
                         to={item.href}
-                        className={isActive ? itemActive : itemIdle}
+                        className={`${isActive ? itemActive : itemIdle} ${CHROME_LINK}`}
                         {...(isActive ? { 'aria-current': 'page' as const } : {})}
                       >
                         {item.label}

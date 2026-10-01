@@ -108,7 +108,7 @@ describe('Shell', () => {
     const classes = current[0]?.className.split(/\s+/) ?? [];
     expect(classes).toContain('border-accent');
     expect(classes).toContain('border-l-(length:--shape-active-rule)');
-    expect(classes).toContain('font-semibold');
+    expect(classes).toContain('font-bold');
     expect(classes).toContain('bg-background');
   });
 

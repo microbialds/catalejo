@@ -1,6 +1,6 @@
 // Panel (requirements §7, components; §6.1 Controls; §8; collection board).
 // A white box with a hairline border and 12 px 14 px padding; the title in
-// the serif at 15 px semibold over a light rule 6 px below it, an optional
+// the sans at 15 px bold over a light rule 6 px below it, an optional
 // subtitle in secondary sans after the title, and an "expand" text control
 // on the right. Slots below the body hold the annotation version note
 // (§5.6) and a footnote (§5.5). Expanded, the panel spans every column of
@@ -60,10 +60,10 @@ export function Panel({
   return (
     <section aria-label={name} className={classes} {...(expanded ? { 'data-expanded': '' } : {})}>
       <div className="flex items-baseline justify-between gap-3 border-b border-rule-light pb-1.5">
-        <h2 className="min-w-0 font-serif text-panel-title font-semibold">
+        <h2 className="min-w-0 font-sans text-panel-title font-bold">
           {title}
           {subtitle !== undefined && (
-            <span className="ml-1.5 font-sans text-control font-normal text-text-secondary">
+            <span className="ml-1.5 font-sans text-control font-regular text-text-secondary">
               {subtitle}
             </span>
           )}

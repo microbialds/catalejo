@@ -1,5 +1,5 @@
 // Set bar (requirements §5.1, §5.2, §5.10; collection board, top bar). 56 px
-// high with a hairline bottom rule. Left: the count as a large serif numeral
+// high with a hairline bottom rule. Left: the count as a large monospace numeral
 // and the phrase, then the chips area (filter chips and "add filter"). Right:
 // the search slot on pages where search applies, then the actions ("Share
 // link", "Save set"). Below the drawer breakpoint a "Filters" text button
@@ -22,7 +22,7 @@ export interface SetBarProps {
 }
 
 const toggleClass =
-  'drawer:hidden rounded-control border border-control-border bg-panel px-3 py-1.75 text-control font-medium text-ink';
+  'drawer:hidden rounded-control border border-control-border bg-panel px-3 py-1.75 text-control font-bold text-ink';
 
 export function SetBar({ count, chips, search, actions }: SetBarProps) {
   const { drawerRegistered, drawerOpen, toggleDrawer } = useLayout();
@@ -44,7 +44,7 @@ export function SetBar({ count, chips, search, actions }: SetBarProps) {
       )}
       <div className="flex min-w-0 shrink-0 items-baseline gap-panel-gap">
         <span
-          className="font-serif text-set-count font-semibold tracking-tight"
+          className="font-mono text-set-count font-bold tracking-tight"
           aria-live="polite"
           aria-atomic="true"
         >

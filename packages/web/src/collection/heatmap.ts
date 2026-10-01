@@ -1,34 +1,44 @@
-// Resistance class by species heatmap (requirements §6.1; contract §6.2
-// amr_class_by_species). Rows are the chart groups of the set's species (the
-// "Other" rule of ./species.ts), columns the drug classes present in the set
-// in palette order. A cell is the fraction of the row's genomes with at
-// least one hit in the class, drawn in chrome ink at a stepped opacity
-// (maintainer decision): zero is no fill, and any other fraction falls in one
-// of HEAT_STEPS equal bins, so that 50% and above sit in the upper half.
-// Values are shown as integer percent; text is white from 50% upward and ink
-// below.
+// Resistance class by species heatmap (requirements §5.4, §6.1; contract
+// §6.2 amr_class_by_species). Rows are the chart groups of the set's species
+// (the "Other" rule of ./species.ts), columns the drug classes present in the
+// set in palette order. A cell is the fraction of the row's genomes with at
+// least one hit in the class, drawn as a solid fill from the seven steps of
+// palette.sequential.heatmap (light to dark), never at reduced opacity.
+// A fraction above zero falls in one of seven equal bins, so that 1/7 and
+// above leave the first step and 6/7 and above reach the last. A cell at zero
+// takes no step and stays on the panel white, so that "no genome" never
+// reads as the lightest nonzero step. Values are shown as integer percent;
+// cell text is chrome.on_ink on the last three steps and chrome.ink on the
+// first four and on zero (the contrast stated in config/palette.yaml).
 import type { AmrClassRow } from '../data/setEngine';
+import { palette } from '../generated/palette';
 import { compareText } from '../set/filters';
 import { drugClassOrder } from '../set/fields';
 import type { ChartGroup } from './species';
 import { groupOfSpecies } from './species';
 
-export const HEAT_STEPS = 6;
+/** The steps of the scale, light to dark. */
+export const HEAT_SCALE: readonly string[] = palette.sequential.heatmap;
 
-/** The opacity step of a fraction: 0 for none, else 1 to HEAT_STEPS. */
+export const HEAT_STEPS = HEAT_SCALE.length;
+
+/** Steps from this one up carry chrome.on_ink text (the last three). */
+const FIRST_ON_INK_STEP = HEAT_STEPS - 2;
+
+/** The step of a fraction: 0 for none, else 1 to HEAT_STEPS. */
 export function heatStep(fraction: number): number {
   if (!(fraction > 0)) return 0;
   return Math.min(HEAT_STEPS, Math.floor(fraction * HEAT_STEPS) + 1);
 }
 
-/** The ink opacity of a step. */
-export function heatOpacity(step: number): number {
-  return step / HEAT_STEPS;
+/** The solid fill of a step; undefined for zero, which stays on the panel. */
+export function heatFill(step: number): string | undefined {
+  return step > 0 ? HEAT_SCALE[step - 1] : undefined;
 }
 
-/** Whether the cell text is white (on ink) rather than ink. */
-export function heatTextOnInk(fraction: number): boolean {
-  return fraction >= 0.5;
+/** Whether the cell text of a step is chrome.on_ink rather than chrome.ink. */
+export function heatTextOnInk(step: number): boolean {
+  return step >= FIRST_ON_INK_STEP;
 }
 
 /** The integer percent shown in a cell. */

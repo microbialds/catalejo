@@ -26,7 +26,7 @@ export function ExportMenu({ kind }: { kind: ExportKind }) {
       className="flex flex-col gap-1.5 border-b border-rule-light pb-2"
     >
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-small font-semibold tracking-label text-text-label uppercase">
+        <span className="text-small font-bold tracking-label text-text-label">
           {strings.exportMenuLabel}
         </span>
         {entries.map((entry) => (

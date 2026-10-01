@@ -1,22 +1,26 @@
 // Resistance class by species heatmap (requirements §6.1, §5.5, §5.6,
 // §5.10; checklist C2, G12, G13; collection board, third panel). Rows are
 // the chart groups (eight species and "Other"), columns the drug classes of
-// the set in palette order with short labels; each cell is a button in
-// chrome ink at a stepped opacity (collection/heatmap.ts) showing the integer
+// the set in palette order with short labels; each cell is a button with a
+// solid fill from the sequential heatmap scale (collection/heatmap.ts; zero
+// stays on the panel white) showing the integer
 // percent of the row's genomes with a hit in the class, and clicking it adds
 // the species and the class as filters. The panel carries the annotation
 // version note when the set mixes database versions, and the §5.5 footnote
 // when it mixes platforms or assembly statuses. Below the compact breakpoint
 // the grid is replaced by a note that it needs a wider screen. A species
-// row header links to the collection filtered by that species (§5.9).
+// row header links to the collection filtered by that species (§5.9), in the
+// quiet link tier of tables (§5.4).
 // A cell column is never narrower than its widest value ("100", three
 // monospace digits at the cell size, sized in ch on the grid so it holds for
 // any fallback face); when the panel is narrower than that, the grid scrolls
 // sideways inside the panel instead of letting values spill into each other.
+// Columns are a hairline apart, so that eleven classes in B612 Mono fit the
+// panel at the 1440 px board width without scrolling.
 import type { CSSProperties } from 'react';
 import {
   buildHeatmap,
-  heatOpacity,
+  heatFill,
   heatPercent,
   heatStep,
   heatTextOnInk,
@@ -30,6 +34,7 @@ import { SpeciesName } from '../../components/Species';
 import type { AnnotationVersionWarning } from '../../data/annotationVersions';
 import type { AmrClassRow } from '../../data/setEngine';
 import { AnnotationVersionNote } from '../../components/AnnotationVersionNote';
+import { QUIET_LINK } from '../../linkTier';
 import { drugClassLabel, drugClassShortLabel } from '../../set/fields';
 import { withValue } from '../../set/filters';
 import { useGenomeSet } from '../../set/store';
@@ -85,7 +90,7 @@ export function HeatmapPanel({
             <div
               role="table"
               aria-label={strings.panelAmrClass}
-              className={`grid items-center gap-0.5 font-mono max-compact:hidden ${wide ? 'text-small' : 'text-small drawer:text-micro'}`}
+              className={`grid items-center gap-x-px gap-y-0.5 font-mono max-compact:hidden ${wide ? 'text-small' : 'text-small drawer:text-micro'}`}
               style={grid}
             >
               <div role="row" className="contents">
@@ -112,7 +117,7 @@ export function HeatmapPanel({
                       <Link
                         to="/"
                         query={queryFor({ species_code: row.group.codes })}
-                        className="text-ink no-underline hover:text-accent"
+                        className={QUIET_LINK}
                       >
                         <SpeciesName name={row.group.label} short={!wide} className="text-base" />
                       </Link>
@@ -122,6 +127,7 @@ export function HeatmapPanel({
                   </span>
                   {row.cells.map((cell) => {
                     const step = heatStep(cell.fraction);
+                    const fill = heatFill(step);
                     const percent = String(heatPercent(cell.fraction));
                     const name = strings.heatmapCellName(
                       row.group.label,
@@ -143,18 +149,12 @@ export function HeatmapPanel({
                               ),
                             );
                           }}
-                          className={`relative flex h-6 w-full items-center justify-center overflow-hidden ${
-                            step === 0 ? 'bg-bar-track' : ''
-                          } ${heatTextOnInk(cell.fraction) ? 'text-on-ink' : 'text-ink'}`}
+                          className={`flex h-6 w-full items-center justify-center overflow-hidden ${
+                            heatTextOnInk(step) ? 'text-on-ink' : 'text-ink'
+                          }`}
+                          {...(fill === undefined ? {} : { style: { backgroundColor: fill } })}
                         >
-                          {step > 0 && (
-                            <span
-                              aria-hidden="true"
-                              className="absolute inset-0 bg-ink"
-                              style={{ opacity: heatOpacity(step) }}
-                            />
-                          )}
-                          <span className="relative">{strings.heatmapPercent(percent)}</span>
+                          {strings.heatmapPercent(percent)}
                         </button>
                       </span>
                     );

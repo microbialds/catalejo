@@ -392,7 +392,7 @@ describe('collection page', () => {
 });
 
 describe('genome table (C5, G2, G11)', () => {
-  it('sets identifiers in monospace with links, species in italic serif', async () => {
+  it('sets identifiers in monospace with links, species in italic sans', async () => {
     await rendered(`/${encodeFilters({ country: ['CL'] })}`);
     const table = within(main()).getByRole('table', { name: strings.panelGenomes });
     const id = within(table).getByRole('link', { name: 'KPN0001' });
@@ -400,7 +400,7 @@ describe('genome table (C5, G2, G11)', () => {
     expect(id.className.split(/\s+/)).toContain('font-mono');
     const species = within(table).getAllByTitle('Klebsiella pneumoniae')[0];
     expect(species?.className.split(/\s+/)).toEqual(
-      expect.arrayContaining(['font-serif', 'italic']),
+      expect.arrayContaining(['font-sans', 'italic']),
     );
     expect(species?.closest('a')?.getAttribute('href')).toBe(
       `/${encodeFilters({ species_code: ['KPN'] })}`,

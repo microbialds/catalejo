@@ -70,8 +70,21 @@ function firstFamily(family: string): string {
   return family.replace(/["']/g, '').split(',')[0]?.trim() ?? '';
 }
 
-const SERIF = firstFamily(tokens.typography.families.serif);
+const SANS = firstFamily(tokens.typography.families.sans);
 const MONO = firstFamily(tokens.typography.families.mono);
+
+/** The four faces the interface uses (requirements §7): both families, roman and italic. */
+const FONT_FACES = [
+  { family: SANS, style: 'normal' },
+  { family: SANS, style: 'italic' },
+  { family: MONO, style: 'normal' },
+  { family: MONO, style: 'italic' },
+] as const;
+
+/** The font shorthand of a face at the base size, for the FontFaceSet API. */
+function fontSpec(face: (typeof FONT_FACES)[number]): string {
+  return `${face.style === 'italic' ? 'italic ' : ''}${tokens.typography.sizes.base} '${face.family}'`;
+}
 
 /** Errors thrown in the page, collected for the "never an error" checks. */
 function pageErrors(page: Page): string[] {
@@ -171,6 +184,39 @@ test('G1 vocabulary: no "cohort" and no "atlas"; Embeddings and embedding map', 
 test('G2 typography of species, identifiers, counts and genes', async ({ page }, testInfo) => {
   await page.goto('/');
   await collectionReady(page);
+
+  // B612 and B612 Mono, roman and italic, load from Google Fonts (the link
+  // of index.html). Each face is rendered in a probe so the browser fetches
+  // it, then loaded through the FontFaceSet. document.fonts.check() alone
+  // would also pass with a synthesized italic or with no face at all, so the
+  // loaded faces are listed by family and style as well.
+  const fonts = await page.evaluate(
+    async (faces) => {
+      const probes = faces.map(({ family, style, spec }) => {
+        const probe = document.createElement('span');
+        probe.textContent = 'Kpn 0123';
+        probe.style.fontFamily = `'${family}'`;
+        probe.style.fontStyle = style;
+        document.body.append(probe);
+        return { probe, spec };
+      });
+      document.body.getBoundingClientRect();
+      await Promise.all(probes.map(({ spec }) => document.fonts.load(spec)));
+      await document.fonts.ready;
+      const checks = probes.map(({ spec }) => [spec, document.fonts.check(spec)] as const);
+      for (const { probe } of probes) probe.remove();
+      const loaded = [...document.fonts]
+        .filter((face) => face.status === 'loaded')
+        .map((face) => `${face.family.replace(/["']/g, '')} ${face.style}`);
+      return { checks, loaded: [...new Set(loaded)].sort() };
+    },
+    FONT_FACES.map((face) => ({ ...face, spec: fontSpec(face) })),
+  );
+  expect(fonts.checks).toEqual(FONT_FACES.map((face) => [fontSpec(face), true]));
+  expect(fonts.loaded).toEqual(
+    expect.arrayContaining(FONT_FACES.map((face) => `${face.family} ${face.style}`)),
+  );
+
   const rail = await openFacets(page);
   const main = mainArea(page);
 
@@ -193,7 +239,7 @@ test('G2 typography of species, identifiers, counts and genes', async ({ page },
     expect([style.text, style.fontStyle, firstFamily(style.family)]).toEqual([
       style.text,
       'italic',
-      SERIF,
+      SANS,
     ]);
   }
 
@@ -226,6 +272,13 @@ test('G2 typography of species, identifiers, counts and genes', async ({ page },
     ]);
   }
 
+  // Counters are monospace numerals.
+  const counterFamilies = await counters(page)
+    .getByRole('definition')
+    .evaluateAll((values) => values.map((value) => getComputedStyle(value).fontFamily));
+  expect(counterFamilies.length).toBe(5);
+  expect(counterFamilies.map(firstFamily)).toEqual(counterFamilies.map(() => MONO));
+
   // Gene and element names are italic monospace: a resistance determinant chip.
   await page.goto(`/${encodeFilters({ presence_amr: ['blaKPC-2'] })}`);
   await settledSetCount(page);
@@ -246,14 +299,42 @@ test('G2 typography of species, identifiers, counts and genes', async ({ page },
 /** Every hex color of the generated palette and the chrome tokens. */
 function allowedHexes(): string[] {
   const hexes = new Set<string>();
-  const visit = (value: unknown) => {
-    if (typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value)) hexes.add(value);
-    else if (Array.isArray(value)) value.forEach(visit);
-    else if (typeof value === 'object' && value !== null) Object.values(value).forEach(visit);
+  const add = (hex: string) => {
+    hexes.add(hex.toLowerCase());
   };
-  visit(palette);
-  visit(tokens.color);
+  visitHexes(palette, add);
+  visitHexes(tokens.color, add);
   return [...hexes];
+}
+
+function visitHexes(value: unknown, add: (hex: string) => void): void {
+  if (typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value)) add(value);
+  else if (Array.isArray(value) || (typeof value === 'object' && value !== null)) {
+    for (const item of Object.values(value)) visitHexes(item, add);
+  }
+}
+
+/**
+ * The data colors: every palette color outside the chrome and the heatmap
+ * scale (whose steps repeat the chrome grays), less any that is also a chrome
+ * color.
+ */
+function dataHexes(): string[] {
+  const chrome = new Set<string>();
+  const add = (hex: string) => {
+    chrome.add(hex.toLowerCase());
+  };
+  visitHexes(palette.chrome, add);
+  visitHexes(palette.sequential, add);
+  visitHexes(tokens.color, add);
+  const data = new Set<string>();
+  for (const [section, value] of Object.entries(palette)) {
+    if (section === 'chrome' || section === 'sequential') continue;
+    visitHexes(value, (hex) => {
+      if (!chrome.has(hex.toLowerCase())) data.add(hex.toLowerCase());
+    });
+  }
+  return [...data];
 }
 
 interface ColorFinding {
@@ -262,12 +343,18 @@ interface ColorFinding {
   value: string;
 }
 
-/** Colors outside the allowed set, and accent colors outside links and the active item. */
+/**
+ * Colors outside the palette and the chrome tokens (any translucent color
+ * counts, since nothing is drawn at an opacity), and data colors used by the
+ * chrome: as text, border, outline or underline color anywhere, or as a fill
+ * of anything but a data mark (an element whose own style or SVG paint sets
+ * the color, as collection/species.ts markStyle does).
+ */
 async function colorAudit(
   page: Page,
-): Promise<{ outside: ColorFinding[]; accent: ColorFinding[] }> {
+): Promise<{ outside: ColorFinding[]; dataInChrome: ColorFinding[]; dataMarks: number }> {
   return page.evaluate(
-    ({ hexes, accentHexes, inkHex }) => {
+    ({ hexes, dataColors }) => {
       const probe = document.createElement('span');
       document.body.append(probe);
       const normalize = (color: string) => {
@@ -276,43 +363,23 @@ async function colorAudit(
         return getComputedStyle(probe).color;
       };
       const allowed = new Set(hexes.map(normalize));
-      const accent = new Set(accentHexes.map(normalize));
-      const ink = normalize(inkHex).replace(/^rgb\(|\)$/g, '');
+      const data = new Set(dataColors.map(normalize));
       probe.remove();
-      const rgba = /^rgba\((\d+), (\d+), (\d+), ([\d.]+)\)$/;
-      const ok = (value: string) => {
-        if (allowed.has(value)) return true;
-        const match = rgba.exec(value);
-        if (match === null) return false;
-        const [, r, g, b, a] = match;
-        if (Number(a) === 0) return true;
-        const rgb = `${r ?? ''}, ${g ?? ''}, ${b ?? ''}`;
-        // The ink ramp: chrome ink and white at an opacity.
-        return rgb === ink || rgb === '255, 255, 255';
-      };
+      const transparent = /^rgba\(\d+, \d+, \d+, 0\)$/;
+      const ok = (value: string) => allowed.has(value) || transparent.test(value);
       const describe = (element: Element) => {
         const id = element.id === '' ? '' : `#${element.id}`;
         const label = element.getAttribute('aria-label') ?? element.textContent.trim().slice(0, 40);
         return `${element.tagName.toLowerCase()}${id} "${label}"`;
       };
-      const isLinkLike = (element: Element) => {
-        if (element.closest('a, [aria-current="page"]') !== null) return true;
-        // Text controls the boards draw as links (the Button link variant):
-        // no background and no border.
-        const button = element.closest('button');
-        if (button === null) return false;
-        const style = getComputedStyle(button);
-        return (
-          style.backgroundColor === 'rgba(0, 0, 0, 0)' &&
-          ['Top', 'Right', 'Bottom', 'Left'].every(
-            (side) =>
-              style.getPropertyValue(`border-${side.toLowerCase()}-width`) === '0px' ||
-              style.getPropertyValue(`border-${side.toLowerCase()}-style`) === 'none',
-          )
-        );
+      const isMark = (element: Element, property: string) => {
+        if (element instanceof SVGElement) return property === 'fill' || property === 'stroke';
+        if (property !== 'background-color') return false;
+        return element instanceof HTMLElement && element.style.backgroundColor !== '';
       };
       const outside: { element: string; property: string; value: string }[] = [];
-      const accentFindings: { element: string; property: string; value: string }[] = [];
+      const dataInChrome: { element: string; property: string; value: string }[] = [];
+      let dataMarks = 0;
       for (const element of document.body.querySelectorAll('*')) {
         if (['SCRIPT', 'STYLE', 'TEMPLATE'].includes(element.tagName)) continue;
         if (!element.checkVisibility({ visibilityProperty: true })) continue;
@@ -343,25 +410,68 @@ async function colorAudit(
         }
         for (const [property, value] of values) {
           if (!ok(value)) outside.push({ element: describe(element), property, value });
-          if (accent.has(value) && !isLinkLike(element)) {
-            accentFindings.push({ element: describe(element), property, value });
+          if (data.has(value)) {
+            if (isMark(element, property)) dataMarks += 1;
+            else dataInChrome.push({ element: describe(element), property, value });
           }
         }
       }
-      return { outside, accent: accentFindings };
+      return { outside, dataInChrome, dataMarks };
     },
-    {
-      hexes: allowedHexes(),
-      accentHexes: [tokens.color.accent, tokens.color.accent_hover],
-      inkHex: tokens.color.ink,
-    },
+    { hexes: allowedHexes(), dataColors: dataHexes() },
   );
 }
 
-test('G3 colors come from the palette and the chrome tokens', async ({ page }) => {
+/** The computed underline of an element, and whether it shows keyboard focus. */
+async function underline(link: Locator): Promise<{ underlined: boolean; focusVisible: boolean }> {
+  return link.evaluate((element) => ({
+    underlined: getComputedStyle(element).textDecorationLine.split(' ').includes('underline'),
+    focusVisible: element.matches(':focus-visible'),
+  }));
+}
+
+/** Moves the pointer off every link (the top left corner is the shell's padding). */
+async function pointerAway(page: Page): Promise<void> {
+  await page.mouse.move(1, 1);
+}
+
+/**
+ * A quiet-tier link (requirements §5.4): no underline at rest, the underline
+ * on hover and on keyboard focus.
+ */
+async function expectQuietLink(page: Page, link: Locator, where: string): Promise<void> {
+  await link.scrollIntoViewIfNeeded();
+  await pointerAway(page);
+  expect(await underline(link), `${where} at rest`).toEqual({
+    underlined: false,
+    focusVisible: false,
+  });
+  await link.hover();
+  expect((await underline(link)).underlined, `${where} on hover`).toBe(true);
+  await pointerAway(page);
+  // Keyboard focus: from the control before it, Tab lands on the link.
+  await link.focus();
+  await page.keyboard.press('Shift+Tab');
+  await page.keyboard.press('Tab');
+  await expect(link).toBeFocused();
+  expect(await underline(link), `${where} on keyboard focus`).toEqual({
+    underlined: true,
+    focusVisible: true,
+  });
+  await link.blur();
+}
+
+test('G3 colors come from the palette and the chrome tokens; the chrome is achromatic', async ({
+  page,
+}) => {
+  // The accent is ink (requirements §5.4, §7), in the palette and the tokens.
+  expect(palette.chrome.accent).toBe(palette.chrome.ink);
+  expect(tokens.color.accent).toBe(tokens.color.ink);
+
   const pages: [string, GenomeFilters][] = [
     ['/', {}],
     ['/', { species_code: ['SEN'] }],
+    ['/', { presence_amr: ['blaKPC-2'] }],
     ['/trees', {}],
   ];
   for (const [route, filters] of pages) {
@@ -374,8 +484,79 @@ test('G3 colors come from the palette and the chrome tokens', async ({ page }) =
     await openMenu(page);
     const audit = await colorAudit(page);
     expect(audit.outside, `colors outside the palette on ${page.url()}`).toEqual([]);
-    expect(audit.accent, `accent outside links on ${page.url()}`).toEqual([]);
+    expect(audit.dataInChrome, `data colors in the chrome on ${page.url()}`).toEqual([]);
+    // The audit sees the data marks (species swatches and bars) where there are any.
+    if (route === '/') expect(audit.dataMarks, `data marks on ${page.url()}`).toBeGreaterThan(0);
   }
+});
+
+test('G3 links: underlined at rest in running text, on hover and focus in tables, chips and the facet rail', async ({
+  page,
+}) => {
+  // Running text: the absence statement's Methods link, and the annotation
+  // version note under the heatmap (requirements §5.6).
+  await page.goto('/trees');
+  await shellReady(page);
+  await pointerAway(page);
+  const absent = mainArea(page).getByRole('link', { name: strings.absentMethodsLink, exact: true });
+  expect((await underline(absent)).underlined, 'absence statement Methods link').toBe(true);
+
+  await page.goto(`/${encodeFilters({ species_code: ['SEN'] })}`);
+  await collectionReady(page);
+  await pointerAway(page);
+  const noteLink = panel(page, strings.panelAmrClass)
+    .getByRole('note')
+    .getByRole('link', { name: strings.annotationVersionMethods, exact: true });
+  expect((await underline(noteLink)).underlined, 'heatmap note Methods link').toBe(true);
+
+  // The facet rail: the same note inside the AMR class group is quiet.
+  const rail = await openFacets(page);
+  await expectQuietLink(
+    page,
+    rail
+      .getByRole('group', { name: strings.facetAmrClass })
+      .getByRole('link', { name: strings.annotationVersionMethods, exact: true }),
+    'facet rail Methods link',
+  );
+
+  // Tables: the genome identifier, species and ST links of the genome table,
+  // and a species row header of the heatmap where it is drawn.
+  await page.goto('/');
+  await collectionReady(page);
+  const table = mainArea(page).getByRole('table', { name: strings.panelGenomes, exact: true });
+  const row = table
+    .locator('tbody tr')
+    .filter({ has: page.locator('td:nth-child(4) a') })
+    .first();
+  await expectQuietLink(page, row.locator('td:nth-child(2) a'), 'genome identifier link');
+  await expectQuietLink(page, row.locator('td:nth-child(3) a'), 'species link');
+  await expectQuietLink(page, row.locator('td:nth-child(4) a'), 'ST link');
+  const heatmap = mainArea(page).getByRole('table', { name: strings.panelAmrClass });
+  if (await heatmap.isVisible()) {
+    await expectQuietLink(
+      page,
+      heatmap.getByRole('rowheader').getByRole('link').first(),
+      'heatmap species link',
+    );
+  }
+
+  // Chips: a resistance determinant chip links to its Genes page.
+  await page.goto(`/${encodeFilters({ presence_amr: ['blaKPC-2'] })}`);
+  await settledSetCount(page);
+  await expectQuietLink(
+    page,
+    setBar(page)
+      .getByRole('list', { name: strings.activeFiltersLabel })
+      .getByRole('link', { name: 'blaKPC-2', exact: true }),
+    'chip link',
+  );
+
+  test.info().annotations.push({
+    type: 'not applicable',
+    description:
+      'Pills and links in the counter strip: the collection page of milestone 1b has neither; ' +
+      'the genome page brings the resistance pills in milestone 2.',
+  });
 });
 
 test('G4 square corners, hairlines, no shadows or gradients, text navigation, light sidebar', async ({
@@ -463,7 +644,7 @@ async function accentRgb(page: Page): Promise<string> {
   }, tokens.color.accent);
 }
 
-test('G5 shell: wordmark, tagline, navigation groups, release footer, accent rule', async ({
+test('G5 shell: wordmark, tagline, navigation groups, release footer, ink accent rule', async ({
   page,
 }) => {
   await page.goto('/');
@@ -471,8 +652,14 @@ test('G5 shell: wordmark, tagline, navigation groups, release footer, accent rul
   const wordmark = page.getByText(strings.wordmark, { exact: true });
   await expect(wordmark).toBeVisible();
   expect(
-    firstFamily(await wordmark.evaluate((element) => getComputedStyle(element).fontFamily)),
-  ).toBe(SERIF);
+    await wordmark.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return {
+        family: style.fontFamily.replace(/["']/g, '').split(',')[0],
+        weight: style.fontWeight,
+      };
+    }),
+  ).toEqual({ family: SANS, weight: String(tokens.typography.weights.bold) });
   await expect(page.getByText(strings.tagline, { exact: true })).toBeVisible();
 
   await openMenu(page);
@@ -504,6 +691,8 @@ test('G5 shell: wordmark, tagline, navigation groups, release footer, accent rul
     footer.getByRole('link', { name: strings.footerMethods, exact: true }),
   ).toHaveAttribute('href', '/methods');
 
+  // The accent is ink (requirements §5.1, §7).
+  expect(tokens.color.accent).toBe(tokens.color.ink);
   const accent = await accentRgb(page);
   for (const [route, label] of [
     ['/', strings.pageCollection],
@@ -527,7 +716,7 @@ test('G5 shell: wordmark, tagline, navigation groups, release footer, accent rul
       width: '3px',
       style: 'solid',
       color: accent,
-      weight: String(tokens.typography.weights.semibold),
+      weight: String(tokens.typography.weights.bold),
     });
   }
 });
@@ -544,7 +733,7 @@ test('G6 set bar: large numeral, phrase, chips, add filter, Share link, Save set
     const style = getComputedStyle(element);
     return { family: style.fontFamily, size: style.fontSize };
   });
-  expect(firstFamily(numeral.family)).toBe(SERIF);
+  expect(firstFamily(numeral.family)).toBe(MONO);
   expect(numeral.size).toBe(tokens.typography.sizes.set_count);
   await expect(bar.getByText(strings.setBarPhrase, { exact: true })).toBeVisible();
   await expect(bar.getByRole('button', { name: strings.addFilter, exact: true })).toBeVisible();

@@ -5,7 +5,8 @@
 // page of 50 rows per request, total pages from the set count. Genome
 // identifiers link to their genome page keeping the set; species and STs
 // link to the collection filtered by them (links that are themselves
-// filters). Selection is kept by genome identifier across pages and sorts
+// filters), in the quiet link tier of tables (§5.4). Selection is kept by
+// genome identifier across pages and sorts
 // and cleared when the set changes; "Use as set" asks, in the page, for a
 // confirmation that states the new count, then replaces the set with the
 // selected identifiers.
@@ -46,6 +47,7 @@ import type { TableColumn } from '../../components/Table';
 import type { SetEngine } from '../../data/setEngine';
 import { useEngineQuery, useSetCount } from '../../data/setEngineContext';
 import { formatCount } from '../../format';
+import { QUIET_LINK } from '../../linkTier';
 import { palette } from '../../generated/palette';
 import { vocabularyLabel } from '../../set/fields';
 import { filtersKey } from '../../set/filters';
@@ -101,7 +103,7 @@ function useCellRenderer() {
         return (
           <Link
             to={`/genomes/${encodeURIComponent(row.genome_id)}`}
-            className="font-mono no-underline"
+            className={`font-mono ${QUIET_LINK}`}
           >
             {row.genome_id}
           </Link>
@@ -112,7 +114,7 @@ function useCellRenderer() {
           <Link
             to="/"
             query={queryFor({ species_code: [row.species_code] })}
-            className="inline-flex items-center gap-1.5 text-ink no-underline hover:text-accent"
+            className={`inline-flex items-center gap-1.5 ${QUIET_LINK}`}
           >
             <Swatch color={row.color ?? palette.species.other} />
             <SpeciesName name={name} short className="text-base" />
@@ -126,7 +128,7 @@ function useCellRenderer() {
           <Link
             to="/"
             query={queryFor({ species_code: [row.species_code], st: [row.st] })}
-            className="font-mono text-ink no-underline hover:text-accent"
+            className={`font-mono ${QUIET_LINK}`}
           >
             {strings.chipSt(row.st)}
           </Link>

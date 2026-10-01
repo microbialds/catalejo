@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 
 import yaml
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AfterValidator, BaseModel, BeforeValidator, ConfigDict, Field, model_validator
 
 CONFIG_DIR_ENV = "CATALEJO_CONFIG_DIR"
 
@@ -178,6 +178,16 @@ class EmbeddingMapPalette(_Model):
     text_muted: HexColor
 
 
+class SequentialPalette(_Model):
+    """Sequential scales, light to dark (requirements §5.4).
+
+    ``heatmap`` holds the seven steps a heatmap cell takes for its value; the
+    steps are drawn solid, never at reduced opacity.
+    """
+
+    heatmap: list[HexColor] = Field(min_length=7, max_length=7)
+
+
 class PaletteConfig(_Model):
     """``config/palette.yaml`` (requirements §5.4)."""
 
@@ -187,6 +197,7 @@ class PaletteConfig(_Model):
     contig_types: dict[str, HexColor]
     tracks: dict[str, HexColor]
     neighborhood_categories: dict[str, HexColor]
+    sequential: SequentialPalette
     embedding_map: EmbeddingMapPalette
     chrome: dict[str, HexColor]
 
@@ -231,12 +242,31 @@ class PaletteConfig(_Model):
 # design-tokens.yaml -------------------------------------------------------------
 
 
+def _css_length(value: object) -> object:
+    """Read a bare YAML number (``tagline: 0``) as its CSS text."""
+    if isinstance(value, int | float) and not isinstance(value, bool):
+        return str(value)
+    return value
+
+
+CssLength = Annotated[str, BeforeValidator(_css_length)]
+
+TYPOGRAPHY_FAMILIES = frozenset({"sans", "mono"})
+TYPOGRAPHY_WEIGHTS = frozenset({400, 700})
+
+
 class Typography(_Model):
+    """Font families, sizes and weights (requirements §7, Typography).
+
+    B612 and B612 Mono are the only families, declared as ``sans`` and
+    ``mono``, and 400 and 700 the only weights.
+    """
+
     families: dict[str, str]
     google_fonts_url: str
     sizes: dict[str, str]
     weights: dict[str, int]
-    letter_spacing: dict[str, str]
+    letter_spacing: dict[str, CssLength]
     line_heights: dict[str, float] = Field(default_factory=dict[str, float])
 
 
@@ -274,8 +304,13 @@ class DesignTokens(_Model):
                 raise ValueError(
                     f"marks outline_color must be a palette reference: {rule.outline_color!r}"
                 )
-        if set(self.typography.families) != {"serif", "sans", "mono"}:
-            raise ValueError("typography.families must be serif, sans and mono")
+        if frozenset(self.typography.families) != TYPOGRAPHY_FAMILIES:
+            raise ValueError("typography.families must be sans and mono")
+        weights = frozenset(self.typography.weights.values())
+        if not weights <= TYPOGRAPHY_WEIGHTS:
+            raise ValueError(
+                f"typography.weights must be 400 or 700: {sorted(weights - TYPOGRAPHY_WEIGHTS)}"
+            )
         return self
 
 

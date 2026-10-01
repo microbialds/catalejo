@@ -11,11 +11,20 @@
   palette match lists), genome_count (genomes with a hit in the class),
   fraction (of the species' genomes), hit_count. Hits are those counted in
   ``amr_gene_count`` (``ingest.summary.is_amr_gene``).
+- ``amr_class_by_genome`` (contract 0.9 §6.2): genome_id, species_code,
+  drug_class, hit_count, one row per genome and class with at least one hit.
+  It counts the same hits, classified the same way, as
+  ``amr_class_by_species``, so that per class its distinct genomes give
+  ``genome_count`` and its sums give ``hit_count`` there, and per genome its
+  sum is ``amr_gene_count``.
 - ``qc``: genome_id, species_code, completeness, contamination, flag
   (``pass``, ``fail``, ``missing``; thresholds from ``platform.yaml`` qc).
 - ``presence_amr``: genome_id, species_code, then one BOOLEAN column per
   element name of the hits counted in ``amr_gene_count``, columns sorted;
-  ``presence_mob`` likewise per ``mob_cluster_id``.
+  ``presence_mob`` likewise per ``mob_cluster_id``, and ``presence_replicon``
+  (contract 0.9 §6.2) per replicon type, the values of
+  ``contig.replicon_types`` over all contigs of the genome. Every genome of
+  the release has a row in each presence file, all false when it has none.
 - ``search_index``: term, kind, target, species_code, count, one row per term,
   kind and species; ``count`` is the number of genomes. Targets use the
   requirements §5.3 routes (decision 9): ``/genomes/<id>`` for genome ids and
@@ -178,11 +187,13 @@ def write_summaries(
         con.execute("SELECT species_code, count(*) FROM genome GROUP BY 1").fetchall()
     )
     classes: dict[tuple[str, str], tuple[set[str], int]] = {}
+    by_genome: dict[tuple[str, str, str], int] = {}
     for gid, code, hit in hits:
         _, entry = classify(hit.drug_class, hit.drug_subclass, palette)
         genomes, count = classes.get((code, entry.key), (set[str](), 0))
         genomes.add(gid)
         classes[(code, entry.key)] = (genomes, count + 1)
+        by_genome[(gid, code, entry.key)] = by_genome.get((gid, code, entry.key), 0) + 1
     rows = [
         (code, key, len(g), len(g) / species_sizes[code], n)
         for (code, key), (g, n) in classes.items()
@@ -203,6 +214,24 @@ def write_summaries(
         ),
         path,
         ["species_code", "drug_class"],
+    )
+    done(path)
+
+    path = out / "amr_class_by_genome.parquet"
+    _write(
+        con,
+        pl.DataFrame(
+            [(gid, code, key, n) for (gid, code, key), n in by_genome.items()],
+            schema={
+                "genome_id": pl.String,
+                "species_code": pl.String,
+                "drug_class": pl.String,
+                "hit_count": pl.Int32,
+            },
+            orient="row",
+        ),
+        path,
+        ["genome_id", "species_code", "drug_class"],
     )
     done(path)
 
@@ -230,6 +259,13 @@ def write_summaries(
         "SELECT DISTINCT genome_id, mob_cluster_id FROM contig WHERE mob_cluster_id IS NOT NULL"
     ).fetchall()
     _presence(con, {(g, c) for g, c in mob}, path)
+    done(path)
+    path = root / "presence_replicon.parquet"
+    replicons = con.execute(
+        """SELECT DISTINCT genome_id, unnest(replicon_types) FROM contig
+        WHERE replicon_types IS NOT NULL"""
+    ).fetchall()
+    _presence(con, {(g, r) for g, r in replicons if r is not None}, path)
     done(path)
 
     path = out / "search_index.parquet"

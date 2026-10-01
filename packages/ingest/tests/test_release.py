@@ -22,6 +22,7 @@ from ingest.release.genome_files import cgview_bytes
 from ingest.release.output import EPOCH_ENV, MARKER, ReleaseError
 from ingest.release.tables import TABLES
 from ingest.side import ingest_groups
+from ingest.synth.plan import AMRFINDER_DB, AMRFINDER_DB_OLD, BAKTA_DB, BAKTA_DB_OLD
 
 runner = CliRunner()
 EPOCH = "1790000000"
@@ -63,10 +64,11 @@ def test_layout(release: Path, small_manifest: dict[str, Any]) -> None:
         for path in paths:
             assert (release / path).is_file(), path
     for name in ("counts_by_species", "counts_by_species_year", "counts_by_species_st",
-                 "counts_by_source", "counts_by_platform", "amr_class_by_species", "qc",
-                 "search_index"):  # fmt: skip
+                 "counts_by_source", "counts_by_platform", "amr_class_by_species",
+                 "amr_class_by_genome", "qc", "search_index"):  # fmt: skip
         assert (release / "summaries" / f"{name}.parquet").is_file()
-    assert (release / "presence_amr.parquet").is_file()
+    for name in ("presence_amr", "presence_mob", "presence_replicon"):
+        assert (release / f"{name}.parquet").is_file()
     for gid, info in small_manifest["genomes"].items():
         folder = release / "genomes" / info["species_code"] / gid
         names = sorted(p.name for p in folder.iterdir())
@@ -469,3 +471,179 @@ def test_command_sequence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
               "--catalog", str(tmp_path / "latest.duckdb")],
     )  # fmt: skip
     assert bad.exit_code == VALIDATION_EXIT
+
+
+# Contract 0.9 §6.2 and §6.4, milestone 1b.
+
+GENOME_FILES = ("summaries/amr_class_by_genome.parquet", "presence_replicon.parquet")
+
+
+def _amr_class_by_genome(root: Path) -> list[tuple[Any, ...]]:
+    return _column(
+        root / "summaries/amr_class_by_genome.parquet",
+        "SELECT genome_id, species_code, drug_class, hit_count FROM FILE",
+    )
+
+
+def test_amr_class_by_genome(release: Path) -> None:
+    """One row per genome and class with a hit, sorted, per-genome sums are amr_gene_count."""
+    path = release / "summaries/amr_class_by_genome.parquet"
+    con = duckdb.connect()
+    types = con.execute(f"DESCRIBE SELECT * FROM '{path.as_posix()}'").fetchall()
+    assert [(t[0], t[1]) for t in types] == [
+        ("genome_id", "VARCHAR"), ("species_code", "VARCHAR"), ("drug_class", "VARCHAR"),
+        ("hit_count", "INTEGER"),
+    ]  # fmt: skip
+    meta = con.execute(
+        f"SELECT DISTINCT compression FROM parquet_metadata('{path.as_posix()}')"
+    ).fetchall()
+    assert meta == [("ZSTD",)]
+    rows = _amr_class_by_genome(release)
+    assert rows and rows == sorted(rows)
+    keys = [r[:3] for r in rows]
+    assert len(keys) == len(set(keys)) and all(r[3] >= 1 for r in rows)
+    palette = load_palette()
+    allowed = {d.key for d in palette.drug_classes} | {"other"}
+    assert {r[2] for r in rows} <= allowed
+    genomes = _column(
+        release / "tables/genome.parquet",
+        "SELECT genome_id, species_code, amr_gene_count FROM FILE",
+    )
+    sums: dict[str, int] = {}
+    for gid, _, _, n in rows:
+        sums[gid] = sums.get(gid, 0) + n
+    for gid, _, amr in genomes:
+        assert sums.get(gid, 0) == amr, gid
+    species = {gid: code for gid, code, _ in genomes}
+    assert all(species[gid] == code for gid, code, _, _ in rows)
+
+
+def test_amr_class_by_genome_agrees_with_amr_class_by_species(release: Path) -> None:
+    """Per species and class, distinct genomes give genome_count and sums give hit_count."""
+    for root in (release, release / GROUP, release / CORE):
+        expected: dict[tuple[str, str], tuple[set[str], int]] = {}
+        for gid, code, key, n in _amr_class_by_genome(root):
+            genomes, hits = expected.get((code, key), (set[str](), 0))
+            expected[(code, key)] = (genomes | {gid}, hits + n)
+        species = _column(
+            root / "summaries/amr_class_by_species.parquet",
+            "SELECT species_code, drug_class, genome_count, hit_count FROM FILE",
+        )
+        assert species
+        assert {(c, k): (g, h) for c, k, g, h in species} == {
+            k: (len(g), h) for k, (g, h) in expected.items()
+        }
+
+
+def test_presence_replicon(release: Path, small_manifest: dict[str, Any]) -> None:
+    """Every genome has a row; one sorted BOOLEAN column per replicon type of its contigs."""
+    path = release / "presence_replicon.parquet"
+    con = duckdb.connect()
+    described = con.execute(f"DESCRIBE SELECT * FROM '{path.as_posix()}'").fetchall()
+    columns = [d[0] for d in described]
+    assert columns[:2] == ["genome_id", "species_code"]
+    replicons = columns[2:]
+    assert replicons and replicons == sorted(replicons)
+    assert all(d[1] == "BOOLEAN" for d in described[2:])
+    genomes = _column(release / "tables/genome.parquet", "SELECT genome_id FROM FILE")
+    rows = con.execute(f"SELECT * FROM '{path.as_posix()}'").fetchall()
+    assert [(r[0],) for r in rows] == sorted(genomes)
+    contigs = con.execute(
+        f"""SELECT DISTINCT genome_id, unnest(replicon_types) FROM
+        '{(release / "tables/contig").as_posix()}/*.parquet' WHERE replicon_types IS NOT NULL"""
+    ).fetchall()
+    expected = {(g, r) for g, r in contigs}
+    assert {r for _, r in expected} == set(replicons)
+    found = {(r[0], c) for r in rows for c, v in zip(replicons, r[2:], strict=True) if v}
+    assert found == expected
+    assert any(not any(r[2:]) for r in rows), "a genome without replicons keeps an all-false row"
+    plant = small_manifest["plants"]["carbapenemase_plasmid"]
+    carriers = [g for g, info in plant["carriers"].items() if info["has_mobsuite"]]
+    assert carriers
+    for gid in carriers:
+        for replicon in plant["replicon_types"]:
+            assert (gid, replicon) in found
+
+
+def test_manifest_annotation_versions(release: Path, small_manifest: dict[str, Any]) -> None:
+    """SEN mixes two Bakta and two AMRFinderPlus databases; the other species have one each."""
+    mixed = small_manifest["plants"]["mixed_annotation_versions"]
+    assert mixed["species_code"] == "SEN"
+    versions = {s["species_code"]: s["annotation_versions"] for s in _manifest(release)["species"]}
+    assert versions["SEN"] == {
+        "amrfinderplus": sorted([AMRFINDER_DB, AMRFINDER_DB_OLD]),
+        "bakta": sorted([BAKTA_DB, BAKTA_DB_OLD]),
+    }
+    assert sorted(mixed["bakta_database"]) == versions["SEN"]["bakta"]
+    assert sorted(mixed["amrfinderplus_database"]) == versions["SEN"]["amrfinderplus"]
+    for code in ("KPN", "SAU"):
+        assert versions[code] == {"amrfinderplus": [AMRFINDER_DB], "bakta": [BAKTA_DB]}
+    text = (release / "manifest.json").read_text(encoding="utf-8")
+    assert text.index('"amrfinderplus"') < text.index('"bakta"')
+
+
+def test_manifest_annotation_versions_empty_for_a_tool_that_did_not_run(
+    small_catalog: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(EPOCH_ENV, EPOCH)
+    catalog = copy_catalog(small_catalog, tmp_path / "c")
+    con = connect(catalog)
+    con.execute(
+        """DELETE FROM tool_version WHERE tool = 'amrfinderplus'
+        AND genome_id IN (SELECT genome_id FROM genome WHERE species_code = 'SAU')"""
+    )
+    con.execute(
+        """UPDATE tool_version SET database_version = NULL WHERE tool = 'bakta'
+        AND genome_id IN (SELECT genome_id FROM genome WHERE species_code = 'SAU')"""
+    )
+    con.close()
+    out = tmp_path / "rel"
+    build_release(catalog, out)
+    versions = {s["species_code"]: s["annotation_versions"] for s in _manifest(out)["species"]}
+    assert versions["SAU"] == {"amrfinderplus": [], "bakta": []}
+    assert versions["KPN"] == {"amrfinderplus": [AMRFINDER_DB], "bakta": [BAKTA_DB]}
+
+
+def test_group_release_genome_grain_files(
+    release: Path, small_catalog: Path, small_manifest: dict[str, Any]
+) -> None:
+    """A group release computes the new files and versions over its own genomes."""
+    con = connect(small_catalog, read_only=True)
+    try:
+        for group in GROUPS:
+            root = release / group
+            m = _manifest(root)
+            members = {
+                r[0] for r in _column(root / "tables/genome.parquet", "SELECT genome_id FROM FILE")
+            }
+            assert {r[0] for r in _amr_class_by_genome(root)} <= members
+            full_rows = [r for r in _amr_class_by_genome(release) if r[0] in members]
+            assert _amr_class_by_genome(root) == full_rows
+            presence = _column(root / "presence_replicon.parquet", "SELECT genome_id FROM FILE")
+            assert {r[0] for r in presence} == members and len(presence) == len(members)
+            paths = {f["path"] for f in m["files"]}
+            assert set(GENOME_FILES) <= paths
+            expected: dict[str, dict[str, list[str]]] = {}
+            for code, tool, database in con.execute(
+                """SELECT g.species_code, t.tool, t.database_version FROM tool_version t
+                JOIN genome g USING (genome_id)
+                WHERE t.tool IN ('amrfinderplus', 'bakta') AND t.database_version IS NOT NULL
+                AND g.genome_id IN (SELECT unnest(?::VARCHAR[]))""",
+                [sorted(members)],
+            ).fetchall():
+                entry = expected.setdefault(code, {"amrfinderplus": [], "bakta": []})
+                entry[tool] = sorted({*entry[tool], database})
+            assert {s["species_code"]: s["annotation_versions"] for s in m["species"]} == expected
+    finally:
+        con.close()
+    assert set(GENOME_FILES) <= {f["path"] for f in _manifest(release)["files"]}
+    # The SEN genomes of amr-network all carry one database of each tool.
+    mixed = small_manifest["plants"]["mixed_annotation_versions"]
+    members = set(small_manifest["plants"]["access_groups"][GROUP])
+    planted = {
+        key: sorted(v for v, gids in mixed[f"{key}_database"].items() if members & set(gids))
+        for key in ("amrfinderplus", "bakta")
+    }
+    assert planted == {"amrfinderplus": [AMRFINDER_DB], "bakta": [BAKTA_DB]}
+    sen = next(s for s in _manifest(release / GROUP)["species"] if s["species_code"] == "SEN")
+    assert sen["annotation_versions"] == planted

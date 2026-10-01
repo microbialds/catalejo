@@ -41,7 +41,7 @@ export function FacetOption({ checked, onToggle, label, name, count, mark }: Fac
         type="checkbox"
         className="m-0 size-3.25 accent-ink"
         checked={checked}
-        aria-label={strings.facetOptionName(name, shown)}
+        aria-label={strings.facetOptionName(name, shown, count)}
         onChange={(event) => {
           onToggle(event.target.checked);
         }}

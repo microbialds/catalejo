@@ -42,11 +42,11 @@ test('collection page renders on the synthetic release', async ({ page }) => {
 
   const species = main.getByRole('region', { name: strings.panelSpecies, exact: true });
   await expect(
-    species.getByRole('button', { name: strings.speciesBarName(strings.chartOther, '7') }),
+    species.getByRole('button', { name: strings.speciesBarName(strings.chartOther, '7', 7) }),
   ).toBeVisible();
 
   await species
-    .getByRole('button', { name: strings.speciesBarName('Serratia marcescens', '9') })
+    .getByRole('button', { name: strings.speciesBarName('Serratia marcescens', '9', 9) })
     .click();
   const bar = page.getByRole('banner', { name: strings.setBarLabel });
   await expect(bar.getByText('Serratia marcescens', { exact: true })).toBeVisible();

@@ -554,13 +554,38 @@ test('G6 set bar: large numeral, phrase, chips, add filter, Share link, Save set
   const kpn = species('KPN');
   await panel(page, strings.panelSpecies)
     .getByRole('button', {
-      name: strings.speciesBarName(kpn.canonical_name, formatCount(kpn.genome_count)),
+      name: strings.speciesBarName(
+        kpn.canonical_name,
+        formatCount(kpn.genome_count),
+        kpn.genome_count,
+      ),
     })
     .click();
   const chips = bar.getByRole('list', { name: strings.activeFiltersLabel });
   await expect(chips.getByRole('listitem')).toHaveCount(1);
   await expect(chipRemove(chips, kpn.canonical_name)).toBeVisible();
   await expect(count).toHaveText(formatCount(kpn.genome_count));
+});
+
+test('disabled navigation items are reached by Tab and show their tooltip on focus', async ({
+  page,
+}) => {
+  // Requirements §9 (keyboard reachable controls) and §5.1 (the tooltip).
+  await page.goto('/');
+  await shellReady(page);
+  await openMenu(page);
+  const nav = navigation(page);
+  const explore = nav.getByRole('group', { name: strings.navGroupExplore });
+  const analyze = nav.getByRole('group', { name: strings.navGroupAnalyze });
+  // Start on the last Explore link; the Analyze items follow it in the tab order.
+  await explore.getByRole('link').last().focus();
+  for (const [route, product] of PRODUCT_ROUTES) {
+    const tip = absentProductTooltip(product, manifest.release_id);
+    const item = analyze.locator('[aria-disabled="true"]', { hasText: pageTitle(route) ?? '' });
+    await page.keyboard.press('Tab');
+    await expect(item).toBeFocused();
+    await expect(page.getByRole('tooltip', { name: tip })).toBeVisible();
+  }
 });
 
 test('G7 absent products: disabled navigation with tooltip, absence statement', async ({

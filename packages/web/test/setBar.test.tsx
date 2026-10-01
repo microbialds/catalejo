@@ -96,7 +96,7 @@ describe('filter chips', () => {
     expect(within(chips).getByText(strings.chipCompleteness('95'))).toBeTruthy();
     expect(within(chips).getByText('Index isolate')).toBeTruthy();
     expect(
-      within(chips).getByText(strings.chipGenomeIds('4', 'KPN0001, KPN0002, KPN0003…')),
+      within(chips).getByText(strings.chipGenomeIds('4', 4, 'KPN0001, KPN0002, KPN0003…')),
     ).toBeTruthy();
     await screen.findByText(String(STUB_COUNT));
   });

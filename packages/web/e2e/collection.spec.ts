@@ -127,7 +127,11 @@ test.describe('C2 clicking a chart element or a facet value adds its chip', () =
     await collectionReady(page);
     await panel(page, strings.panelSpecies)
       .getByRole('button', {
-        name: strings.speciesBarName(sau.canonical_name, formatCount(sau.genome_count)),
+        name: strings.speciesBarName(
+          sau.canonical_name,
+          formatCount(sau.genome_count),
+          sau.genome_count,
+        ),
       })
       .click();
     await expect(chipRemove(setBar(page), sau.canonical_name)).toBeVisible();
@@ -175,11 +179,11 @@ test.describe('C2 clicking a chart element or a facet value adds its chip', () =
     await page.goto('/');
     await collectionReady(page);
     const year = panel(page, strings.panelYear)
-      .getByRole('button', { name: /^\d{4}: [\d,]+ genomes$/ })
+      .getByRole('button', { name: /^\d{4}: [\d,]+ genomes?$/ })
       .first();
     const value = Number(((await year.getAttribute('aria-label')) ?? '').slice(0, 4));
     await year.click();
-    await expect(chipRemove(setBar(page), strings.chipYearRange(value, value))).toBeVisible();
+    await expect(chipRemove(setBar(page), strings.chipYear(value))).toBeVisible();
     expect(urlFilters(page)).toEqual({ year: { max: value, min: value } });
     const expected = db.numbers(
       `SELECT count(*) AS n FROM ${GENOME} WHERE year(isolation_date) = ${String(value)}`,
@@ -371,6 +375,35 @@ test('C5 the table sorts, pages by 50, selects rows and "Use as set" yields them
   await expect.poll(() => tableIds(page)).toEqual(selected);
 });
 
+/** The narrowest a panel may be beside an expanded one, where the row is wider. */
+const MIN_PANEL_WIDTH = 320;
+
+/** The accessible names of heatmap cells whose value is wider than the cell. */
+async function overflowingHeatmapCells(page: Page): Promise<string[]> {
+  return panel(page, strings.panelAmrClass)
+    .getByRole('cell')
+    .locator('button')
+    .evaluateAll((buttons) =>
+      buttons
+        .filter((button) => button.scrollWidth > button.clientWidth)
+        .map((button) => button.getAttribute('aria-label') ?? ''),
+    );
+}
+
+/** The widths of the other panels in the panel's row group, and the row's content width. */
+async function siblingPanelWidths(region: Locator): Promise<{ row: number; others: number[] }> {
+  return region.evaluate((element) => {
+    const parent = element.parentElement;
+    if (parent === null) return { row: 0, others: [] };
+    const style = getComputedStyle(parent);
+    const row = parent.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+    const others = [...parent.children]
+      .filter((child) => child !== element && child.tagName === 'SECTION')
+      .map((child) => child.getBoundingClientRect().width);
+    return { row, others };
+  });
+}
+
 test('C6 each panel expands to full width with the export menu', async ({ page }, testInfo) => {
   await page.goto('/');
   await collectionReady(page);
@@ -414,6 +447,14 @@ test('C6 each panel expands to full width with the export menu', async ({ page }
     await expect(exportMenu.getByRole('button')).toHaveText(entries);
     const expanded = await widths(region);
     expect(Math.abs(expanded.own - expanded.row), `${name} spans its row`).toBeLessThan(1);
+    // The other panels of the row group flow below at a usable width (§6.1, §5.10).
+    const siblings = await siblingPanelWidths(region);
+    for (const other of siblings.others) {
+      expect(other, `a panel beside the expanded ${name}`).toBeGreaterThanOrEqual(
+        Math.min(MIN_PANEL_WIDTH, siblings.row) - 1,
+      );
+    }
+    expect(await overflowingHeatmapCells(page), `heatmap cells with ${name} expanded`).toEqual([]);
     if (widthOf(testInfo) === 1440 && name !== strings.panelGenomes) {
       expect(before.own, `${name} is narrower than its row before expanding`).toBeLessThan(
         before.row - 1,
@@ -426,6 +467,50 @@ test('C6 each panel expands to full width with the export menu', async ({ page }
     ).toHaveAttribute('aria-expanded', 'false');
     const after = await widths(region);
     expect(Math.abs(after.own - before.own)).toBeLessThan(1);
+  }
+  expect(await overflowingHeatmapCells(page), 'heatmap cells at rest').toEqual([]);
+});
+
+test('C6 heatmap values stay inside their cells from 1200 to 1440 px', async ({
+  page,
+}, testInfo) => {
+  // The panel rows keep three columns down to the drawer breakpoint (1200 px),
+  // where the heatmap panel is narrowest; the 1440 project covers the range.
+  test.skip(widthOf(testInfo) !== 1440, 'the three-column rows exist from 1200 px up');
+  await page.goto('/');
+  await collectionReady(page);
+  const heatmap = panel(page, strings.panelAmrClass);
+  await expect(heatmap.getByRole('table', { name: strings.panelAmrClass })).toBeVisible();
+  const largest = [...manifest.species].sort(
+    (a, b) => b.genome_count - a.genome_count || compareText(a.species_code, b.species_code),
+  )[0];
+  const panels = [
+    strings.panelSpecies,
+    stPanelName(largest?.species_code ?? ''),
+    strings.panelAmrClass,
+    strings.panelYear,
+    strings.panelQc,
+  ];
+  for (const width of [1440, 1360, 1280, 1200]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(await overflowingHeatmapCells(page), `at rest at ${String(width)} px`).toEqual([]);
+    for (const name of panels) {
+      const region = panel(page, name);
+      await region
+        .getByRole('button', { name: strings.panelExpandName(name), exact: true })
+        .click();
+      const collapse = region.getByRole('button', {
+        name: strings.panelCollapseName(name),
+        exact: true,
+      });
+      await expect(collapse).toHaveAttribute('aria-expanded', 'true');
+      expect(
+        await overflowingHeatmapCells(page),
+        `${name} expanded at ${String(width)} px`,
+      ).toEqual([]);
+      await collapse.click();
+      await expect(collapse).toHaveCount(0);
+    }
   }
 });
 
@@ -445,7 +530,7 @@ test('C7 the smallest species are "Other" in charts, not in the table, facets or
   const bars = panel(page, strings.panelSpecies);
   await expect(
     bars.getByRole('button', {
-      name: strings.speciesBarName(strings.chartOther, formatCount(otherCount)),
+      name: strings.speciesBarName(strings.chartOther, formatCount(otherCount), otherCount),
       exact: true,
     }),
   ).toBeVisible();
@@ -488,7 +573,11 @@ test('C7 the smallest species are "Other" in charts, not in the table, facets or
   for (const row of other) {
     await expect(
       rail.getByRole('checkbox', {
-        name: strings.facetOptionName(row.canonical_name, formatCount(row.genome_count)),
+        name: strings.facetOptionName(
+          row.canonical_name,
+          formatCount(row.genome_count),
+          row.genome_count,
+        ),
         exact: true,
       }),
     ).toBeVisible();

@@ -65,6 +65,7 @@ export function YearPanel({
                     segment.group.label,
                     column.year,
                     formatCount(segment.genomeCount),
+                    segment.genomeCount,
                   );
                   return (
                     <button
@@ -101,7 +102,11 @@ export function YearPanel({
                 {index % step === 0 && column.total > 0 && (
                   <button
                     type="button"
-                    aria-label={strings.yearColumnName(column.year, formatCount(column.total))}
+                    aria-label={strings.yearColumnName(
+                      column.year,
+                      formatCount(column.total),
+                      column.total,
+                    )}
                     onClick={() => {
                       pick(column.year);
                     }}

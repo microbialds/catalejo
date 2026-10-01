@@ -91,7 +91,11 @@ export function SpeciesPanel({
                   <span className="text-control">{group.label}</span>
                 )
               }
-              name={strings.speciesBarName(group.label, formatCount(group.genomeCount))}
+              name={strings.speciesBarName(
+                group.label,
+                formatCount(group.genomeCount),
+                group.genomeCount,
+              )}
               color={group.color}
               count={group.genomeCount}
               max={max}
@@ -175,8 +179,8 @@ export function SequenceTypePanel({
                 }
                 name={
                   bar.isOther
-                    ? strings.stOtherName(count, formatCount(bar.values.length))
-                    : strings.stBarName(label, count)
+                    ? strings.stOtherName(count, bar.genomeCount, formatCount(bar.values.length))
+                    : strings.stBarName(label, count, bar.genomeCount)
                 }
                 color={color}
                 count={bar.genomeCount}

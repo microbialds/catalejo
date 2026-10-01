@@ -247,7 +247,7 @@ describe('collection page', () => {
     await rendered();
     fireEvent.click(
       within(panel(strings.panelSpecies)).getByRole('button', {
-        name: strings.speciesBarName('Serratia marcescens', '9'),
+        name: strings.speciesBarName('Serratia marcescens', '9', 9),
       }),
     );
     expect(current()).toEqual({ species_code: ['SMA'] });
@@ -273,7 +273,7 @@ describe('collection page', () => {
     expect(within(year).getByText(new RegExp(strings.yearUndated('4')))).toBeTruthy();
     fireEvent.click(
       within(year).getByRole('button', {
-        name: strings.yearSegmentName('Klebsiella pneumoniae', 2019, '27'),
+        name: strings.yearSegmentName('Klebsiella pneumoniae', 2019, '27', 27),
       }),
     );
     expect(current()).toEqual({ year: { max: 2019, min: 2019 } });
@@ -282,7 +282,7 @@ describe('collection page', () => {
   it('adds the species and the ST from an ST bar of the largest species', async () => {
     await rendered();
     const st = panel(/^Sequence types Klebsiella pneumoniae/);
-    fireEvent.click(within(st).getByRole('button', { name: strings.stBarName('ST258', '20') }));
+    fireEvent.click(within(st).getByRole('button', { name: strings.stBarName('ST258', '20', 20) }));
     expect(current()).toEqual({ species_code: ['KPN'], st: ['258'] });
   });
 
@@ -298,18 +298,18 @@ describe('collection page', () => {
     const rail = screen.getByRole('complementary', { name: strings.facetsLabel });
     fireEvent.click(
       within(rail).getByRole('checkbox', {
-        name: strings.facetOptionName(strings.sourceTypeClinical, '61'),
+        name: strings.facetOptionName(strings.sourceTypeClinical, '61', 61),
       }),
     );
     expect(current()).toEqual({ source_type: ['clinical'] });
     fireEvent.click(
       within(rail).getByRole('checkbox', {
-        name: strings.facetOptionName(strings.facetPlasmidContig, '40'),
+        name: strings.facetOptionName(strings.facetPlasmidContig, '40', 40),
       }),
     );
     expect(current()).toEqual({ plasmid_contig: true, source_type: ['clinical'] });
     const checked = within(rail).getByRole<HTMLInputElement>('checkbox', {
-      name: strings.facetOptionName(strings.facetPlasmidContig, '40'),
+      name: strings.facetOptionName(strings.facetPlasmidContig, '40', 40),
     });
     expect(checked.checked).toBe(true);
     fireEvent.click(checked);

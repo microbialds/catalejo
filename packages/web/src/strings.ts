@@ -2,6 +2,11 @@
 // never contain literal interface text; test/strings.test.ts enforces it. A
 // translation is one more module with the same keys.
 
+/** A count and "genome" or "genomes"; `count` undefined (pending) reads as plural. */
+function genomeCount(formatted: string, count: number | undefined): string {
+  return count === 1 ? `${formatted} genome` : `${formatted} genomes`;
+}
+
 export const strings = {
   // Shell (requirements §5.1)
   wordmark: 'Catalejo',
@@ -44,8 +49,7 @@ export const strings = {
 
   // Footer (requirements §5.1). The values arrive with the manifest.
   footerRelease: 'Release',
-  footerGenomeCount: (formatted: string, count: number) =>
-    count === 1 ? `${formatted} genome` : `${formatted} genomes`,
+  footerGenomeCount: (formatted: string, count: number) => genomeCount(formatted, count),
   footerMethods: 'Methods',
   separator: ' · ',
   listSeparator: ', ',
@@ -54,6 +58,7 @@ export const strings = {
   // Set bar (requirements §5.1, §5.2; collection board, top bar)
   setBarLabel: 'Current genome set',
   setBarPhrase: 'genomes in the current set',
+  setBarPhraseOne: 'genome in the current set',
   activeFiltersLabel: 'Active filters',
   addFilter: '+ add filter',
   addFilterMenuLabel: 'Add filter',
@@ -71,6 +76,7 @@ export const strings = {
   // Filter chips (requirements §5.2; contract §7.5). The value follows the
   // field label; species, genes and identifiers are set apart by type.
   chipSt: (st: string) => (/^\d+$/.test(st) ? `ST${st}` : st),
+  chipYear: (year: number) => `year ${String(year)}`,
   chipYearRange: (min: number, max: number) => `year ${String(min)}–${String(max)}`,
   chipYearFrom: (min: number) => `year ≥ ${String(min)}`,
   chipYearTo: (max: number) => `year ≤ ${String(max)}`,
@@ -78,8 +84,8 @@ export const strings = {
   chipContamination: (value: string) => `contamination ≤ ${value}%`,
   chipPlasmidContig: 'plasmid contig present',
   chipProphage: 'prophage present',
-  chipGenomeIds: (count: string, list: string) => `${count} genomes (${list})`,
-  chipGenomeId: (list: string) => `1 genome (${list})`,
+  chipGenomeIds: (formatted: string, count: number, list: string) =>
+    `${genomeCount(formatted, count)} (${list})`,
   chipListMore: '…',
   chipPrefixSourceType: 'source',
   chipPrefixCountry: 'country',
@@ -145,8 +151,7 @@ export const strings = {
   searchLoading: 'Loading the search index',
   searchUnavailable: 'Search is unavailable for this release.',
   searchNoMatches: 'No matches',
-  searchGenomeCount: (formatted: string, count: number) =>
-    count === 1 ? `${formatted} genome` : `${formatted} genomes`,
+  searchGenomeCount: (formatted: string, count: number) => genomeCount(formatted, count),
   searchGroupCount: (formatted: string) => formatted,
   searchKindGenome: 'Genomes',
   searchKindAccession: 'Accessions',
@@ -186,13 +191,18 @@ export const strings = {
   facetFewerClasses: 'Fewer classes',
   facetPlatform: 'Platform',
   facetAssemblyStatus: 'Assembly status',
-  facetOptionName: (value: string, count: string) => `${value}, ${count} genomes in the set`,
+  facetOptionName: (value: string, formatted: string, count: number | undefined) =>
+    `${value}, ${genomeCount(formatted, count)} in the set`,
   countersLabel: 'Counts for the current set',
   counterGenomes: 'genomes in current set',
+  counterGenomesOne: 'genome in current set',
   counterSpecies: 'species',
   counterSequenceTypes: 'sequence types',
+  counterSequenceTypesOne: 'sequence type',
   counterAmrHits: 'resistance determinant hits',
+  counterAmrHitsOne: 'resistance determinant hit',
   counterPlasmidContigs: 'plasmid contigs',
+  counterPlasmidContigsOne: 'plasmid contig',
   panelSpecies: 'Species',
   panelSequenceTypes: 'Sequence types',
   panelAmrClass: 'AMR class by species',
@@ -208,11 +218,13 @@ export const strings = {
   panelLoading: 'Loading',
   panelLoadFailed: 'The counts could not be loaded.',
   chartOther: 'Other',
-  speciesBarName: (species: string, count: string) => `${species}, ${count} genomes`,
+  speciesBarName: (species: string, formatted: string, count: number) =>
+    `${species}, ${genomeCount(formatted, count)}`,
   stOther: 'other',
-  stBarName: (st: string, count: string) => `${st}, ${count} genomes`,
-  stOtherName: (count: string, stCount: string) =>
-    `Other sequence types (${stCount}), ${count} genomes`,
+  stBarName: (st: string, formatted: string, count: number) =>
+    `${st}, ${genomeCount(formatted, count)}`,
+  stOtherName: (formatted: string, count: number, stCount: string) =>
+    `Other sequence types (${stCount}), ${genomeCount(formatted, count)}`,
   stUntyped: (count: string) => `${count} without an ST`,
   stNoScheme: 'No MLST scheme covers this species, so it has no sequence types.',
   heatmapNeedsWidth: 'The resistance class heatmap needs a wider screen.',
@@ -223,9 +235,10 @@ export const strings = {
   footnoteMixedAssemblies:
     'This set mixes sequencing platforms or assembly statuses. Short-read assemblies fragment at repeats and undercount mobile elements.',
   yearUndated: (count: string) => `${count} without an isolation date not shown`,
-  yearSegmentName: (species: string, year: number, count: string) =>
-    `${species}, ${String(year)}: ${count} genomes`,
-  yearColumnName: (year: number, count: string) => `${String(year)}: ${count} genomes`,
+  yearSegmentName: (species: string, year: number, formatted: string, count: number) =>
+    `${species}, ${String(year)}: ${genomeCount(formatted, count)}`,
+  yearColumnName: (year: number, formatted: string, count: number) =>
+    `${String(year)}: ${genomeCount(formatted, count)}`,
   yearNoDates: 'No genome in this set has an isolation date.',
   qcFlagged: (count: string) => `${count} flagged`,
   qcMissing: (count: string) => `${count} without CheckM2 values not shown`,
@@ -265,10 +278,8 @@ export const strings = {
   tableSelected: (count: string) => `${count} selected`,
   tableClearSelection: 'Clear selection',
   useAsSet: 'Use as set',
-  useAsSetConfirm: (count: string, total: number) =>
-    total === 1
-      ? `The current set becomes these ${count} genome.`
-      : `The current set becomes these ${count} genomes.`,
+  useAsSetConfirm: (formatted: string, count: number) =>
+    `The current set becomes these ${genomeCount(formatted, count)}.`,
   useAsSetApply: 'Replace the set',
   useAsSetCancel: 'Cancel',
   tablePrevious: 'Previous',

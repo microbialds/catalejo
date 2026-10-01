@@ -50,7 +50,9 @@ export function SetBar({ count, chips, search, actions }: SetBarProps) {
         >
           {count === undefined ? strings.valuePending : formatCount(count)}
         </span>
-        <span className="mr-1.5 text-base text-text-secondary">{strings.setBarPhrase}</span>
+        <span className="mr-1.5 text-base text-text-secondary">
+          {count === 1 ? strings.setBarPhraseOne : strings.setBarPhrase}
+        </span>
       </div>
       <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-panel-gap gap-y-2 max-drawer:order-last max-drawer:basis-full">
         {chips}

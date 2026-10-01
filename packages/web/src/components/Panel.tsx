@@ -4,8 +4,9 @@
 // subtitle in secondary sans after the title, and an "expand" text control
 // on the right. Slots below the body hold the annotation version note
 // (§5.6) and a footnote (§5.5). Expanded, the panel spans every column of
-// the grid it sits in and shows the export menu (§8) under the title; the
-// control then reads "collapse". Square corners, no shadow.
+// the grid it sits in, carries a data-expanded attribute for the page's
+// layout, and shows the export menu (§8) under the title; the control then
+// reads "collapse". Square corners, no shadow.
 import { useId } from 'react';
 import type { ReactNode } from 'react';
 import { strings } from '../strings';
@@ -57,7 +58,7 @@ export function Panel({
     .filter((part) => part !== '')
     .join(' ');
   return (
-    <section aria-label={name} className={classes}>
+    <section aria-label={name} className={classes} {...(expanded ? { 'data-expanded': '' } : {})}>
       <div className="flex items-baseline justify-between gap-3 border-b border-rule-light pb-1.5">
         <h2 className="min-w-0 font-serif text-panel-title font-semibold">
           {title}

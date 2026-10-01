@@ -9,6 +9,10 @@
 // when it mixes platforms or assembly statuses. Below the compact breakpoint
 // the grid is replaced by a note that it needs a wider screen. A species
 // row header links to the collection filtered by that species (§5.9).
+// A cell column is never narrower than its widest value ("100", three
+// monospace digits at the cell size, sized in ch on the grid so it holds for
+// any fallback face); when the panel is narrower than that, the grid scrolls
+// sideways inside the panel instead of letting values spill into each other.
 import type { CSSProperties } from 'react';
 import {
   buildHeatmap,
@@ -32,6 +36,9 @@ import { useGenomeSet } from '../../set/store';
 import { strings } from '../../strings';
 import { PanelStatus } from './PanelStatus';
 
+/** The narrowest cell column: "100" at the cell size, plus one pixel of air. */
+const CELL_MIN_WIDTH = 'calc(3ch + 1px)';
+
 export function HeatmapPanel({
   groups,
   rows,
@@ -54,7 +61,7 @@ export function HeatmapPanel({
   const grid: CSSProperties = {
     gridTemplateColumns: `${wide ? '200px' : '96px'} repeat(${String(
       Math.max(1, heatmap?.classes.length ?? 1),
-    )}, minmax(0, 1fr))`,
+    )}, minmax(${CELL_MIN_WIDTH}, 1fr))`,
   };
   return (
     <Panel
@@ -74,85 +81,87 @@ export function HeatmapPanel({
           <p className="text-control text-text-secondary compact:hidden">
             {strings.heatmapNeedsWidth}
           </p>
-          <div
-            role="table"
-            aria-label={strings.panelAmrClass}
-            className="grid items-center gap-0.5 max-compact:hidden"
-            style={grid}
-          >
-            <div role="row" className="contents">
-              <span role="columnheader" />
-              {heatmap.classes.map((drugClass) => (
-                <span
-                  key={drugClass}
-                  role="columnheader"
-                  title={drugClassLabel(drugClass)}
-                  className={`truncate text-micro text-text-secondary ${
-                    wide
-                      ? 'text-center'
-                      : 'max-h-16 justify-self-center text-left drawer:rotate-180 drawer:[writing-mode:vertical-rl]'
-                  }`}
-                >
-                  {wide ? drugClassLabel(drugClass) : drugClassShortLabel(drugClass)}
-                </span>
+          <div className="min-w-0 overflow-x-auto">
+            <div
+              role="table"
+              aria-label={strings.panelAmrClass}
+              className={`grid items-center gap-0.5 font-mono max-compact:hidden ${wide ? 'text-small' : 'text-small drawer:text-micro'}`}
+              style={grid}
+            >
+              <div role="row" className="contents">
+                <span role="columnheader" />
+                {heatmap.classes.map((drugClass) => (
+                  <span
+                    key={drugClass}
+                    role="columnheader"
+                    title={drugClassLabel(drugClass)}
+                    className={`truncate font-sans text-micro text-text-secondary ${
+                      wide
+                        ? 'text-center'
+                        : 'max-h-16 justify-self-center text-left drawer:rotate-180 drawer:[writing-mode:vertical-rl]'
+                    }`}
+                  >
+                    {wide ? drugClassLabel(drugClass) : drugClassShortLabel(drugClass)}
+                  </span>
+                ))}
+              </div>
+              {heatmap.rows.map((row) => (
+                <div key={row.group.key} role="row" className="contents">
+                  <span role="rowheader" className="min-w-0 truncate">
+                    {row.group.isSpecies ? (
+                      <Link
+                        to="/"
+                        query={queryFor({ species_code: row.group.codes })}
+                        className="text-ink no-underline hover:text-accent"
+                      >
+                        <SpeciesName name={row.group.label} short={!wide} className="text-base" />
+                      </Link>
+                    ) : (
+                      <span className="font-sans text-control">{row.group.label}</span>
+                    )}
+                  </span>
+                  {row.cells.map((cell) => {
+                    const step = heatStep(cell.fraction);
+                    const percent = String(heatPercent(cell.fraction));
+                    const name = strings.heatmapCellName(
+                      row.group.label,
+                      drugClassLabel(cell.drugClass),
+                      percent,
+                    );
+                    return (
+                      <span key={cell.drugClass} role="cell" className="min-w-0">
+                        <button
+                          type="button"
+                          aria-label={name}
+                          title={name}
+                          onClick={() => {
+                            setFilters(
+                              withValue(
+                                withSpecies(filters, row.group.codes),
+                                'drug_class',
+                                cell.drugClass,
+                              ),
+                            );
+                          }}
+                          className={`relative flex h-6 w-full items-center justify-center overflow-hidden ${
+                            step === 0 ? 'bg-bar-track' : ''
+                          } ${heatTextOnInk(cell.fraction) ? 'text-on-ink' : 'text-ink'}`}
+                        >
+                          {step > 0 && (
+                            <span
+                              aria-hidden="true"
+                              className="absolute inset-0 bg-ink"
+                              style={{ opacity: heatOpacity(step) }}
+                            />
+                          )}
+                          <span className="relative">{strings.heatmapPercent(percent)}</span>
+                        </button>
+                      </span>
+                    );
+                  })}
+                </div>
               ))}
             </div>
-            {heatmap.rows.map((row) => (
-              <div key={row.group.key} role="row" className="contents">
-                <span role="rowheader" className="min-w-0 truncate">
-                  {row.group.isSpecies ? (
-                    <Link
-                      to="/"
-                      query={queryFor({ species_code: row.group.codes })}
-                      className="text-ink no-underline hover:text-accent"
-                    >
-                      <SpeciesName name={row.group.label} short={!wide} className="text-base" />
-                    </Link>
-                  ) : (
-                    <span className="text-control">{row.group.label}</span>
-                  )}
-                </span>
-                {row.cells.map((cell) => {
-                  const step = heatStep(cell.fraction);
-                  const percent = String(heatPercent(cell.fraction));
-                  const name = strings.heatmapCellName(
-                    row.group.label,
-                    drugClassLabel(cell.drugClass),
-                    percent,
-                  );
-                  return (
-                    <span key={cell.drugClass} role="cell" className="min-w-0">
-                      <button
-                        type="button"
-                        aria-label={name}
-                        title={name}
-                        onClick={() => {
-                          setFilters(
-                            withValue(
-                              withSpecies(filters, row.group.codes),
-                              'drug_class',
-                              cell.drugClass,
-                            ),
-                          );
-                        }}
-                        className={`relative flex h-6 w-full items-center justify-center overflow-hidden font-mono ${wide ? 'text-small' : 'text-small drawer:text-micro'} ${
-                          step === 0 ? 'bg-bar-track' : ''
-                        } ${heatTextOnInk(cell.fraction) ? 'text-on-ink' : 'text-ink'}`}
-                      >
-                        {step > 0 && (
-                          <span
-                            aria-hidden="true"
-                            className="absolute inset-0 bg-ink"
-                            style={{ opacity: heatOpacity(step) }}
-                          />
-                        )}
-                        <span className="relative">{strings.heatmapPercent(percent)}</span>
-                      </button>
-                    </span>
-                  );
-                })}
-              </div>
-            ))}
           </div>
         </>
       )}

@@ -206,11 +206,8 @@ export function chipLabel(entry: FilterEntry, manifest: Manifest | undefined): C
     case 'genome_id': {
       const shown = entry.values.slice(0, MAX_LISTED_IDS).join(strings.listSeparator);
       const list = entry.values.length > MAX_LISTED_IDS ? `${shown}${strings.chipListMore}` : shown;
-      const value =
-        entry.values.length === 1
-          ? strings.chipGenomeId(list)
-          : strings.chipGenomeIds(formatCount(entry.values.length), list);
-      return label(undefined, value, 'plain');
+      const count = entry.values.length;
+      return label(undefined, strings.chipGenomeIds(formatCount(count), count, list), 'plain');
     }
     case 'plasmid_contig':
       return label(undefined, strings.chipPlasmidContig, 'plain');
@@ -224,7 +221,9 @@ export function chipLabel(entry: FilterEntry, manifest: Manifest | undefined): C
       const { min, max } = entry.value;
       const text =
         min !== undefined && max !== undefined
-          ? strings.chipYearRange(min, max)
+          ? min === max
+            ? strings.chipYear(min)
+            : strings.chipYearRange(min, max)
           : min !== undefined
             ? strings.chipYearFrom(min)
             : strings.chipYearTo(max ?? 0);

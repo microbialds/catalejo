@@ -39,3 +39,6 @@ Thumbs.db
 .idea/
 .vscode/*
 !.vscode/extensions.json
+
+# Snapshots and logs written by the Playwright MCP browser tool
+.playwright-mcp/

@@ -138,12 +138,16 @@ describe('search timing (requirements §5.8)', () => {
     const index = buildSearchIndex(synthetic);
     const buildTime = performance.now() - built;
     const queries = ['k', 'KPN0001', 'kinase', 'sub', 'ECO04999', 'zzz', 'protein transporter'];
+    // One call before timing, so the bound measures matching on a loaded
+    // index (§5.8) and not the first compilation of the matcher, which the
+    // parallel test workers can delay well past the requirement's 200 ms.
+    matchSearch(index, queries[0] ?? '');
     for (const query of queries) {
       const start = performance.now();
       matchSearch(index, query);
       exactGenomeMatch(index, query);
       const elapsed = performance.now() - start;
-      expect(elapsed, query).toBeLessThan(50);
+      expect(elapsed, query).toBeLessThan(200);
     }
     expect(buildTime).toBeLessThan(1000);
   });

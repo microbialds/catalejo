@@ -1,7 +1,9 @@
 // Presentation of the filter fields (requirements §5.2; data contract §7.5):
 // the menu label of each field, whether the release can evaluate it (from
 // the manifest alone, so the menu renders before the engine starts), and the
-// label of each chip. Species names are set in italic serif, gene, element
+// label of each chip, with the labels of the controlled vocabularies (source
+// type, platform, assembly status) and the short forms used in the
+// collection charts. Species names are set in italic serif, gene, element
 // and mutation names in italic monospace, other identifiers in monospace.
 import type { Manifest } from '../data/manifest';
 import { formatCount } from '../format';
@@ -68,6 +70,73 @@ export function drugClassLabel(key: string): string {
   return found === undefined ? key : strings[found.label_key];
 }
 
+const DRUG_CLASS_SHORT: Readonly<Record<string, string>> = {
+  carbapenem: strings.drugClassShortCarbapenem,
+  beta_lactam: strings.drugClassShortBetaLactam,
+  aminoglycoside: strings.drugClassShortAminoglycoside,
+  quinolone: strings.drugClassShortQuinolone,
+  colistin: strings.drugClassShortColistin,
+  tetracycline: strings.drugClassShortTetracycline,
+  sulfonamide: strings.drugClassShortSulfonamide,
+  trimethoprim: strings.drugClassShortTrimethoprim,
+  phenicol: strings.drugClassShortPhenicol,
+  macrolide: strings.drugClassShortMacrolide,
+  fosfomycin: strings.drugClassShortFosfomycin,
+  glycopeptide: strings.drugClassShortGlycopeptide,
+  rifamycin: strings.drugClassShortRifamycin,
+  other: strings.drugClassShortOther,
+};
+
+/** The short label of a drug class key, for heatmap columns. */
+export function drugClassShortLabel(key: string): string {
+  return DRUG_CLASS_SHORT[key] ?? drugClassLabel(key);
+}
+
+/** The palette order of a drug class key; unknown keys sort last. */
+export function drugClassOrder(key: string): number {
+  const index = palette.drug_classes.findIndex((drugClass) => drugClass.key === key);
+  return index < 0 ? palette.drug_classes.length : index;
+}
+
+// Labels of the controlled vocabularies of contract §4.2 and §5.2; a value
+// outside them is shown as written.
+const VOCABULARY: Partial<Record<FilterKey, Readonly<Record<string, string>>>> = {
+  source_type: {
+    clinical: strings.sourceTypeClinical,
+    environmental: strings.sourceTypeEnvironmental,
+    food: strings.sourceTypeFood,
+    animal: strings.sourceTypeAnimal,
+    other: strings.sourceTypeOther,
+  },
+  platform: {
+    illumina: strings.platformIllumina,
+    ont: strings.platformOnt,
+    pacbio: strings.platformPacbio,
+    hybrid: strings.platformHybrid,
+  },
+  assembly_status: {
+    complete: strings.assemblyStatusComplete,
+    draft: strings.assemblyStatusDraft,
+  },
+};
+
+/** The label of a value of source type, platform or assembly status. */
+export function vocabularyLabel(key: FilterKey, value: string): string {
+  return VOCABULARY[key]?.[value] ?? value;
+}
+
+/**
+ * A species name with the genus abbreviated, as the collection board sets it
+ * in charts and tables: "Klebsiella pneumoniae" becomes "K. pneumoniae". A
+ * name of one word, or one already abbreviated, is returned as given.
+ */
+export function shortSpeciesName(name: string): string {
+  const words = name.trim().split(/\s+/);
+  const [genus, ...rest] = words;
+  if (genus === undefined || rest.length === 0 || genus.endsWith('.')) return name;
+  return `${genus.charAt(0)}. ${rest.join(' ')}`;
+}
+
 /** The canonical species name of a code, or the code itself. */
 export function speciesName(manifest: Manifest | undefined, code: string): string {
   return manifest?.species.find((species) => species.species_code === code)?.canonical_name ?? code;
@@ -109,13 +178,17 @@ export function chipLabel(entry: FilterEntry, manifest: Manifest | undefined): C
     case 'st':
       return label(undefined, strings.chipSt(entry.value), 'identifier');
     case 'source_type':
-      return label(strings.chipPrefixSourceType, entry.value, 'plain');
+      return label(strings.chipPrefixSourceType, vocabularyLabel(entry.key, entry.value), 'plain');
     case 'country':
       return label(strings.chipPrefixCountry, entry.value, 'plain');
     case 'platform':
-      return label(strings.chipPrefixPlatform, entry.value, 'plain');
+      return label(strings.chipPrefixPlatform, vocabularyLabel(entry.key, entry.value), 'plain');
     case 'assembly_status':
-      return label(strings.chipPrefixAssemblyStatus, entry.value, 'plain');
+      return label(
+        strings.chipPrefixAssemblyStatus,
+        vocabularyLabel(entry.key, entry.value),
+        'plain',
+      );
     case 'presence_amr':
       return label(undefined, entry.value, 'gene');
     case 'drug_class':

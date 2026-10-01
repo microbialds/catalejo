@@ -3,7 +3,7 @@
 // both with 2 px corners and no shadow. The link variant is a text control
 // in the accent color, for actions that read as links on the boards ("add
 // filter", "Clear the last filter").
-import type { ButtonHTMLAttributes } from 'react';
+import type { ComponentPropsWithRef } from 'react';
 
 export type ButtonVariant = 'primary' | 'secondary' | 'link';
 
@@ -15,7 +15,7 @@ export const buttonClass: Readonly<Record<ButtonVariant, string>> = {
   link: 'text-control text-accent hover:text-accent-hover disabled:text-text-faint',
 };
 
-export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+export interface ButtonProps extends ComponentPropsWithRef<'button'> {
   variant?: ButtonVariant;
 }
 

@@ -34,7 +34,7 @@ test('set bar with the synthetic release', async ({ page, baseURL }) => {
   await expect(bar.getByText('Klebsiella pneumoniae', { exact: true })).toBeVisible();
 
   await bar.getByRole('button', { name: strings.addFilter }).click();
-  await page.getByRole('button', { name: strings.filterFieldSt }).click();
+  await page.getByRole('button', { name: strings.filterFieldSt, exact: true }).click();
   await expect(page.getByRole('dialog').getByText('ST258', { exact: true })).toBeVisible();
   await page.keyboard.press('Escape');
 

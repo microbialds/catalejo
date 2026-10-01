@@ -336,7 +336,8 @@ describe('narrow viewports (requirements §5.10)', () => {
   }
 
   it('offers no drawer toggle when the page registers no drawer', () => {
-    renderApp('/', synth);
+    // The collection page at / registers its facet rail; /genes has none yet.
+    renderApp('/genes', synth);
     expect(screen.queryByRole('button', { name: strings.drawerToggle })).toBeNull();
   });
 

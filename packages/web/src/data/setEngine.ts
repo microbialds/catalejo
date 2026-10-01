@@ -5,7 +5,8 @@
 // manifest and the species-grain summaries (summaries/counts_by_* and
 // amr_class_by_species). Any other set is aggregated in the browser over the
 // genome-grain files: tables/genome.parquet projected into the in-memory
-// table `genome_facts`, summaries/amr_class_by_genome.parquet, the presence
+// table `genome_facts` (which also holds the assembly statistics the
+// collection table shows), summaries/amr_class_by_genome.parquet, the presence
 // files, tables/mutation.parquet and tables/genome_set_member.parquet. No
 // per-species table is read here.
 //
@@ -293,7 +294,8 @@ export function setupStatements(
     `CREATE OR REPLACE TABLE ${tables.genomeFacts} AS SELECT genome_id, species_code, st, ` +
       `mlst_scheme, source_type, country, CAST(year(isolation_date) AS INTEGER) AS year, ` +
       `platform, assembly_status, checkm2_completeness, checkm2_contamination, ` +
-      `amr_gene_count, amr_mutation_count, plasmid_contig_count, prophage_region_count ` +
+      `amr_gene_count, amr_mutation_count, plasmid_contig_count, prophage_region_count, ` +
+      `genome_size, contig_count, n50, gc_content ` +
       `FROM ${relations.genome}`,
   ];
   const empty = (columns: string) => `SELECT ${columns} WHERE FALSE`;

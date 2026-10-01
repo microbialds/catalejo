@@ -1,0 +1,93 @@
+// Panel (requirements §7, components; §6.1 Controls; §8; collection board).
+// A white box with a hairline border and 12 px 14 px padding; the title in
+// the serif at 15 px semibold over a light rule 6 px below it, an optional
+// subtitle in secondary sans after the title, and an "expand" text control
+// on the right. Slots below the body hold the annotation version note
+// (§5.6) and a footnote (§5.5). Expanded, the panel spans every column of
+// the grid it sits in and shows the export menu (§8) under the title; the
+// control then reads "collapse". Square corners, no shadow.
+import { useId } from 'react';
+import type { ReactNode } from 'react';
+import { strings } from '../strings';
+import { Button } from './Button';
+import { ExportMenu } from './ExportMenu';
+import type { ExportKind } from './ExportMenu';
+
+export interface PanelExpansion {
+  expanded: boolean;
+  onToggle: () => void;
+  /** Which export menu the expanded panel shows. */
+  exportKind: ExportKind;
+}
+
+export interface PanelProps {
+  /** The title as shown; may hold an italic species name. */
+  title: ReactNode;
+  /** The title as plain text, for accessible names. */
+  name: string;
+  subtitle?: ReactNode;
+  expansion?: PanelExpansion;
+  /** The annotation version note (requirements §5.6). */
+  note?: ReactNode;
+  footnote?: ReactNode;
+  className?: string;
+  /** Classes of the body, which grows to fill the panel. */
+  bodyClassName?: string;
+  children: ReactNode;
+}
+
+export function Panel({
+  title,
+  name,
+  subtitle,
+  expansion,
+  note,
+  footnote,
+  className,
+  bodyClassName,
+  children,
+}: PanelProps) {
+  const bodyId = useId();
+  const expanded = expansion?.expanded === true;
+  const classes = [
+    'flex min-w-0 flex-col gap-2 border border-border bg-panel px-panel-padding-x py-panel-padding-y',
+    expanded ? 'col-span-full' : '',
+    className ?? '',
+  ]
+    .filter((part) => part !== '')
+    .join(' ');
+  return (
+    <section aria-label={name} className={classes}>
+      <div className="flex items-baseline justify-between gap-3 border-b border-rule-light pb-1.5">
+        <h2 className="min-w-0 font-serif text-panel-title font-semibold">
+          {title}
+          {subtitle !== undefined && (
+            <span className="ml-1.5 font-sans text-control font-normal text-text-secondary">
+              {subtitle}
+            </span>
+          )}
+        </h2>
+        {expansion !== undefined && (
+          <Button
+            variant="link"
+            className="shrink-0 text-small"
+            aria-expanded={expanded}
+            aria-controls={bodyId}
+            aria-label={expanded ? strings.panelCollapseName(name) : strings.panelExpandName(name)}
+            onClick={expansion.onToggle}
+          >
+            {expanded ? strings.panelCollapse : strings.panelExpand}
+          </Button>
+        )}
+      </div>
+      {expanded && <ExportMenu kind={expansion.exportKind} />}
+      <div id={bodyId} className={`flex min-w-0 grow flex-col ${bodyClassName ?? ''}`}>
+        {children}
+      </div>
+      {note}
+      {footnote !== undefined && (
+        <p className="text-small leading-body text-text-secondary">{footnote}</p>
+      )}
+    </section>
+  );
+}

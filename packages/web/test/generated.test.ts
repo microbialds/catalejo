@@ -1,5 +1,6 @@
 // The committed files under src/generated/ equal a fresh generation from
-// config/palette.yaml and config/design-tokens.yaml (requirements §7), and
+// config/palette.yaml, config/design-tokens.yaml, config/platform.yaml and
+// config/export-presets.yaml (requirements §6.1, §7, §8), and
 // index.html links the Google Fonts URL of the design tokens. CI also runs
 // `git diff --exit-code` on src/generated after the tests, because pretest
 // regenerates the files before this test reads them.
@@ -17,6 +18,7 @@ describe('generated files', () => {
       'src/generated/palette.ts',
       'src/generated/tokens.ts',
       'src/generated/tokens.css',
+      'src/generated/platform.ts',
     ]);
     for (const file of files) {
       const committed = readFileSync(path.join(webRoot, file.path), 'utf8');

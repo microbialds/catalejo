@@ -1,6 +1,6 @@
 # Requirements
 
-Catalejo Genómico. Version 0.5, 2026-09-30. Status: draft for review.
+Catalejo Genómico. Version 0.6, 2026-10-01. Status: draft for review.
 
 This document states what the platform does, page by page, and the constraints it is built under. It is the companion of `docs/data-contract.md`, which defines the data the platform reads; where the two disagree, the contract wins and this document is corrected. The critic checklist (`docs/critic-checklist.md`) is derived from the acceptance items at the end of each page section, and the build plan takes its milestones from §14.
 
@@ -60,7 +60,7 @@ No instance stores user data. There are no accounts, profiles, saved objects or 
 
 ### 5.1 Shell
 
-Every page shares the shell shown on the final canvas boards. A 200 px left column holds the wordmark (Catalejo, with the tagline "microbial genome collection"), the navigation in two groups, Explore (Collection, Genome sets, Genomes, Genes) and Analyze (Phylogeny, Pangenome, Embeddings, Sequence search), and a footer with the release identifier (a link to the Releases page), the genome count, the pipeline name and version from the manifest (contract §6.4), and a link to the Methods page. The active page is marked by a left rule in the accent color.
+Every page shares the shell shown on the final canvas boards. A 200 px left column holds the wordmark (Catalejo, with the tagline "microbial genome collection"), the navigation in two groups, Explore (Collection, Genome sets, Genomes, Genes) and Analyze (Phylogeny, Pangenome, Embeddings, Sequence search), and a footer with the release identifier (a link to the Releases page), the genome count, the pipeline name and version from the manifest (contract §6.4), and a link to the Methods page. The active page is marked by a 3 px left rule in ink and bold text.
 
 A 56 px bar spans the top of every page and shows the current genome set (the count as a large numeral, the phrase "genomes in the current set", the active filters as chips, an "add filter" link), a search field on pages where search applies, and the actions "Share link" and "Save set".
 
@@ -107,7 +107,7 @@ All colors come from `config/palette.yaml`, read by the Python exports and the T
 - Drug classes have a fixed palette of fourteen distinguishable colors on white, listed in the palette file, with a stated order.
 - Contig types are fixed. Chromosome dark gray, plasmid purple, prophage lavender, unclassified light gray, none of which appears in the species sequence. The AMR track and determinant highlight is vermillion; virulence is reddish purple; GC skew is bluish green.
 - The embedding map uses a dark background and a lifted variant of the species palette, also listed in the palette file, so the mapping from species to hue is preserved.
-- Interface chrome uses no saturated color other than the accent (dark brick red) for links and the active navigation item, so that data colors are the only saturated colors on a page.
+- Interface chrome is achromatic. Links are ink, underlined at rest in running text and on hover and focus in tables, chips, pills and the facet rail, and the active navigation item carries an ink rule, so that data colors are the only saturated colors on a page.
 
 ### 5.5 Draft and complete genomes
 
@@ -174,7 +174,7 @@ Acceptance.
 
 Purpose. Everything about one genome, in the layout of the final genome board.
 
-Layout. Header with the species name (italic serif), ST chip, species source note, the generated summary sentence with linked determinants, typing chips per `config/typing_display.yaml`, and six counters (size and contigs, CDS and GC, assembly status and platform, resistance determinants and mutations, plasmids, prophage regions). Middle row with the contig list and track toggles (190 px), the genome map (CGView.js), and a right column holding "Resistance determinants by location" as pills grouped by replicon and, below it, the full feature table with search. Bottom, the gene neighborhood strip for the selected feature with the link to compare across the current set.
+Layout. Header with the species name (italic), ST chip, species source note, the generated summary sentence with linked determinants, typing chips per `config/typing_display.yaml`, and six counters (size and contigs, CDS and GC, assembly status and platform, resistance determinants and mutations, plasmids, prophage regions). Middle row with the contig list and track toggles (190 px), the genome map (CGView.js), and a right column holding "Resistance determinants by location" as pills grouped by replicon and, below it, the full feature table with search. Bottom, the gene neighborhood strip for the selected feature with the link to compare across the current set.
 
 Data. `genomes/<species>/<genome_id>/features.parquet` and `cgview.json`; the genome row from `genome.parquet`; `contig` rows.
 
@@ -266,17 +266,17 @@ A tombstoned genome shows its identifier, the release it was removed in, the rea
 
 ## 7. Design system
 
-The system is fixed by the final boards and by these tokens, all of which live in `config/design-tokens.yaml` and are compiled into CSS variables.
+The system is fixed by the final boards for layout and by these tokens for color and type, all of which live in `config/design-tokens.yaml` and are compiled into CSS variables.
 
-Typography. Source Serif 4 for the wordmark, panel titles, large numerals and species names (italic). Source Sans 3 for interface text. Source Code Pro for identifiers, coordinates, counts in tables, gene and allele names (italic). Base size 13 px, panel titles 15 px, counters 24 px, headline on the genome page 28 px. No other families.
+Typography. B612 for the wordmark, panel titles and interface text, and for species names in italic. B612 Mono for identifiers, coordinates, counts in tables, the set count, counters and the large numerals on the genome page, and for gene and allele names in italic. Weights 400 and 700 only. Base size 13 px, panel titles 15 px, counters 24 px, headline on the genome page 28 px, subject to the size check in the design proposal. No other families.
 
-Color. Paper background `#f6f5f1`, panel white, borders `#dcdad3` and `#d9d7cf`, ink `#1c1c1a`, secondary text `#6b6a64`, accent `#8a2f22`. Data colors from `config/palette.yaml`.
+Color. Chassis `#e4e6e9`, panels white, navigation column `#f2f3f5`, borders `#d3d7dc` and `#c3c8ce`, ink `#1b1d21`, secondary text `#5c6168`, control borders `#737a83`. The accent is ink. Data colors from `config/palette.yaml`.
 
-Shape and spacing. Square corners (2 px on buttons and chips), hairline borders, no shadows, no gradients. Panels have a 6 px bottom rule under the title. Counters are set in a ruled strip with a heavy top rule. Tables have a heavy top rule, light row rules, uppercase letterspaced column headers. Vertical rhythm on a 4 px grid, panel padding 12 px 14 px, panel gap 14 px.
+Shape and spacing. Square corners (2 px on buttons and chips), hairline borders, no shadows, no gradients. Panels have a 6 px bottom rule under the title. Counters are set in a ruled strip with a heavy top rule. Tables have a heavy top rule, light row rules and sentence case column headers in bold. Vertical rhythm on a 4 px grid, panel padding 12 px 14 px, panel gap 14 px.
 
 Components. Panel, counter strip, facet group, chip (filter, typing, gene pill), button (primary ink, secondary outlined), underlined search field, table, contig list, track toggle, set bar, navigation. Each is one component with variants, and no page defines its own.
 
-What not to do. No icon-only navigation, no rounded cards, no colored headers, no blue accent, no dark sidebar, no emoji, no gradient, no drop shadow, no sans-serif species names, no color used for meaning outside the palette file.
+What not to do. No icon-only navigation, no rounded cards, no colored headers, no colored accent, no warm paper or cream background, no serif face, no uppercase labels, no dark sidebar, no emoji, no gradient, no drop shadow, no roman species names, no color used for meaning outside the palette file.
 
 ## 8. Exports
 

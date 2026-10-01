@@ -5,7 +5,9 @@
 // link", "Save set"). Below the drawer breakpoint a "Filters" text button
 // opens the page's facet drawer when the page has registered one. Below the
 // compact breakpoint the bar grows and wraps instead of scrolling sideways.
-// The chips, search and actions arrive with the genome-set store.
+// The bar is at least 56 px high and grows when the chips wrap; below the
+// drawer breakpoint the chips move to a row of their own under the count,
+// search and actions.
 import type { ReactNode } from 'react';
 import { formatCount } from '../format';
 import { DRAWER_ID, useLayout } from '../layout';
@@ -27,7 +29,7 @@ export function SetBar({ count, chips, search, actions }: SetBarProps) {
   return (
     <header
       aria-label={strings.setBarLabel}
-      className="flex h-set-bar-height shrink-0 items-center gap-panel-gap border-b border-border-strong bg-background px-page-padding-x max-compact:h-auto max-compact:min-h-set-bar-height max-compact:flex-wrap max-compact:py-2"
+      className="flex min-h-set-bar-height shrink-0 items-center gap-panel-gap border-b border-border-strong bg-background px-page-padding-x py-2 max-drawer:flex-wrap"
     >
       {drawerRegistered && (
         <button
@@ -40,16 +42,21 @@ export function SetBar({ count, chips, search, actions }: SetBarProps) {
           {strings.drawerToggle}
         </button>
       )}
-      <div className="flex min-w-0 items-baseline gap-panel-gap">
-        <span className="font-serif text-set-count font-semibold tracking-tight">
+      <div className="flex min-w-0 shrink-0 items-baseline gap-panel-gap">
+        <span
+          className="font-serif text-set-count font-semibold tracking-tight"
+          aria-live="polite"
+          aria-atomic="true"
+        >
           {count === undefined ? strings.valuePending : formatCount(count)}
         </span>
-        <span className="text-base text-text-secondary">{strings.setBarPhrase}</span>
+        <span className="mr-1.5 text-base text-text-secondary">{strings.setBarPhrase}</span>
       </div>
-      <div className="flex min-w-0 flex-wrap items-center gap-2">{chips}</div>
-      <div className="grow max-compact:hidden" />
+      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-panel-gap gap-y-2 max-drawer:order-last max-drawer:basis-full">
+        {chips}
+      </div>
       {(search !== undefined || actions !== undefined) && (
-        <div className="flex min-w-0 flex-wrap items-center gap-panel-gap">
+        <div className="ml-auto flex min-w-0 shrink-0 items-center gap-panel-gap max-compact:shrink max-compact:flex-wrap">
           {search}
           {actions}
         </div>

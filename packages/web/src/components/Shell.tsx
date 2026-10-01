@@ -11,18 +11,33 @@
 // navigation and footer; the menu closes when the path changes. Below 1200 px
 // (breakpoint_drawer) a page's facet rail becomes a drawer through
 // LayoutContext (components/Drawer.tsx).
+//
+// The shell holds the genome-set store (set/store.ts) for every page and
+// fills the set bar from it: the count (the manifest's for the whole
+// release, the set engine's otherwise), the chips, "add filter", the
+// complete-genomes toggle, the global search and the actions. When a
+// filtered set has no genome, the main area shows only the empty-set
+// message (requirements §5.2).
 import { useCallback, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useManifest } from '../data/manifest';
+import { useSetCount } from '../data/setEngineContext';
 import { formatCount, formatPipeline } from '../format';
 import { LayoutContext } from '../layout';
 import type { LayoutState } from '../layout';
 import { methodsHref, releasesHref } from '../navigation';
 import { useRouter } from '../router';
+import { isWholeRelease } from '../set/filters';
+import { SetProvider, useGenomeSet } from '../set/store';
 import { strings } from '../strings';
+import { AddFilterMenu } from './AddFilterMenu';
+import { EmptySet } from './EmptySet';
+import { FilterChips } from './FilterChips';
+import { GlobalSearch } from './GlobalSearch';
 import { Link } from './Link';
 import { Navigation } from './Navigation';
 import { SetBar } from './SetBar';
+import { CompleteToggle, SetActions } from './SetActions';
 
 const MENU_ID = 'shell-menu';
 
@@ -100,9 +115,39 @@ function useLayoutState(pathname: string): LayoutState {
   );
 }
 
+function CurrentSet({ children }: { children: ReactNode }) {
+  const { filters } = useGenomeSet();
+  const count = useSetCount(filters);
+  const empty = count === 0 && !isWholeRelease(filters);
+  return (
+    <>
+      <SetBar
+        count={count}
+        chips={
+          <>
+            <FilterChips />
+            <AddFilterMenu />
+            <CompleteToggle />
+          </>
+        }
+        search={<GlobalSearch />}
+        actions={<SetActions />}
+      />
+      <main className="relative flex min-w-0 grow flex-col">{empty ? <EmptySet /> : children}</main>
+    </>
+  );
+}
+
 export function Shell({ children }: { children: ReactNode }) {
+  return (
+    <SetProvider>
+      <ShellLayout>{children}</ShellLayout>
+    </SetProvider>
+  );
+}
+
+function ShellLayout({ children }: { children: ReactNode }) {
   const { pathname } = useRouter();
-  const manifest = useManifest();
   const layout = useLayoutState(pathname);
   const [menuOpenAt, setMenuOpenAt] = useState<string | null>(null);
   const menuOpen = menuOpenAt === pathname;
@@ -136,8 +181,7 @@ export function Shell({ children }: { children: ReactNode }) {
           </div>
         </div>
         <div className="flex min-w-0 flex-col">
-          <SetBar count={manifest?.genome_count} />
-          <main className="relative flex min-w-0 grow flex-col">{children}</main>
+          <CurrentSet>{children}</CurrentSet>
         </div>
       </div>
     </LayoutContext>

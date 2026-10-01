@@ -18,14 +18,22 @@ export interface ManifestPipeline {
   versions: string[];
 }
 
+export interface ManifestAnnotationVersions {
+  amrfinderplus?: string[];
+  bakta?: string[];
+}
+
 export interface ManifestSpecies {
   species_code: string;
   canonical_name: string;
   genome_count: number;
   has_pangenome: boolean;
   tree_ids: string[];
-  /** Annotation database versions by tool (contract addition pending in milestone 1b). */
-  annotation_versions?: Record<string, string[]>;
+  /**
+   * The distinct database versions of Bakta and AMRFinderPlus recorded for
+   * the species' genomes (contract §6.4); absent in releases built before it.
+   */
+  annotation_versions?: ManifestAnnotationVersions;
 }
 
 export interface ManifestToolVersion {

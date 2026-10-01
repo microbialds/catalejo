@@ -1,0 +1,26 @@
+// Buttons (requirements §7, components; collection board, set bar actions).
+// Primary is ink with white text, secondary is outlined on the panel color,
+// both with 2 px corners and no shadow. The link variant is a text control
+// in the accent color, for actions that read as links on the boards ("add
+// filter", "Clear the last filter").
+import type { ButtonHTMLAttributes } from 'react';
+
+export type ButtonVariant = 'primary' | 'secondary' | 'link';
+
+const base = 'rounded-control px-3 py-1.75 text-control font-medium disabled:cursor-default';
+
+export const buttonClass: Readonly<Record<ButtonVariant, string>> = {
+  primary: `${base} border border-ink bg-ink text-on-ink disabled:border-text-faint disabled:bg-text-faint`,
+  secondary: `${base} border border-control-border bg-panel text-ink disabled:text-text-faint`,
+  link: 'text-control text-accent hover:text-accent-hover disabled:text-text-faint',
+};
+
+export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+  variant?: ButtonVariant;
+}
+
+export function Button({ variant = 'secondary', className, type, ...rest }: ButtonProps) {
+  const classes =
+    className === undefined ? buttonClass[variant] : `${buttonClass[variant]} ${className}`;
+  return <button type={type ?? 'button'} className={classes} {...rest} />;
+}

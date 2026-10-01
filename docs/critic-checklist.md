@@ -25,7 +25,7 @@ Derived from `docs/requirements.md`. Each item has an identifier, the requiremen
 
 | Id | Ref | Check |
 |---|---|---|
-| C1 | §6.1 | The five counters equal the summary counts for the current set |
+| C1 | §6.1 | The five counters equal the summary counts for the whole release, and the counts computed over the genome-grain files for a filtered set |
 | C2 | §6.1 | Clicking a species bar, a heatmap cell, a facet value and a year each adds the corresponding filter chip |
 | C3 | §6.1 | Brushing the QC scatter adds completeness and contamination filters |
 | C4 | §6.1 | Facet counts update within 300 ms of a filter change on the synthetic release |

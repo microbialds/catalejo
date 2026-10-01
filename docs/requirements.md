@@ -1,6 +1,6 @@
 # Requirements
 
-Catalejo Genómico. Version 0.4, 2026-09-29. Status: draft for review.
+Catalejo Genómico. Version 0.5, 2026-09-30. Status: draft for review.
 
 This document states what the platform does, page by page, and the constraints it is built under. It is the companion of `docs/data-contract.md`, which defines the data the platform reads; where the two disagree, the contract wins and this document is corrected. The critic checklist (`docs/critic-checklist.md`) is derived from the acceptance items at the end of each page section, and the build plan takes its milestones from §14.
 
@@ -70,7 +70,7 @@ Navigation items whose data is absent from the release (per the manifest) are sh
 
 The current set is the subset of the release selected by filters, or an explicit list of genome identifiers, or a curated set from the release. It is global state, shared by every page, and it is fully encoded in the URL (§5.3) so that a link reproduces it.
 
-Filters are conjunctive across fields and disjunctive within a field. Supported fields, in the order they appear in the "add filter" menu: species, sequence type, source type, country, year (range), platform, assembly status, completeness (minimum), contamination (maximum), resistance determinant present (by element name or drug class), point mutation present, plasmid replicon present, MOB cluster present, prophage present, pangenome cluster present (within one species), curated set membership, and explicit genome identifiers.
+Filters are conjunctive across fields and disjunctive within a field. Supported fields, in the order they appear in the "add filter" menu: species, sequence type, source type, country, year (range), platform, assembly status, completeness (minimum), contamination (maximum), resistance determinant present (by element name or drug class), point mutation present, plasmid replicon present, plasmid contig present, MOB cluster present, prophage present, pangenome cluster present (within one species), curated set membership, and explicit genome identifiers. The key and value of each field are listed in the contract §7.5.
 
 Actions. "Save set" downloads the exchange file defined in the contract §7.5. "Load set" (on the Genome sets page) accepts that file, applies its filters and reports how many listed identifiers are present in the current release. "Share link" copies the current URL. "Use as set" appears wherever a selection can become a set (a tree clade, an embedding lasso, a table selection, a gene's carriers) and replaces the current set after a confirmation that states the new count.
 
@@ -115,7 +115,7 @@ A genome is complete when every classified replicon is circular (contract §5.2)
 
 ### 5.6 Annotation versions
 
-When the current set contains genomes annotated with more than one version of the Bakta database or the AMRFinderPlus database, every prevalence chart and the resistance heatmap show a warning with the versions involved and a link to the Methods page. The check reads `tool_version` through the manifest summary and never scans the table.
+When the current set contains genomes annotated with more than one version of the Bakta database or the AMRFinderPlus database, every prevalence chart and the resistance heatmap show a warning with the versions involved and a link to the Methods page. The check reads the annotation versions per species in the manifest (contract §6.4) and never scans `tool_version`; the warning shows when the species of the set together carry more than one version of either database.
 
 ### 5.7 Presence of optional products
 
@@ -143,14 +143,14 @@ Purpose. Show what the current set contains and let the user narrow it.
 
 Layout. Facet rail (232 px) on the left with species, source, mobile elements, AMR class, platform and assembly status, each facet showing counts for the current set. Main area with a ruled strip of five counters (genomes, species, sequence types, resistance determinant hits, plasmid contigs), a row of three panels (species bars, sequence types for the selected or largest species, resistance class by species heatmap), a row of two panels (genomes by year stacked by species, assembly QC scatter with thresholds), and the genome table.
 
-Data. `summaries/*` for every chart and counter; `genome.parquet` for the table, paged.
+Data. The species-grain summaries (`summaries/counts_by_*` and `amr_class_by_species`) for every chart and counter when the set is the whole release, which is also the first render. For any other set, the same counts aggregated in the browser over the genome-grain files (`genome.parquet`, `summaries/qc.parquet`, `summaries/amr_class_by_genome.parquet`, the presence files, `mutation.parquet` and `genome_set_member.parquet`), never over the per-species tables. `genome.parquet` for the table, paged.
 
 Controls and interactions. Clicking a bar, a heatmap cell, a facet value or a year adds the corresponding filter. The QC scatter supports brushing, which adds a completeness and contamination filter. The table supports sorting, column selection, paging by 50, and row selection, with "Use as set" for the selection. Each panel has an expand control that opens it full-width with the export menu.
 
 States. Empty set as §5.2. Fewer than eight species collapses "Other". A species with no ST scheme shows the ST panel with a statement instead of bars.
 
 Acceptance.
-- Counters equal the counts in the summaries for the current set.
+- Counters equal the counts in the summaries for the whole release, and the same counts computed over the genome-grain files for any other set.
 - Every chart element is clickable and the resulting filter appears as a chip.
 - Facet counts update within 300 ms of a filter change on the synthetic release.
 - The table shows italic species names, monospace identifiers, and links on identifiers, species and STs.

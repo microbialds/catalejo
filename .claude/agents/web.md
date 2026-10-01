@@ -17,7 +17,7 @@ Rules
 - Every user-visible string is a key in `src/strings.ts`. A test fails the build if a component contains literal interface text.
 - Every color is read from the generated palette module; a test fails the build on a hard-coded color outside it.
 - When `dev/design/` exists, read the board for the page you are building before writing it and match its structure, spacing and wording; the documents win where they disagree.
-- Components follow `docs/requirements.md` §7. Species names italic serif; identifiers, coordinates and gene names monospace; square corners; hairline borders; no shadows or gradients; the accent color only for links and the active navigation item.
+- Components follow `docs/requirements.md` §7. Species names italic; identifiers, coordinates, counters and gene names monospace; square corners; hairline borders; no shadows or gradients; achromatic chrome with the ink accent; links underlined at rest in running text and on hover and focus in tables, chips, pills, counters and the facet rail.
 - Layouts are stacking grids per the viewport policy (§5.10). Build every page for 1440 px first, then verify 1024 px and 390 px.
 - Exports produce SVG with text as text and PNG at the preset sizes, plus the sidecar JSON with release identifier, filters and data.
 - Tests: Vitest for components and stores, Playwright for the acceptance items, run against a synthetic release served locally.

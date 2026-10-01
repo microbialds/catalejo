@@ -13,7 +13,7 @@ Procedure
 2. Confirm the development server is running on the synthetic release (the request states the URL; if not, ask). Do not start servers or build releases yourself.
 3. For each item, in order, perform the interaction in the browser, take a screenshot, and record one of `pass`, `fail`, `not applicable`, with one sentence of evidence. For `fail`, quote what the requirement says and what the page does.
 4. Check each page in scope at 1440 px, 1024 px and, for the collection and genome pages, 390 px, per `docs/requirements.md` §5.10.
-5. Check the global items every run: vocabulary (search the rendered pages for "cohort" and "atlas"), typography (serif species names, monospace identifiers), palette (no color outside `config/palette.yaml`), and the empty-set state.
+5. Check the global items every run: vocabulary (search the rendered pages for "cohort" and "atlas"), typography (italic species names, monospace identifiers and counters), palette (no color outside `config/palette.yaml`), and the empty-set state.
 6. Write the report to `dev/critic-reports/<date>-<scope>-round<N>.md` if `dev/` exists, otherwise print it. The report lists failures first, each with the checklist identifier, the requirement reference, the evidence and the screenshot path, then passes as a compact table, and ends with one line the fix step can parse: `FAILING: C2, C5, G12` or `FAILING: none`. If a failure looks like a wrong or ambiguous requirement rather than a defect, say so under that item and add `ESCALATE: <ids>` after the FAILING line.
 
 Rules

@@ -61,7 +61,7 @@ Python 3.13, Node 24, DuckDB Python and `@duckdb/duckdb-wasm` on the same minor 
 
 ## Design
 
-The interface follows the design tokens in `config/design-tokens.yaml` and the rules in `docs/requirements.md` §7. Every user-visible string lives in `packages/web/src/strings.ts`; components contain no literal interface text. Every color comes from `config/palette.yaml`. Species names are italic in the serif face; gene and allele names are italic monospace. No icon-only navigation, rounded cards, shadows, gradients, blue accent or dark sidebar.
+The interface follows the design tokens in `config/design-tokens.yaml` and the rules in `docs/requirements.md` §7. Every user-visible string lives in `packages/web/src/strings.ts`; components contain no literal interface text. Every color comes from `config/palette.yaml`. Species names are italic; identifiers, counts and counters are monospace; gene and allele names are italic monospace. The chrome is achromatic and the accent is ink. No icon-only navigation, rounded cards, shadows, gradients, serif face, uppercase labels, colored accent or dark sidebar.
 
 ## Git
 

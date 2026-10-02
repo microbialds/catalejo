@@ -2,7 +2,9 @@
 
 - ``counts_by_species``: species_code, canonical_name, color, genome_count,
   complete_count, st_count (distinct STs), amr_hit_count (sum of
-  ``amr_gene_count``), plasmid_contig_count (sum).
+  ``amr_gene_count``), plasmid_contig_count (sum), and (contract 0.10 §6.2)
+  plasmid_genome_count and prophage_genome_count, the genomes with
+  ``plasmid_contig_count`` and ``prophage_region_count`` above zero.
 - ``counts_by_species_year``: species_code, year (null when undated), genome_count.
 - ``counts_by_species_st``: species_code, mlst_scheme, st, genome_count.
 - ``counts_by_source``: species_code, source_type, country, genome_count.
@@ -157,7 +159,11 @@ def write_summaries(
                count(*) FILTER (WHERE g.assembly_status = 'complete')::INTEGER AS complete_count,
                count(DISTINCT g.st)::INTEGER AS st_count,
                sum(g.amr_gene_count)::INTEGER AS amr_hit_count,
-               sum(g.plasmid_contig_count)::INTEGER AS plasmid_contig_count
+               sum(g.plasmid_contig_count)::INTEGER AS plasmid_contig_count,
+               count(*) FILTER (WHERE g.plasmid_contig_count > 0)::INTEGER
+                   AS plasmid_genome_count,
+               count(*) FILTER (WHERE g.prophage_region_count > 0)::INTEGER
+                   AS prophage_genome_count
         FROM genome g JOIN species_registry s USING (species_code)
         GROUP BY 1, 2, 3 ORDER BY 1""",
         path,

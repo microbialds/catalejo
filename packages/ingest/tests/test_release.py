@@ -647,3 +647,41 @@ def test_group_release_genome_grain_files(
     assert planted == {"amrfinderplus": [AMRFINDER_DB], "bakta": [BAKTA_DB]}
     sen = next(s for s in _manifest(release / GROUP)["species"] if s["species_code"] == "SEN")
     assert sen["annotation_versions"] == planted
+
+
+# Contract 0.10 §6.2, milestone 1b (the Mobile elements facet).
+
+COUNTS_BY_SPECIES = [
+    ("species_code", "VARCHAR"), ("canonical_name", "VARCHAR"), ("color", "VARCHAR"),
+    ("genome_count", "INTEGER"), ("complete_count", "INTEGER"), ("st_count", "INTEGER"),
+    ("amr_hit_count", "INTEGER"), ("plasmid_contig_count", "INTEGER"),
+    ("plasmid_genome_count", "INTEGER"), ("prophage_genome_count", "INTEGER"),
+]  # fmt: skip
+
+
+def test_counts_by_species_mobile_genome_counts(release: Path) -> None:
+    """Genomes with a plasmid contig and with a prophage region, per species, in every release."""
+    for root in (release, release / CORE, release / GROUP):
+        path = root / "summaries/counts_by_species.parquet"
+        types = duckdb.connect().execute(f"DESCRIBE SELECT * FROM '{path.as_posix()}'").fetchall()
+        assert [(t[0], t[1]) for t in types] == COUNTS_BY_SPECIES, root
+        found = _column(
+            path,
+            """SELECT species_code, genome_count, plasmid_genome_count, prophage_genome_count
+            FROM FILE""",
+        )
+        expected: dict[str, list[int]] = {}
+        for code, plasmids, prophages in _column(
+            root / "tables/genome.parquet",
+            "SELECT species_code, plasmid_contig_count, prophage_region_count FROM FILE",
+        ):
+            entry = expected.setdefault(code, [0, 0, 0])
+            entry[0] += 1
+            entry[1] += plasmids > 0
+            entry[2] += prophages > 0
+        assert found == sorted((code, *counts) for code, counts in expected.items()), root
+        totals = [sum(r[i] for r in found) for i in (1, 2, 3)]
+        assert totals[1] > 0 and totals[2] > 0, root
+        # The full release has genomes of each kind, and genomes without them.
+        if root == release:
+            assert totals[1] < totals[0] and totals[2] < totals[0]

@@ -13,6 +13,9 @@
 // The in-memory tables are created once per engine, on the first request
 // that needs them; the engine is created once per manifest (see
 // ./setEngineContext.ts). The whole-release count never opens the database.
+// The Mobile elements facet of the whole release reads plasmid_genome_count
+// and prophage_genome_count of summaries/counts_by_species (contract 0.10
+// §6.2), and of any other set counts the genomes of genome_facts.
 // The species attributes (summaries/counts_by_species) and the CheckM2 points
 // (summaries/qc) are copied into memory as well, so that a filter change runs
 // its aggregates without reading a release file again (requirements §6.1, C4).
@@ -73,6 +76,10 @@ export interface SpeciesCountRow {
   st_count: number;
   amr_hit_count: number;
   plasmid_contig_count: number;
+  /** Genomes with plasmid_contig_count above zero (contract 0.10 §6.2). */
+  plasmid_genome_count: number;
+  /** Genomes with prophage_region_count above zero (contract 0.10 §6.2). */
+  prophage_genome_count: number;
 }
 
 export interface SpeciesYearRow {
@@ -155,6 +162,14 @@ export interface MobileCounts {
   prophage: number;
 }
 
+/** The mobile element counts of a set from its species-grain rows. */
+export function mobileCountsOf(bySpecies: readonly SpeciesCountRow[]): MobileCounts {
+  return {
+    plasmidContig: bySpecies.reduce((total, row) => total + row.plasmid_genome_count, 0),
+    prophage: bySpecies.reduce((total, row) => total + row.prophage_genome_count, 0),
+  };
+}
+
 export interface FilterOption {
   value: string;
   /** Genomes of the release with the value, when cheap to know. */
@@ -196,7 +211,10 @@ export interface SetEngine {
   summarize(filters: GenomeFilters): Promise<SetSummary>;
   /** The five counters of a set, from `summarize`. */
   counters(filters: GenomeFilters): Promise<SetCounters>;
-  /** Genomes with a plasmid contig and with a prophage region. */
+  /**
+   * Genomes with a plasmid contig and with a prophage region: the species
+   * summary for the whole release, else genome grain.
+   */
   mobileCounts(filters: GenomeFilters): Promise<MobileCounts>;
   /** CheckM2 points of a set (summaries/qc.parquet). */
   qcPoints(filters: GenomeFilters, priority?: QueryPriority): Promise<QcPoint[]>;
@@ -234,6 +252,8 @@ function speciesCountRow(row: Row): SpeciesCountRow {
     st_count: num(row.st_count),
     amr_hit_count: num(row.amr_hit_count),
     plasmid_contig_count: num(row.plasmid_contig_count),
+    plasmid_genome_count: num(row.plasmid_genome_count),
+    prophage_genome_count: num(row.prophage_genome_count),
   };
 }
 
@@ -379,7 +399,9 @@ export function summaryQuery(set: string, speciesAttributes: string, tables = EN
     `CAST(count(*) FILTER (WHERE s.assembly_status = 'complete') AS INTEGER) AS complete_count, ` +
     `CAST(count(DISTINCT s.st) AS INTEGER) AS st_count, ` +
     `CAST(coalesce(sum(s.amr_gene_count), 0) AS BIGINT) AS amr_hit_count, ` +
-    `CAST(coalesce(sum(s.plasmid_contig_count), 0) AS BIGINT) AS plasmid_contig_count ` +
+    `CAST(coalesce(sum(s.plasmid_contig_count), 0) AS BIGINT) AS plasmid_contig_count, ` +
+    `CAST(count(*) FILTER (WHERE s.plasmid_contig_count > 0) AS INTEGER) AS plasmid_genome_count, ` +
+    `CAST(count(*) FILTER (WHERE s.prophage_region_count > 0) AS INTEGER) AS prophage_genome_count ` +
     `FROM s LEFT JOIN ${speciesAttributes} AS a USING (species_code) ` +
     `GROUP BY s.species_code, a.canonical_name, a.color ` +
     `UNION ALL BY NAME ` +
@@ -622,6 +644,7 @@ export function createSetEngine(source: ReleaseSource, manifest: Manifest): SetE
     },
     counters: async (filters) => countersOf((await engine.summarize(filters)).bySpecies),
     mobileCounts: async (filters) => {
+      if (isWholeRelease(filters)) return mobileCountsOf((await loadReleaseSummaries()).bySpecies);
       const rows = await aggregate(
         filters,
         ({ set }) =>

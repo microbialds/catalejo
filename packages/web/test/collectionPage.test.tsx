@@ -52,6 +52,8 @@ function speciesRows(codes?: string[]): SpeciesCountRow[] {
       st_count: code === 'SMA' ? 0 : 2,
       amr_hit_count: count * 3,
       plasmid_contig_count: count,
+      plasmid_genome_count: count - 1,
+      prophage_genome_count: 1,
     }),
   );
 }

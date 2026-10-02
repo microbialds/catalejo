@@ -6,9 +6,14 @@
 // table is read without one species code.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { assertSingleFile, CrossSpeciesScanError, speciesTable } from '../src/data/release';
-import { countersOf, createSetEngine, summarizeOverGenomes } from '../src/data/setEngine';
+import {
+  countersOf,
+  createSetEngine,
+  RELEASE_FILES,
+  summarizeOverGenomes,
+} from '../src/data/setEngine';
 import type { SetEngine } from '../src/data/setEngine';
-import type { PartitionedTable } from '../src/data/release';
+import type { PartitionedTable, ReleaseSource } from '../src/data/release';
 import { decodeFilters, encodeFilters } from '../src/set/filters';
 import type { GenomeFilters } from '../src/set/filters';
 import {
@@ -320,6 +325,35 @@ describe('whole release and genome grain agree (requirements §6.1, C1)', () => 
       plasmidContig: count(`species_code = 'KPN' AND plasmid_contig_count > 0`),
       prophage: count(`species_code = 'KPN' AND prophage_region_count > 0`),
     });
+  });
+
+  it('reads the mobile element counts of the whole release from the species summary', async () => {
+    // Contract 0.10 §6.2, requirements §6.1 Data: a fresh engine over a source
+    // that records the files it opens, so that the path taken is visible.
+    if (!database) throw new Error('DuckDB did not start');
+    const opened: string[] = [];
+    const base = nodeSource(database);
+    const recording: ReleaseSource = {
+      ...base,
+      relation: (relative) => {
+        opened.push(relative);
+        return base.relation(relative);
+      },
+    };
+    const whole = await createSetEngine(recording, readSynthManifest()).mobileCounts({});
+    expect(opened).toContain(RELEASE_FILES.countsBySpecies);
+    expect(opened).not.toContain(RELEASE_FILES.genome);
+    const summary = parquet('summaries/counts_by_species.parquet');
+    expect(whole).toEqual({
+      plasmidContig: scalar(`SELECT sum(plasmid_genome_count) FROM ${summary}`),
+      prophage: scalar(`SELECT sum(prophage_genome_count) FROM ${summary}`),
+    });
+    expect(whole).toEqual({
+      plasmidContig: count(`plasmid_contig_count > 0`),
+      prophage: count(`prophage_region_count > 0`),
+    });
+    expect(whole.plasmidContig).toBeGreaterThan(0);
+    expect(whole.prophage).toBeGreaterThan(0);
   });
 
   it('reads QC points of a set', async () => {

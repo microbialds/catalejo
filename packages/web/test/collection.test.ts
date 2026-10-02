@@ -468,6 +468,8 @@ function speciesRow(code: string, count: number): SpeciesCountRow {
     st_count: 0,
     amr_hit_count: 0,
     plasmid_contig_count: 0,
+    plasmid_genome_count: 0,
+    prophage_genome_count: 0,
   };
 }
 

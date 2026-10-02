@@ -1,6 +1,6 @@
 # Data contract
 
-Version 0.9, 2026-09-30. Status: draft for review.
+Version 0.10, 2026-10-02. Status: draft for review.
 
 This document is the interface between the ingestion package (`packages/ingest`, Python) and the web application (`packages/web`, TypeScript). Both are built against it. Anything the web application reads is defined here; anything the ingestion package writes is defined here. A change to this document is a schema change and bumps `schema_version`.
 
@@ -514,7 +514,7 @@ Columns of the summary files. Counts are INTEGER, and each file is sorted by its
 
 | Path | Columns |
 |---|---|
-| `summaries/counts_by_species.parquet` | `species_code`, `canonical_name`, `color`, `genome_count`, `complete_count` (genomes with `assembly_status` complete), `st_count` (distinct STs), `amr_hit_count` (sum of `genome.amr_gene_count`), `plasmid_contig_count` |
+| `summaries/counts_by_species.parquet` | `species_code`, `canonical_name`, `color`, `genome_count`, `complete_count` (genomes with `assembly_status` complete), `st_count` (distinct STs), `amr_hit_count` (sum of `genome.amr_gene_count`), `plasmid_contig_count`, `plasmid_genome_count` (genomes with `plasmid_contig_count` above zero), `prophage_genome_count` (genomes with `prophage_region_count` above zero) |
 | `summaries/counts_by_species_year.parquet` | `species_code`, `year` (INTEGER, null when the genome has no isolation date), `genome_count` |
 | `summaries/counts_by_species_st.parquet` | `species_code`, `mlst_scheme`, `st`, `genome_count` |
 | `summaries/counts_by_source.parquet` | `species_code`, `source_type`, `country`, `genome_count` |

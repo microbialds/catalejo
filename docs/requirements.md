@@ -1,6 +1,6 @@
 # Requirements
 
-Catalejo Genómico. Version 0.6, 2026-10-01. Status: draft for review.
+Catalejo Genómico. Version 0.7, 2026-10-02. Status: draft for review.
 
 This document states what the platform does, page by page, and the constraints it is built under. It is the companion of `docs/data-contract.md`, which defines the data the platform reads; where the two disagree, the contract wins and this document is corrected. The critic checklist (`docs/critic-checklist.md`) is derived from the acceptance items at the end of each page section, and the build plan takes its milestones from §14.
 
@@ -48,7 +48,7 @@ Tiers add pages and data; they do not change the shell, the contract's existing 
 
 The vocabulary in the data contract §1 is binding for interface strings, code identifiers, URLs, commit messages and documentation. In particular, a subset of genomes is a genome set, never a cohort; a gene or mutation linked to resistance is a resistance determinant; the two-dimensional projection is the embedding map on the Embeddings page.
 
-The interface is in English. Every user-visible string lives in one module, `packages/web/src/strings.ts`, keyed by identifier, and components never contain literal interface text, so that a Spanish translation later is one additional file. Species names are rendered in italics wherever they appear. Gene symbols and allele names are rendered in italics in a monospace face.
+The interface is in English. Every user-visible string lives in one module, `packages/web/src/strings.ts`, keyed by identifier, and components never contain literal interface text, so that a Spanish translation later is one additional file. Species names are rendered in italics wherever they appear. Gene symbols and allele names are rendered in italics in a monospace face. Controlled values are shown with labels from the strings module: source types as Clinical, Environmental, Food, Animal and Other; platforms as Illumina, Oxford Nanopore, PacBio and Hybrid; assembly statuses as Complete and Draft.
 
 ## 4. Access model
 
@@ -62,7 +62,7 @@ No instance stores user data. There are no accounts, profiles, saved objects or 
 
 Every page shares the shell shown on the final canvas boards. A 200 px left column holds the wordmark (Catalejo, with the tagline "microbial genome collection"), the navigation in two groups, Explore (Collection, Genome sets, Genomes, Genes) and Analyze (Phylogeny, Pangenome, Embeddings, Sequence search), and a footer with the release identifier (a link to the Releases page), the genome count, the pipeline name and version from the manifest (contract §6.4), and a link to the Methods page. The active page is marked by a 3 px left rule in ink and bold text.
 
-A 56 px bar spans the top of every page and shows the current genome set (the count as a large numeral, the phrase "genomes in the current set", the active filters as chips, an "add filter" link), a search field on pages where search applies, and the actions "Share link" and "Save set".
+A 56 px bar spans the top of every page and shows the current genome set (the count as a large numeral, the phrase "genomes in the current set", the active filters as chips, an "add filter" link), a search field, and the actions "Share link" and "Save set".
 
 Navigation items whose data is absent from the release (per the manifest) are shown disabled with a tooltip stating that the release does not include that product.
 
@@ -107,7 +107,7 @@ All colors come from `config/palette.yaml`, read by the Python exports and the T
 - Drug classes have a fixed palette of fourteen distinguishable colors on white, listed in the palette file, with a stated order.
 - Contig types are fixed. Chromosome dark gray, plasmid purple, prophage lavender, unclassified light gray, none of which appears in the species sequence. The AMR track and determinant highlight is vermillion; virulence is reddish purple; GC skew is bluish green.
 - The embedding map uses a dark background and a lifted variant of the species palette, also listed in the palette file, so the mapping from species to hue is preserved.
-- Interface chrome is achromatic. Links are ink, underlined at rest in running text and on hover and focus in tables, chips, pills and the facet rail, and the active navigation item carries an ink rule, so that data colors are the only saturated colors on a page.
+- Interface chrome is achromatic. Links are ink, underlined at rest in running text and on hover and focus in tables, chips, pills, the facet rail, navigation, footer links, panel titles and in-panel controls, and the active navigation item carries an ink rule, so that data colors are the only saturated colors on a page.
 
 ### 5.5 Draft and complete genomes
 
@@ -145,7 +145,7 @@ Layout. Facet rail (232 px) on the left with species, source, mobile elements, A
 
 Data. The species-grain summaries (`summaries/counts_by_*` and `amr_class_by_species`) for every chart and counter when the set is the whole release, which is also the first render. For any other set, the same counts aggregated in the browser over the genome-grain files (`genome.parquet`, `summaries/qc.parquet`, `summaries/amr_class_by_genome.parquet`, the presence files, `mutation.parquet` and `genome_set_member.parquet`), never over the per-species tables. `genome.parquet` for the table, paged.
 
-Controls and interactions. Clicking a bar, a heatmap cell, a facet value or a year adds the corresponding filter. The QC scatter supports brushing, which adds a completeness and contamination filter. The table supports sorting, column selection, paging by 50, and row selection, with "Use as set" for the selection. Each panel has an expand control that opens it full-width with the export menu.
+Controls and interactions. Clicking a facet value adds that value as an alternative within its field. Clicking a bar, a heatmap cell or a year adds the corresponding filter and narrows the set to the clicked element, replacing the values already chosen in the fields it names. The QC scatter supports brushing, which adds a completeness and contamination filter. The table supports sorting, column selection, paging by 50, and row selection, with "Use as set" for the selection. Each panel has an expand control that opens it full-width with the export menu.
 
 States. Empty set as §5.2. Fewer than eight species collapses "Other". A species with no ST scheme shows the ST panel with a statement instead of bars.
 
@@ -310,7 +310,7 @@ Scale. Designed for 10,000 genomes at launch and 100,000 within the same design;
 
 ## 10. Hosting and deployment
 
-One Cloudflare Pages project per instance, on its `pages.dev` hostname until a custom domain is chosen. The application is static; a Pages Function bound to the R2 bucket forwards range requests for `releases/<release_id>/<group_id>/...` to the bucket, so the application and the data share one hostname and one Access policy. Cloudflare Access protects the hostname with an email allow-list per group. R2 holds the releases under `releases/<release_id>/` and `releases/<release_id>/<group_id>/`, with a pointer file `releases/current.json` per group naming the current release. Cache headers mark release files immutable (they never change under one `release_id`) and the pointer file short-lived. The DuckDB-WASM engine files exceed the Pages per-file limit and the Parquet extension would otherwise be fetched from the internet, so both are served from the bucket through a second Function at `/assets/`, uploaded by the deploy workflow; the application makes no request outside its origin.
+One Cloudflare Pages project per instance, on its `pages.dev` hostname until a custom domain is chosen. The application is static; a Pages Function bound to the R2 bucket forwards range requests for `releases/<release_id>/<group_id>/...` to the bucket, so the application and the data share one hostname and one Access policy. Cloudflare Access protects the hostname with an email allow-list per group. R2 holds the releases under `releases/<release_id>/` and `releases/<release_id>/<group_id>/`, with a pointer file `releases/current.json` per group naming the current release. The application reads `manifest.json` at `/data/manifest.json` and requests every other release file at `/data/r/<release_id>/<path>`, which the Function serves only for the release named in the pointer. Cache headers mark those files immutable (they never change under one `release_id`) and the manifest and the pointer file short-lived. A request for a release other than the current one is refused, and the application asks the reader to reload. The DuckDB-WASM engine files exceed the Pages per-file limit and the Parquet extension would otherwise be fetched from the internet, so both are served from the bucket through a second Function at `/assets/`, uploaded by the deploy workflow; the application makes no request outside its origin.
 
 Tier 2 service. The sequence search service runs on a server operated by the maintaining group and is connected to Cloudflare through a tunnel on a hostname of the project's domain, protected by an Access service token. Instances reach it only through a Pages Function at `/api/search/*`, so the browser never contacts the service's hostname and the service accepts requests from the Functions alone. When the service is unreachable the Function answers 503 and the Sequence search page shows the unavailable state.
 

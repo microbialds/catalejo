@@ -8,7 +8,7 @@ Derived from `docs/requirements.md`. Each item has an identifier, the requiremen
 |---|---|---|
 | G1 | §3 | No rendered page contains the word "cohort"; the embedding page and its links use "Embeddings" and "embedding map", never "atlas" |
 | G2 | §3, §7 | Species names are italic wherever they appear; genome identifiers, coordinates, counts in tables, counters and gene names are monospace; gene and allele names are italic |
-| G3 | §5.4, §7 | No color on the page is outside `config/palette.yaml` and the chrome tokens; the chrome is achromatic; links in running text are underlined at rest, and links in tables, chips, pills and the facet rail are underlined on hover and focus |
+| G3 | §5.4, §7 | No color on the page is outside `config/palette.yaml` and the chrome tokens; the chrome is achromatic; links in running text are underlined at rest, and links in tables, chips, pills, the facet rail, navigation, footer, panel titles and controls are underlined on hover and focus |
 | G4 | §7 | Square corners, hairline borders, no shadows, no gradients, no icon-only navigation, no dark sidebar |
 | G5 | §5.1 | The shell shows the wordmark and tagline, the two navigation groups in the stated order, the release footer with the Methods link, and the active page marked by the accent rule |
 | G6 | §5.1 | The set bar shows the count as a large numeral, "genomes in the current set", filter chips, "add filter", "Share link" and "Save set" |

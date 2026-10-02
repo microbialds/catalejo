@@ -1,13 +1,15 @@
 // Requirements §5.8 and data contract §6.2: the global search joins index rows
 // of the same kind, term and target, keeps sequence types per species,
-// matches exact and prefix (substring for products) without regard to case,
-// groups results by kind in a fixed order with counts, and completes well
-// within 200 ms on a loaded index of 50,000 rows.
+// matches by substring for every kind without regard to case, ranks within a
+// kind exact matches, then prefix matches, then other substrings, each by
+// genome count, groups results by kind in a fixed order with counts, and
+// completes well within 200 ms on a loaded index of 50,000 rows.
 import { describe, expect, it } from 'vitest';
 import {
   buildSearchIndex,
   exactGenomeMatch,
   matchSearch,
+  matchTier,
   readSearchRows,
   searchKinds,
 } from '../src/data/searchIndex';
@@ -63,19 +65,65 @@ describe('search index', () => {
     expect(st?.matches.map((match) => match.entry.speciesCodes)).toEqual([['KPN'], ['SEN']]);
   });
 
-  it('matches by prefix without regard to case, exact first', () => {
+  it('matches without regard to case, exact first', () => {
     const [genomes] = matchSearch(index, 'kpn00');
     expect(genomes?.kind).toBe('genome_id');
     expect(genomes?.matches.map((match) => match.entry.term)).toEqual(['KPN0001', 'KPN0010']);
     const exact = matchSearch(index, 'KPN0010')[0]?.matches[0];
-    expect(exact).toMatchObject({ exact: true, entry: { term: 'KPN0010' } });
+    expect(exact).toMatchObject({ tier: 'exact', entry: { term: 'KPN0010' } });
   });
 
-  it('matches products by substring only', () => {
+  it('matches every kind by substring (open point 5a)', () => {
     const groups = matchSearch(index, 'gyrase');
     expect(groups.map((group) => group.kind)).toEqual(['product']);
     expect(groups[0]?.matches[0]?.entry.count).toBe(36);
-    expect(matchSearch(index, 'yrA').map((group) => group.kind)).toEqual(['product']);
+    // "yrA" lies inside the gene symbol gyrA and the product name.
+    expect(matchSearch(index, 'yrA').map((group) => group.kind)).toEqual(['gene', 'product']);
+    // "0010" lies inside a genome identifier and an accession.
+    const inside = matchSearch(index, '0010');
+    expect(inside.map((group) => group.kind)).toEqual(['genome_id']);
+    expect(inside[0]?.matches.map((match) => match.entry.term)).toEqual(['KPN0010']);
+    expect(matchSearch(index, 'amn0').map((group) => group.kind)).toEqual(['accession']);
+    expect(matchSearch(index, 'T11').map((group) => group.kind)).toEqual(['st']);
+  });
+
+  it('finds both blaKPC-2 and KPC-2 elements for "KPC"', () => {
+    const kpc = buildSearchIndex([
+      row('element', 'blaKPC-2', '/genes/element/blaKPC-2', 'KPN', 8),
+      row('element', 'KPC-2', '/genes/element/KPC-2', 'KPN', 3),
+      row('element', 'blaOXA-48', '/genes/element/blaOXA-48', 'KPN', 5),
+      row('gene', 'blaKPC', '/genes/symbol/blaKPC', 'KPN', 8),
+    ]);
+    const groups = matchSearch(kpc, 'KPC');
+    expect(groups.map((group) => group.kind)).toEqual(['gene', 'element']);
+    const elements = groups.find((group) => group.kind === 'element');
+    expect(elements?.total).toBe(2);
+    expect(elements?.matches.map((match) => [match.entry.term, match.tier])).toEqual([
+      ['KPC-2', 'prefix'],
+      ['blaKPC-2', 'substring'],
+    ]);
+  });
+
+  it('ranks exact, then prefix, then substring matches, each by genome count', () => {
+    const ranked = buildSearchIndex([
+      row('gene', 'xsul', '/genes/symbol/xsul', 'KPN', 90),
+      row('gene', 'sul2', '/genes/symbol/sul2', 'KPN', 10),
+      row('gene', 'sul1', '/genes/symbol/sul1', 'KPN', 40),
+      row('gene', 'asul', '/genes/symbol/asul', 'KPN', 20),
+      row('gene', 'sul', '/genes/symbol/sul', 'KPN', 1),
+    ]);
+    const [genes] = matchSearch(ranked, 'SUL');
+    expect(genes?.matches.map((match) => [match.entry.term, match.tier])).toEqual([
+      ['sul', 'exact'],
+      ['sul1', 'prefix'],
+      ['sul2', 'prefix'],
+      ['xsul', 'substring'],
+      ['asul', 'substring'],
+    ]);
+    expect(matchTier('kpc-2', 'kpc-2')).toBe('exact');
+    expect(matchTier('kpc-2', 'kpc')).toBe('prefix');
+    expect(matchTier('blakpc-2', 'kpc')).toBe('substring');
+    expect(matchTier('blaoxa-48', 'kpc')).toBeUndefined();
   });
 
   it('groups in the fixed order of kinds with counts before the cap', () => {

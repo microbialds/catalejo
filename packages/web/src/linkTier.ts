@@ -3,11 +3,11 @@
 // chips, pills, counters and the facet rail use QUIET_LINK, underlined on
 // hover and keyboard focus only.
 //
-// The navigation items, the footer links and the text controls drawn as
-// links ("+ add filter", "expand", "All N classes", the pager) are not named
-// by the rule. They take CHROME_LINK, the one place where their tier is set:
-// the quiet tier until the maintainer decides at the size check of the
-// Instrument design change; RUNNING_LINK underlines them at rest.
+// Navigation items, footer links, panel titles and the text controls drawn as
+// links ("+ add filter", "expand", "All N classes", the pager) take
+// CHROME_LINK, which requirements 0.7 §5.4 puts in the hover-and-focus tier,
+// as the maintainer chose at the size check of the Instrument design change.
+// RUNNING_LINK underlines at rest.
 
 /** Underline on hover and on keyboard focus only. */
 export const QUIET_LINK = 'link-quiet';

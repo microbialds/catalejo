@@ -34,7 +34,7 @@ export function ExportMenu({ kind }: { kind: ExportKind }) {
             key={entry.key}
             type="button"
             disabled
-            className="rounded-control border border-control-border bg-panel px-2 py-0.5 text-control text-text-faint"
+            className="rounded-control border border-control-border bg-panel px-2 py-0.5 text-control text-text-label"
           >
             {entry.label}
           </button>

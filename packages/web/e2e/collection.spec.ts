@@ -18,12 +18,15 @@ import {
   counterValues,
   escapeRegExp,
   facetOption,
+  genomeTable,
   mainArea,
   openFacets,
+  pager,
   panel,
   setBar,
   setCount,
   settledSetCount,
+  tableIds,
   urlFilters,
   widthOf,
 } from './support/page';
@@ -43,21 +46,6 @@ test.afterAll(async () => {
 });
 
 const GENOME = parquet('tables/genome.parquet');
-
-function genomeTable(page: Page): Locator {
-  return mainArea(page).getByRole('table', { name: strings.panelGenomes, exact: true });
-}
-
-function pager(page: Page): Locator {
-  return mainArea(page).getByRole('navigation', { name: strings.tablePagerLabel });
-}
-
-/** The genome identifiers of the table rows, in order. */
-async function tableIds(page: Page): Promise<string[]> {
-  return genomeTable(page)
-    .locator('tbody tr')
-    .evaluateAll((rows) => rows.map((row) => row.children[1]?.textContent.trim() ?? ''));
-}
 
 function ids(sql: string): string[] {
   return db.rows(sql).map((row) => String(row.genome_id));

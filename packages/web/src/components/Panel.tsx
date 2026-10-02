@@ -7,12 +7,18 @@
 // the grid it sits in, carries a data-expanded attribute for the page's
 // layout, and shows the export menu (§8) under the title; the control then
 // reads "collapse". Square corners, no shadow.
-import { useId } from 'react';
+// While the panel draws a held view of an older set (components/
+// panelUpdating.ts), an "Updating" note follows the title and subtitle and
+// the section is aria-busy, after a short delay so fast updates never flicker.
+// A panel without an expand control (the genome table on its own page,
+// §5.3) may show its export menu at all times through `exportKind`.
+import { useContext, useId } from 'react';
 import type { ReactNode } from 'react';
 import { strings } from '../strings';
 import { Button } from './Button';
 import { ExportMenu } from './ExportMenu';
 import type { ExportKind } from './ExportMenu';
+import { PanelHeldContext, UPDATING_DELAY_MS, useDelayedFlag } from './panelUpdating';
 
 export interface PanelExpansion {
   expanded: boolean;
@@ -28,6 +34,10 @@ export interface PanelProps {
   name: string;
   subtitle?: ReactNode;
   expansion?: PanelExpansion;
+  /** The export menu of a panel without an expand control, shown at all times. */
+  exportKind?: ExportKind;
+  /** The panel's own results for the current view are pending (a new table page). */
+  updating?: boolean;
   /** The annotation version note (requirements §5.6). */
   note?: ReactNode;
   footnote?: ReactNode;
@@ -42,6 +52,8 @@ export function Panel({
   name,
   subtitle,
   expansion,
+  exportKind,
+  updating = false,
   note,
   footnote,
   className,
@@ -49,7 +61,10 @@ export function Panel({
   children,
 }: PanelProps) {
   const bodyId = useId();
+  const held = useContext(PanelHeldContext);
+  const busy = useDelayedFlag(held || updating, UPDATING_DELAY_MS);
   const expanded = expansion?.expanded === true;
+  const exportMenu = expansion?.expanded === true ? expansion.exportKind : exportKind;
   const classes = [
     'flex min-w-0 flex-col gap-2 border border-border bg-panel px-panel-padding-x py-panel-padding-y',
     expanded ? 'col-span-full' : '',
@@ -58,16 +73,28 @@ export function Panel({
     .filter((part) => part !== '')
     .join(' ');
   return (
-    <section aria-label={name} className={classes} {...(expanded ? { 'data-expanded': '' } : {})}>
+    <section
+      aria-label={name}
+      className={classes}
+      {...(expanded ? { 'data-expanded': '' } : {})}
+      {...(busy ? { 'aria-busy': true } : {})}
+    >
       <div className="flex items-baseline justify-between gap-3 border-b border-rule-light pb-1.5">
-        <h2 className="min-w-0 font-sans text-panel-title font-bold">
-          {title}
-          {subtitle !== undefined && (
-            <span className="ml-1.5 font-sans text-control font-regular text-text-secondary">
-              {subtitle}
+        <div className="flex min-w-0 flex-wrap items-baseline gap-x-1.5">
+          <h2 className="min-w-0 font-sans text-panel-title font-bold">
+            {title}
+            {subtitle !== undefined && (
+              <span className="ml-1.5 font-sans text-control font-regular text-text-secondary">
+                {subtitle}
+              </span>
+            )}
+          </h2>
+          {busy && (
+            <span className="font-sans text-control whitespace-nowrap text-text-secondary">
+              {strings.panelUpdating}
             </span>
           )}
-        </h2>
+        </div>
         {expansion !== undefined && (
           <Button
             variant="link"
@@ -81,7 +108,7 @@ export function Panel({
           </Button>
         )}
       </div>
-      {expanded && <ExportMenu kind={expansion.exportKind} />}
+      {exportMenu !== undefined && <ExportMenu kind={exportMenu} />}
       <div id={bodyId} className={`flex min-w-0 grow flex-col ${bodyClassName ?? ''}`}>
         {children}
       </div>

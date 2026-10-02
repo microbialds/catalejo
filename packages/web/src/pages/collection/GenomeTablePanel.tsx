@@ -15,7 +15,10 @@
 //
 // The panel reads the store of the page's view (see ../Collection.tsx) and
 // renders its results at low priority, behind the facet rail (§6.1, §9;
-// checklist C4). The rows are memoized and each draws its cells in its own
+// checklist C4). While a page of rows for the current view loads, the
+// previous rows stay and the panel says it is updating (Panel `updating`).
+// On the genome list page (/genomes, §5.3; ../Genomes.tsx) it stands alone,
+// without the expand control and with the table export menu shown. The rows are memoized and each draws its cells in its own
 // render, so that a change of the count or of the pending state does not
 // redraw the page of rows, and drawing a new page gives way to a click.
 import { useCallback, useMemo, useRef, useState } from 'react';
@@ -94,7 +97,7 @@ function fixed(value: number | null, digits: number): string | null {
 }
 
 function missing(): ReactNode {
-  return <span className="text-text-faint">{strings.valueMissing}</span>;
+  return <span className="text-text-label">{strings.valueMissing}</span>;
 }
 
 function mono(text: string | null): ReactNode {
@@ -196,7 +199,7 @@ interface Keyed<T> {
   value: T;
 }
 
-export function GenomeTablePanel({ expansion }: { expansion: PanelExpansion }) {
+export function GenomeTablePanel({ expansion }: { expansion?: PanelExpansion }) {
   const { filters, replaceWithIds } = useGenomeSet();
   const setKey = filtersKey(filters);
   const total = useSetCount(filters, LOW_PRIORITY);
@@ -380,7 +383,12 @@ export function GenomeTablePanel({ expansion }: { expansion: PanelExpansion }) {
   }, [pageData, selected, visibleIds, render, toggleRow]);
 
   return (
-    <Panel title={strings.panelGenomes} name={strings.panelGenomes} expansion={expansion}>
+    <Panel
+      title={strings.panelGenomes}
+      name={strings.panelGenomes}
+      {...(expansion === undefined ? { exportKind: 'table' as const } : { expansion })}
+      updating={rowsState.pending && shown !== undefined}
+    >
       <div className="flex flex-wrap items-center gap-x-panel-gap gap-y-2 pb-2">
         <div ref={chooserRoot} className="relative">
           <Button

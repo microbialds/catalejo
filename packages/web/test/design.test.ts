@@ -1,8 +1,10 @@
-// Requirements §5.4 and §7 (checklist G2, G3): the type and the marks of the
-// Instrument design. No component uses the serif face, a weight other than
-// 400 and 700, or uppercase labels, and no mark is drawn at an opacity below
-// 1, so that every painted color is a palette color as is. The scan covers
-// src/ without src/generated/.
+// Requirements §5.4, §7 and §9 (checklist G2, G3): the type and the marks of
+// the Instrument design. No component uses the serif face, a weight other
+// than 400 and 700, or uppercase labels, no mark is drawn at an opacity below
+// 1, so that every painted color is a palette color as is, and no text a
+// reader needs is set in chrome.text_faint (decorative only in
+// config/palette.yaml; AA contrast, §9) unless its line carries a
+// "decorative" allow comment. The scan covers src/ without src/generated/.
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -55,6 +57,33 @@ describe('design rule detector', () => {
     ]);
   });
 
+  it('catches text in the faint color, in any variant, unless marked decorative', () => {
+    const source = [
+      '// text-text-faint in a comment does not count',
+      'export const A = () => (',
+      '  <p className="text-control text-text-faint">',
+      '    <button className={`px-1 disabled:text-text-faint ${x}`} />',
+      '    <span className="text-text-faint" /> {/* decorative */}',
+      '    <span className="text-text-label bg-text-faint-x" />',
+      '  </p>',
+      ');',
+    ].join('\n');
+    expect(describeFindings(findDesignInScript(source))).toEqual([
+      'input.tsx:3 text-text-faint',
+      'input.tsx:4 disabled:text-text-faint',
+    ]);
+    const css = [
+      'a { @apply text-text-faint; }',
+      'b { color: var(--color-text-faint); }',
+      'c { color: var(--color-text-faint); } /* decorative */',
+      'd { background-color: var(--color-text-faint); }',
+    ].join('\n');
+    expect(describeFindings(findDesignInCss(css))).toEqual([
+      'input.css:1 text-text-faint',
+      'input.css:2 color: text-faint',
+    ]);
+  });
+
   it('catches opacity, the serif variable and uppercase in stylesheets, not in comments', () => {
     const css = [
       '/* opacity: 0.5; font-family: var(--font-serif) */',
@@ -75,7 +104,7 @@ describe('sources', () => {
   const files = sourceFiles(['.ts', '.tsx', '.css']);
 
   it.each(files.map((file) => [path.relative(webRoot, file), file]))(
-    '%s follows the type and opacity rules',
+    '%s follows the type, opacity and faint text rules',
     (_name, file) => {
       const source = readFileSync(file, 'utf8');
       const name = path.relative(webRoot, file);

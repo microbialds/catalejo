@@ -4,7 +4,8 @@
 // version note's Methods link) is in the quiet tier of the facet rail (§5.4). A row is checked while its value is an active
 // filter, and toggling it adds or removes the filter. Values with no genome
 // in the current set stay listed (values within a field are alternatives,
-// §5.2) with the value in faint text.
+// §5.2) with the value in the label color, which keeps AA contrast (§9;
+// chrome.text_faint is decorative only, config/palette.yaml).
 import type { ReactNode } from 'react';
 import { formatCount } from '../format';
 import { strings } from '../strings';
@@ -46,7 +47,7 @@ export function FacetOption({ checked, onToggle, label, name, count, mark }: Fac
         }}
       />
       <span
-        className={`flex min-w-0 items-center gap-1.5 ${empty ? 'text-text-faint' : 'text-ink'}`}
+        className={`flex min-w-0 items-center gap-1.5 ${empty ? 'text-text-label' : 'text-ink'}`}
       >
         {mark}
         <span className="min-w-0 truncate">{label}</span>

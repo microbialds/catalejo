@@ -6,25 +6,21 @@
 // absence of a scheme, the heatmap and AMR facet carry the annotation
 // version note for the mixed-version species, panels expand with the
 // disabled export menu, and "Use as set" asks in the page and replaces the
-// set with the selected identifiers.
+// set with the selected identifiers. The heatmap carries its legend, and
+// while the charts and the table hold the previous set's view they say they
+// are updating and are aria-busy, until the current set's results arrive.
 import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type {
-  AggregateBuilder,
-  QcPoint,
-  SetEngine,
-  SetSummary,
-  SpeciesCountRow,
-} from '../src/data/setEngine';
+import type { QcPoint, SetEngine, SetSummary, SpeciesCountRow } from '../src/data/setEngine';
 import type { ManifestSpecies } from '../src/data/manifest';
-import { ENGINE_TABLES } from '../src/data/setEngine';
 import { exportPresets } from '../src/generated/platform';
 import { palette } from '../src/generated/palette';
-import { decodeFilters, encodeFilters, filtersKey } from '../src/set/filters';
+import { decodeFilters, encodeFilters, filtersKey, isWholeRelease } from '../src/set/filters';
 import type { GenomeFilters } from '../src/set/filters';
 import { strings } from '../src/strings';
 import { stubEngine } from './support/engine';
 import { manifestFixture, ready } from './support/manifest';
+import { tableAggregate } from './support/genomeTable';
 import { renderApp } from './support/render';
 
 beforeEach(() => {
@@ -142,32 +138,6 @@ const QC: QcPoint[] = [
   },
 ];
 
-function genomeRows(page: number) {
-  return Array.from({ length: 50 }, (_, i) => {
-    const n = page * 50 + i + 1;
-    return {
-      genome_id: `KPN${String(n).padStart(4, '0')}`,
-      species_code: 'KPN',
-      canonical_name: 'Klebsiella pneumoniae',
-      color: colors[0],
-      st: '258',
-      source_type: 'clinical',
-      year: 2019,
-      amr_gene_count: 3,
-      plasmid_contig_count: 1,
-      checkm2_completeness: 99.12,
-      country: 'CL',
-      platform: 'illumina',
-      assembly_status: 'draft',
-      checkm2_contamination: 0.5,
-      genome_size: 5_400_000,
-      contig_count: 80,
-      n50: 250_000,
-      gc_content: 57.1,
-    };
-  });
-}
-
 const manifestSpecies: ManifestSpecies[] = SPECIES.map(([code, name, count]) => ({
   species_code: code,
   canonical_name: name,
@@ -198,17 +168,7 @@ function engine(calls: Calls = { summarize: [], sql: [] }): SetEngine {
     },
     mobileCounts: () => Promise.resolve({ plasmidContig: 40, prophage: 12 }),
     qcPoints: () => Promise.resolve(QC),
-    aggregate: async <T,>(_filters: GenomeFilters, build: AggregateBuilder) => {
-      const sql = await build({
-        set: '(SET)',
-        where: 'TRUE',
-        tables: ENGINE_TABLES,
-        relation: (path) => Promise.resolve(`read_parquet('${path}')`),
-      });
-      calls.sql.push(sql);
-      const offset = /OFFSET (\d+)$/.exec(sql)?.[1] ?? '0';
-      return genomeRows(Number(offset) / 50) as T[];
-    },
+    aggregate: tableAggregate(calls.sql),
   });
 }
 
@@ -224,8 +184,8 @@ function current(): GenomeFilters {
   return decodeFilters(window.location.search);
 }
 
-async function rendered(path = '/', calls?: Calls) {
-  renderApp(path, synth, engine(calls));
+async function rendered(path = '/', calls?: Calls, use: SetEngine = engine(calls)) {
+  renderApp(path, synth, use);
   await within(main()).findByRole('table', { name: strings.panelGenomes });
   await within(panel(strings.panelSpecies)).findAllByRole('button', { name: / genomes$/ });
 }
@@ -343,6 +303,43 @@ describe('collection page', () => {
     expect(note.className.split(/\s+/)).toContain('compact:hidden');
     const grid = within(heatmap).getByRole('table', { name: strings.panelAmrClass });
     expect(grid.className.split(/\s+/)).toContain('max-compact:hidden');
+  });
+
+  it('shows the heatmap legend at rest and expanded, hidden with the grid when narrow (§8)', async () => {
+    await rendered();
+    const heatmap = panel(strings.panelAmrClass);
+    const legend = () => within(heatmap).getByRole('list', { name: strings.heatmapLegendLabel });
+    const labels = () =>
+      within(legend())
+        .getAllByRole('listitem')
+        .map((item) => item.textContent);
+    const expected = [
+      strings.heatmapLegendZero,
+      strings.heatmapLegendRange('1', '14'),
+      strings.heatmapLegendRange('15', '28'),
+      strings.heatmapLegendRange('29', '42'),
+      strings.heatmapLegendRange('43', '57'),
+      strings.heatmapLegendRange('58', '71'),
+      strings.heatmapLegendRange('72', '85'),
+      strings.heatmapLegendRange('86', '100'),
+    ];
+    expect(labels()).toEqual(expected);
+    expect(legend().className.split(/\s+/)).toEqual(
+      expect.arrayContaining(['font-mono', 'max-compact:hidden']),
+    );
+    const swatches = [...legend().querySelectorAll('li > span')] as HTMLElement[];
+    expect(swatches[0]?.className.split(/\s+/)).toEqual(
+      expect.arrayContaining(['border', 'bg-panel']),
+    );
+    expect(swatches.slice(1).map((swatch) => swatch.style.backgroundColor)).toHaveLength(7);
+    // Not part of the grid of cells.
+    expect(
+      within(heatmap).getByRole('table', { name: strings.panelAmrClass }).contains(legend()),
+    ).toBe(false);
+    fireEvent.click(
+      within(heatmap).getByRole('button', { name: strings.panelExpandName(strings.panelAmrClass) }),
+    );
+    expect(labels()).toEqual(expected);
   });
 
   it('counts flagged and missing QC points and describes the keyboard route (C3)', async () => {
@@ -500,5 +497,63 @@ describe('genome table (C5, G2, G11)', () => {
     await rendered();
     fireEvent.click(within(main()).getByRole('checkbox', { name: strings.tableSelectPage }));
     expect(within(main()).getByText(strings.tableSelected('50'))).toBeTruthy();
+  });
+});
+
+describe('held views (requirements §6.1, §9)', () => {
+  it('marks the charts and the table as updating until the set arrives, then clears', async () => {
+    const base = engine();
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((done) => {
+      release = done;
+    });
+    const slow: SetEngine = {
+      ...base,
+      summarize: async (filters) => {
+        if (!isWholeRelease(filters)) await gate;
+        return base.summarize(filters);
+      },
+    };
+    await rendered('/', undefined, slow);
+    const names = [
+      strings.panelSpecies,
+      strings.panelAmrClass,
+      strings.panelYear,
+      strings.panelQc,
+      strings.panelGenomes,
+    ];
+    for (const name of names) {
+      expect(panel(name).getAttribute('aria-busy')).toBeNull();
+      expect(within(panel(name)).queryByText(strings.panelUpdating)).toBeNull();
+    }
+    fireEvent.click(
+      within(panel(strings.panelSpecies)).getByRole('button', {
+        name: strings.speciesBarName('Serratia marcescens', '9', 9),
+      }),
+    );
+    expect(current()).toEqual({ species_code: ['SMA'] });
+    for (const name of names) {
+      expect(await within(panel(name)).findByText(strings.panelUpdating)).toBeTruthy();
+      expect(panel(name).getAttribute('aria-busy')).toBe('true');
+    }
+    // The held view is the previous set's: the Klebsiella bar is still drawn.
+    expect(
+      within(panel(strings.panelSpecies)).getByRole('button', {
+        name: strings.speciesBarName('Klebsiella pneumoniae', '28', 28),
+      }),
+    ).toBeTruthy();
+    await act(async () => {
+      release();
+      await gate;
+    });
+    await waitFor(() => {
+      expect(within(main()).queryAllByText(strings.panelUpdating)).toHaveLength(0);
+    });
+    for (const name of names) expect(panel(name).getAttribute('aria-busy')).toBeNull();
+    expect(
+      within(panel(strings.panelSpecies)).queryByRole('button', {
+        name: strings.speciesBarName('Klebsiella pneumoniae', '28', 28),
+      }),
+    ).toBeNull();
   });
 });

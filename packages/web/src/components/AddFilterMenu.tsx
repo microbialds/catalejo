@@ -69,7 +69,7 @@ function FieldList({ onPick }: { onPick: (key: FilterKey) => void }) {
               aria-disabled="true"
               aria-describedby={tipId}
               title={tip}
-              className="peer block cursor-default px-1 py-1 text-control text-text-faint"
+              className="peer block cursor-default px-1 py-1 text-control text-text-label"
             >
               {field.label}
             </span>

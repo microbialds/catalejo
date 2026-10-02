@@ -3,8 +3,12 @@
 // (font-regular and font-bold), no uppercase labels. Marks: no opacity,
 // fill-opacity or stroke-opacity below 1, and no Tailwind opacity utility or
 // color opacity modifier, since every painted color must be a palette color
-// drawn as is. Scripts are read through the TypeScript compiler, so comments
-// never count; stylesheets have their comments removed first.
+// drawn as is. Text: no text in chrome.text_faint, which config/palette.yaml
+// keeps for decoration only and which fails the AA contrast of §9 on the
+// panel and chassis colors; a line that truly is decoration carries a comment
+// with the word "decorative" (for example `{/* decorative */}`), which allows
+// it. Scripts are read through the TypeScript compiler, so comments never
+// count otherwise; stylesheets have their comments removed first.
 import ts from 'typescript';
 
 export interface DesignFinding {
@@ -21,6 +25,10 @@ const OPACITY_CLASS = /^opacity-(?!100$)(?:\d+|\[.*\])$/;
 /** A color utility with an opacity modifier, such as bg-ink/50. */
 const COLOR_MODIFIER =
   /^(?:bg|text|border(?:-[xytrblse])?|outline|ring|fill|stroke|decoration|accent|caret|divide|placeholder)-[\w-]+\/(?:\d+|\[.*\])$/;
+/** Text in the faint chrome color, for any variant (disabled:, hover:, ...). */
+const FAINT_TEXT_CLASS = 'text-text-faint';
+/** The allow comment of a decorative use of the faint color. */
+const DECORATIVE_ALLOW = /(?:\/\/|\/\*)\s*decorative\b/;
 const OPACITY_PROPERTIES = new Set([
   'opacity',
   'fillOpacity',
@@ -51,6 +59,18 @@ export function classFindings(text: string): string[] {
     else if (COLOR_MODIFIER.test(utility)) found.push(token);
   }
   return found;
+}
+
+/** Class tokens that set text in the faint color. */
+export function faintTextFindings(text: string): string[] {
+  return text
+    .split(/\s+/)
+    .filter((token) => (token.replace(/^!/, '').split(':').pop() ?? '') === FAINT_TEXT_CLASS);
+}
+
+/** Whether a line of source carries the decorative allow comment. */
+function allowsFaint(source: string, line: number): boolean {
+  return DECORATIVE_ALLOW.test(source.split('\n')[line - 1] ?? '');
 }
 
 /** Opacity declarations below 1 in CSS text (comments already removed). */
@@ -103,6 +123,10 @@ export function findDesignInScript(source: string, file = 'input.tsx'): DesignFi
     }
     if (text !== undefined) {
       for (const found of [...classFindings(text), ...cssOpacityFindings(text)]) add(node, found);
+      const faint = faintTextFindings(text);
+      if (faint.length > 0 && !allowsFaint(source, lineOf(source, node.getStart(sourceFile)))) {
+        for (const found of faint) add(node, found);
+      }
     }
     // opacity={0.5}, fillOpacity="0.6", style={{ opacity: x }}
     if (ts.isJsxAttribute(node) || ts.isPropertyAssignment(node)) {
@@ -142,9 +166,18 @@ export function findDesignInCss(source: string, file = 'input.css'): DesignFindi
     findings.push({ file, line: lineOf(stripped, match.index), text: match[0] });
   }
   for (const match of stripped.matchAll(/@apply([^;]+);/g)) {
+    const line = lineOf(stripped, match.index);
     for (const found of classFindings(match[1] ?? '')) {
-      findings.push({ file, line: lineOf(stripped, match.index), text: found });
+      findings.push({ file, line, text: found });
     }
+    if (!allowsFaint(source, line)) {
+      for (const found of faintTextFindings(match[1] ?? ''))
+        findings.push({ file, line, text: found });
+    }
+  }
+  for (const match of stripped.matchAll(/(?:^|[;{\s])color\s*:\s*var\(--color-text-faint\)/g)) {
+    const line = lineOf(stripped, match.index + match[0].search(/color/));
+    if (!allowsFaint(source, line)) findings.push({ file, line, text: 'color: text-faint' });
   }
   return findings;
 }

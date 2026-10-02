@@ -22,7 +22,7 @@ const itemActive = [
   'pr-nav-item-padding-x pl-[calc(var(--spacing-nav-item-padding-x)-var(--shape-active-rule))]',
   'border-l-(length:--shape-active-rule) border-accent bg-background font-bold text-ink',
 ].join(' ');
-const itemDisabled = `${itemBase} peer cursor-default px-nav-item-padding-x text-text-faint`;
+const itemDisabled = `${itemBase} peer cursor-default px-nav-item-padding-x text-text-label`;
 const disabledActive = `${itemActive} peer cursor-default`;
 const tooltip = [
   'pointer-events-none invisible absolute top-full right-nav-item-padding-x left-nav-item-padding-x z-20',

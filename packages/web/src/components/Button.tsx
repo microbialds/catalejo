@@ -12,9 +12,9 @@ export type ButtonVariant = 'primary' | 'secondary' | 'link';
 const base = 'rounded-control px-3 py-1.75 text-control font-bold disabled:cursor-default';
 
 export const buttonClass: Readonly<Record<ButtonVariant, string>> = {
-  primary: `${base} border border-ink bg-ink text-on-ink disabled:border-text-faint disabled:bg-text-faint`,
-  secondary: `${base} border border-control-border bg-panel text-ink disabled:text-text-faint`,
-  link: `text-control text-accent hover:text-accent-hover disabled:text-text-faint ${CHROME_LINK}`,
+  primary: `${base} border border-ink bg-ink text-on-ink disabled:border-text-label disabled:bg-text-label`,
+  secondary: `${base} border border-control-border bg-panel text-ink disabled:text-text-label`,
+  link: `text-control text-accent hover:text-accent-hover disabled:text-text-label ${CHROME_LINK}`,
 };
 
 export interface ButtonProps extends ComponentPropsWithRef<'button'> {

@@ -97,7 +97,7 @@ export function YearPanel({
             {chart.columns.map((column, index) => (
               <span key={column.year} className="flex min-w-0 flex-1 justify-center">
                 {index % step === 0 && column.total === 0 && (
-                  <span className="font-mono text-micro text-text-faint">{column.year}</span>
+                  <span className="font-mono text-micro text-text-label">{column.year}</span>
                 )}
                 {index % step === 0 && column.total > 0 && (
                   <button

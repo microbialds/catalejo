@@ -1,7 +1,11 @@
 // Access to the release files (data contract §6). Every table and summary is
-// read from the same-origin /data/ path (requirements §10): a file is
+// read from the same-origin /data/ path (requirements §10): the manifest at
+// /data/manifest.json and every other file at /data/r/<release_id>/<path>,
+// with the release_id of the manifest the application loaded. A file is
 // registered once per database as an HTTP file, which DuckDB-WASM reads with
-// range requests, and queried as `read_parquet('<path>')`.
+// range requests, and queried as `read_parquet('<path>')`. When a query fails,
+// the source asks ./releaseChange.ts whether the release is still current, so
+// that a reader whose release was replaced is asked to reload.
 //
 // Partitioned tables are reached only through `speciesTable`, which takes
 // exactly one species code; nothing in the application scans `feature`
@@ -12,13 +16,38 @@
 // module does not pull DuckDB-WASM into the first bundle.
 import type { AsyncDuckDB, AsyncDuckDBConnection } from '@duckdb/duckdb-wasm';
 import type { Manifest } from './manifest';
+import { checkRelease } from './releaseChange';
 
 export const DATA_PREFIX = '/data/';
 
-/** The same-origin URL path of a release file, segments percent-encoded. */
-export function dataUrl(path: string): string {
-  const segments = path.split('/').filter((segment) => segment !== '');
-  return `${DATA_PREFIX}${segments.map((segment) => encodeURIComponent(segment)).join('/')}`;
+/** The only release file requested outside the release scope. */
+export const MANIFEST_DATA_URL = `${DATA_PREFIX}manifest.json`;
+
+/** The first segment of the release-scoped paths, /data/r/<release_id>/<path>. */
+export const RELEASE_SCOPE = 'r';
+
+function encodedSegments(path: string): string[] {
+  return path
+    .split('/')
+    .filter((segment) => segment !== '')
+    .map((segment) => encodeURIComponent(segment));
+}
+
+/** /data/r/<release_id>/<path>, segments percent-encoded, for any file. */
+export function releaseFileUrl(path: string, releaseId: string): string {
+  const scope = [RELEASE_SCOPE, encodeURIComponent(releaseId)];
+  return `${DATA_PREFIX}${[...scope, ...encodedSegments(path)].join('/')}`;
+}
+
+/**
+ * The same-origin URL path the application requests a release file at
+ * (requirements §10): /data/manifest.json for the manifest, and
+ * /data/r/<release_id>/<path> for every other file.
+ */
+export function dataUrl(path: string, releaseId: string): string {
+  const segments = encodedSegments(path);
+  if (segments.length === 1 && segments[0] === 'manifest.json') return MANIFEST_DATA_URL;
+  return releaseFileUrl(path, releaseId);
 }
 
 /** Tables written as one file per species (contract §6.1). */
@@ -146,10 +175,15 @@ export interface ReleaseSource {
 const registered = new WeakMap<AsyncDuckDB, Map<string, Promise<string>>>();
 
 /**
- * Registers a release file with the database once and returns its relation,
- * `read_parquet('<path>')`.
+ * Registers a release file with the database once, at its URL in the release
+ * `releaseId`, and returns its relation, `read_parquet('<path>')`.
  */
-export function openParquet(db: AsyncDuckDB, path: string, origin?: string): Promise<string> {
+export function openParquet(
+  db: AsyncDuckDB,
+  path: string,
+  releaseId: string,
+  origin?: string,
+): Promise<string> {
   try {
     assertSingleFile(path);
   } catch (error) {
@@ -167,7 +201,7 @@ export function openParquet(db: AsyncDuckDB, path: string, origin?: string): Pro
   const base = origin ?? window.location.origin;
   const pending = (async () => {
     const { DuckDBDataProtocol } = await import('@duckdb/duckdb-wasm');
-    const url = new URL(dataUrl(path), base).href;
+    const url = new URL(dataUrl(path, releaseId), base).href;
     await db.registerFileURL(path, url, DuckDBDataProtocol.HTTP, false);
     return `read_parquet(${sqlString(path)})`;
   })();
@@ -176,9 +210,26 @@ export function openParquet(db: AsyncDuckDB, path: string, origin?: string): Pro
   return pending;
 }
 
+export interface BrowserSourceOptions {
+  /**
+   * Called with the error of a failed read; by default, checks whether the
+   * manifest's release is still current (./releaseChange.ts).
+   */
+  onReadError?: (error: unknown) => void;
+}
+
 /** A release source over the browser database for a manifest's release. */
-export function createBrowserSource(db: AsyncDuckDB, manifest: Manifest): ReleaseSource {
+export function createBrowserSource(
+  db: AsyncDuckDB,
+  manifest: Manifest,
+  options: BrowserSourceOptions = {},
+): ReleaseSource {
   const files = new Set(manifest.files.map((file) => file.path));
+  const onReadError =
+    options.onReadError ??
+    (() => {
+      void checkRelease(manifest.release_id);
+    });
   let connection: Promise<AsyncDuckDBConnection> | undefined;
   // DuckDB runs one statement at a time per connection. Queries wait in two
   // first-in first-out queues, and the next one is taken from the high queue
@@ -198,7 +249,11 @@ export function createBrowserSource(db: AsyncDuckDB, manifest: Manifest): Releas
   };
   return {
     has: (path) => files.has(path),
-    relation: (path) => openParquet(db, path),
+    relation: (path) =>
+      openParquet(db, path, manifest.release_id).catch((error: unknown) => {
+        if (!(error instanceof CrossSpeciesScanError)) onReadError(error);
+        throw error;
+      }),
     query: (sql, priority = 'high') =>
       new Promise<Row[]>((resolve, reject) => {
         queues[priority].push(async () => {
@@ -206,6 +261,7 @@ export function createBrowserSource(db: AsyncDuckDB, manifest: Manifest): Releas
             connection ??= db.connect();
             resolve(arrowRows(await (await connection).query(sql)));
           } catch (error) {
+            onReadError(error);
             reject(error instanceof Error ? error : new Error(String(error)));
           }
         });

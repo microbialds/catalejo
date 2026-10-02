@@ -20,6 +20,7 @@
     "pretest": "pnpm run generate && pnpm run extensions",
     "test": "vitest run",
     "e2e": "playwright test",
+    "upload-assets": "node scripts/upload-assets.mjs",
     "lint": "eslint . && prettier --check .",
     "pretypecheck": "pnpm run generate",
     "typecheck": "tsc -b"

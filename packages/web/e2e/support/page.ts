@@ -72,6 +72,30 @@ export async function collectionReady(page: Page): Promise<void> {
   await settledSetCount(page);
 }
 
+/** The genome table, on the collection page or the genome list page. */
+export function genomeTable(page: Page): Locator {
+  return mainArea(page).getByRole('table', { name: strings.panelGenomes, exact: true });
+}
+
+/** The pager of the genome table. */
+export function pager(page: Page): Locator {
+  return mainArea(page).getByRole('navigation', { name: strings.tablePagerLabel });
+}
+
+/** The genome identifiers of the table rows, in order. */
+export async function tableIds(page: Page): Promise<string[]> {
+  return genomeTable(page)
+    .locator('tbody tr')
+    .evaluateAll((rows) => rows.map((row) => row.children[1]?.textContent.trim() ?? ''));
+}
+
+/** Waits until the genome list page (/genomes) shows its first table page. */
+export async function genomesReady(page: Page): Promise<void> {
+  await expect(genomeTable(page)).toBeVisible({ timeout: 30_000 });
+  await expect(genomeTable(page).locator('tbody tr').first()).toBeVisible({ timeout: 30_000 });
+  await settledSetCount(page);
+}
+
 /** The five counter values, in order, as numbers. */
 export async function counterValues(page: Page): Promise<number[]> {
   const texts = await counters(page).getByRole('definition').allInnerTexts();

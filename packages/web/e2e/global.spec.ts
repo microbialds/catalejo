@@ -39,7 +39,7 @@ import {
   urlFilters,
   widthOf,
 } from './support/page';
-import { manifest, species } from './support/synth';
+import { manifest, openSynthDatabase, parquet, species } from './support/synth';
 
 const ROUTES = [
   '/',
@@ -941,6 +941,18 @@ test('G10 global search resolves each kind, groups results, opens an exact genom
     await expect(page).toHaveURL((url) => url.pathname === path);
   }
 
+  // Every kind matches by substring: "KPC" finds the elements KPC-2 and
+  // blaKPC-2, the prefix match first (open point 5a).
+  await page.goto('/');
+  await search.fill('KPC');
+  const elements = resultGroup(page, strings.searchKindElement);
+  await expect(elements.getByRole('option').first()).toBeVisible({ timeout: 20_000 });
+  const terms = await elements
+    .getByRole('option')
+    .evaluateAll((options) => options.map((option) => option.firstElementChild?.textContent));
+  expect(terms.indexOf('KPC-2')).toBeGreaterThanOrEqual(0);
+  expect(terms.indexOf('blaKPC-2')).toBeGreaterThan(terms.indexOf('KPC-2'));
+
   // A sequence type result filters the collection by species and ST.
   await page.goto('/');
   await search.fill('ST258');
@@ -1035,6 +1047,38 @@ test('G11 species, genome identifiers, STs and gene names are links', async ({ p
   await option.click({ timeout: 20_000 });
   await expect(page).toHaveURL((url) => url.pathname === '/genes/symbol/dnaA');
   expect(urlFilters(page)).toEqual(filters);
+
+  // A point mutation chip links to the Genes page of its gene, split at the
+  // last underscore (contract §5.6), keeping the set. The mutation is the
+  // most frequent one of the synthetic release's tables/mutation.parquet.
+  const db = await openSynthDatabase();
+  let mutation: { gene: string; variant: string };
+  try {
+    const [top] = db.rows(
+      `SELECT gene, variant FROM ${parquet('tables/mutation.parquet')}
+       GROUP BY gene, variant ORDER BY count(*) DESC, gene, variant LIMIT 1`,
+    );
+    const text = (value: unknown) => (typeof value === 'string' ? value : '');
+    mutation = { gene: text(top?.gene), variant: text(top?.variant) };
+  } finally {
+    await db.close();
+  }
+  expect(mutation.gene).not.toBe('');
+  const mutationFilters: GenomeFilters = {
+    mutation: [`${mutation.gene}_${mutation.variant}`],
+  };
+  await page.goto(`/${encodeFilters(mutationFilters)}`);
+  await settledSetCount(page);
+  const mutationChip = setBar(page)
+    .getByRole('list', { name: strings.activeFiltersLabel })
+    .getByRole('link', { name: `${mutation.gene}_${mutation.variant}`, exact: true });
+  await expect(mutationChip).toHaveAttribute(
+    'href',
+    `/genes/symbol/${encodeURIComponent(mutation.gene)}${encodeFilters(mutationFilters)}`,
+  );
+  await mutationChip.click();
+  await expect(page).toHaveURL((url) => url.pathname === `/genes/symbol/${mutation.gene}`);
+  expect(urlFilters(page)).toEqual(mutationFilters);
 
   test.info().annotations.push({
     type: 'not applicable',
@@ -1143,6 +1187,46 @@ test('G12 viewport: drawer and stacked rows at 1024; menu, scrolling table, note
   expect(after).toBeLessThanOrEqual(pageWidth.innerWidth);
 });
 
+test('the facet drawer closes on Escape from anywhere and on a pointer down outside', async ({
+  page,
+}, testInfo) => {
+  // Requirements §5.10 and §9 (keyboard reachable controls): the drawer exists
+  // below 1200 px; the 1024 project checks it.
+  test.skip(widthOf(testInfo) !== 1024, 'checked at 1024 px, where the rail is a drawer');
+  await page.goto('/');
+  await collectionReady(page);
+  const rail = facetRail(page);
+  const toggle = setBar(page).getByRole('button', { name: strings.drawerToggle, exact: true });
+
+  // Escape from inside the drawer returns the focus to "Filters".
+  await toggle.click();
+  await expect(rail).toBeVisible();
+  await rail.getByRole('checkbox').first().focus();
+  await page.keyboard.press('Escape');
+  await expect(rail).toBeHidden();
+  await expect(toggle).toBeFocused();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+
+  // Escape with the focus elsewhere on the page.
+  await toggle.click();
+  await expect(rail).toBeVisible();
+  await page.evaluate(() => {
+    (document.activeElement as HTMLElement | null)?.blur();
+  });
+  await page.keyboard.press('Escape');
+  await expect(rail).toBeHidden();
+  await expect(toggle).toBeFocused();
+
+  // A press inside the drawer keeps it open; one outside it and "Filters" closes it.
+  await toggle.click();
+  await expect(rail).toBeVisible();
+  await rail.getByRole('group').first().locator('legend').click();
+  await expect(rail).toBeVisible();
+  await counters(page).click();
+  await expect(rail).toBeHidden();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+});
+
 test('G13 annotation version warning for the mixed-version species', async ({ page }) => {
   const mixed = manifest.species.filter(
     (row) =>
@@ -1232,9 +1316,22 @@ test('G14 no request leaves the origin when a Parquet file is opened', async ({
   await page.goto('/');
   const response = await parquet;
   expect(new URL(response.url()).origin).toBe(origin);
+  // Release files are read at /data/r/<release_id>/<path> and cached as
+  // immutable (requirements §10).
+  expect(new URL(response.url()).pathname.startsWith(`/data/r/${manifest.release_id}/`)).toBe(true);
+  expect(response.headers()['cache-control']).toContain('immutable');
   expect([200, 206]).toContain(response.status());
   await collectionReady(page);
   await page.waitForLoadState('networkidle');
-  expect(log.urls.some((url) => new URL(url).pathname.endsWith('.parquet'))).toBe(true);
+  const dataPaths = log.urls
+    .map((url) => new URL(url))
+    .filter((url) => url.origin === origin && url.pathname.startsWith('/data/'))
+    .map((url) => url.pathname);
+  expect(dataPaths.some((pathname) => pathname.endsWith('.parquet'))).toBe(true);
+  for (const pathname of dataPaths) {
+    if (pathname !== '/data/manifest.json') {
+      expect(pathname.startsWith(`/data/r/${manifest.release_id}/`)).toBe(true);
+    }
+  }
   expect(log.foreign()).toEqual([]);
 });

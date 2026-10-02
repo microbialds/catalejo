@@ -52,6 +52,36 @@ function Popover({ onClose }: { onClose?: () => void }) {
   );
 }
 
+/** A drawer whose trigger lies outside its root, as the facet drawer's does. */
+function Detached({ label }: { label: string }) {
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  useDismiss(open, {
+    root,
+    trigger,
+    inside: [trigger],
+    onClose: () => {
+      setOpen(false);
+    },
+  });
+  return (
+    <div>
+      <button
+        ref={trigger}
+        type="button"
+        aria-expanded={open}
+        onClick={() => {
+          setOpen(!open);
+        }}
+      >
+        {`${label} trigger`}
+      </button>
+      <div ref={root}>{open && <fieldset aria-label={label} />}</div>
+    </div>
+  );
+}
+
 const trigger = () => screen.getByRole('button', { name: 'trigger' });
 const popover = () => screen.queryByRole('group', { name: 'popover' });
 
@@ -127,5 +157,37 @@ describe('useDismiss', () => {
     expect(popover()).toBeNull();
     fireEvent.keyDown(document.body, { key: 'Escape' });
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('keeps a popover open on a pointer down on an inside element outside its root', () => {
+    render(<Detached label="drawer" />);
+    const detachedTrigger = screen.getByRole('button', { name: 'drawer trigger' });
+    fireEvent.click(detachedTrigger);
+    expect(screen.queryByRole('group', { name: 'drawer' })).not.toBeNull();
+    fireEvent.pointerDown(detachedTrigger);
+    expect(screen.queryByRole('group', { name: 'drawer' })).not.toBeNull();
+    fireEvent.click(detachedTrigger);
+    expect(screen.queryByRole('group', { name: 'drawer' })).toBeNull();
+    fireEvent.click(detachedTrigger);
+    fireEvent.pointerDown(document.body);
+    expect(screen.queryByRole('group', { name: 'drawer' })).toBeNull();
+  });
+
+  it('closes the popover opened last on Escape, then the one below it', () => {
+    render(
+      <>
+        <Detached label="drawer" />
+        <Popover />
+      </>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'drawer trigger' }));
+    open();
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    expect(popover()).toBeNull();
+    expect(screen.queryByRole('group', { name: 'drawer' })).not.toBeNull();
+    expect(document.activeElement).toBe(trigger());
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    expect(screen.queryByRole('group', { name: 'drawer' })).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'drawer trigger' }));
   });
 });

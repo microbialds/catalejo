@@ -10,10 +10,14 @@
 // reads as the lightest nonzero step. Values are shown as integer percent;
 // cell text is chrome.on_ink on the last three steps and chrome.ink on the
 // first four and on zero (the contrast stated in config/palette.yaml).
+// The legend (§6.1, §8 "legend included") lists the zero swatch and the seven
+// steps with the integer percents each step holds, read from heatStep itself
+// so that the labels never drift from the cells.
 import type { AmrClassRow } from '../data/setEngine';
 import { palette } from '../generated/palette';
 import { compareText } from '../set/filters';
 import { drugClassOrder } from '../set/fields';
+import { strings } from '../strings';
 import type { ChartGroup } from './species';
 import { groupOfSpecies } from './species';
 
@@ -44,6 +48,39 @@ export function heatTextOnInk(step: number): boolean {
 /** The integer percent shown in a cell. */
 export function heatPercent(fraction: number): number {
   return Math.round(fraction * 100);
+}
+
+export interface HeatLegendEntry {
+  /** 0 for the zero swatch, else 1 to HEAT_STEPS. */
+  step: number;
+  /** The solid fill; undefined for zero, drawn on the panel with a border. */
+  fill: string | undefined;
+  /** The smallest and largest integer percent the step holds. */
+  min: number;
+  max: number;
+}
+
+/**
+ * The legend of the scale: zero, then each step with the integer percents p
+ * (1 to 100) for which heatStep(p / 100) is that step.
+ */
+export function heatLegend(): HeatLegendEntry[] {
+  const entries: HeatLegendEntry[] = [{ step: 0, fill: undefined, min: 0, max: 0 }];
+  for (let percent = 1; percent <= 100; percent += 1) {
+    const step = heatStep(percent / 100);
+    const known = entries.find((entry) => entry.step === step);
+    if (known === undefined)
+      entries.push({ step, fill: heatFill(step), min: percent, max: percent });
+    else known.max = percent;
+  }
+  return entries.sort((a, b) => a.step - b.step);
+}
+
+/** The label of a legend entry: "0%" for zero, else its range of integer percents. */
+export function heatLegendLabel(entry: HeatLegendEntry): string {
+  return entry.step === 0
+    ? strings.heatmapLegendZero
+    : strings.heatmapLegendRange(String(entry.min), String(entry.max));
 }
 
 export interface HeatCell {

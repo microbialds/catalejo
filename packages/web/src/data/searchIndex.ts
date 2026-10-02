@@ -2,10 +2,11 @@
 // of summaries/search_index.parquet hold one term per species; the index
 // joins rows with the same kind, term and target (summing their counts, so a
 // gene carried by three species is one result) and keeps sequence types
-// apart, since their targets name the species. Matching is case-insensitive:
-// exact and prefix for identifiers, accessions, gene symbols, element names,
-// clusters and sequence types; substring for products. Results are grouped by
-// kind in a fixed order, exact matches first, then by genome count.
+// apart, since their targets name the species. Matching is case-insensitive
+// and by substring for every kind, so that "KPC" finds the element KPC-2 and
+// the element blaKPC-2. Results are grouped by kind in a fixed order and
+// ranked within each kind: exact matches first, then prefix matches, then
+// other substring matches, each by genome count, then by length and term.
 
 export type SearchKind =
   'genome_id' | 'accession' | 'gene' | 'element' | 'cluster' | 'product' | 'st';
@@ -43,9 +44,12 @@ export interface SearchEntry {
   folded: string;
 }
 
+/** How a term matches the query: the whole term, its start, or elsewhere in it. */
+export type MatchTier = 'exact' | 'prefix' | 'substring';
+
 export interface SearchMatch {
   entry: SearchEntry;
-  exact: boolean;
+  tier: MatchTier;
 }
 
 export interface SearchGroup {
@@ -105,11 +109,18 @@ export function buildSearchIndex(rows: readonly SearchRow[]): SearchIndex {
   return index;
 }
 
-/** Kinds matched by substring; every other kind by exact value or prefix. */
-const SUBSTRING_KINDS: ReadonlySet<SearchKind> = new Set<SearchKind>(['product']);
+const TIER_ORDER: Readonly<Record<MatchTier, number>> = { exact: 0, prefix: 1, substring: 2 };
+
+/** The tier of a folded term against a folded query, or undefined for no match. */
+export function matchTier(term: string, query: string): MatchTier | undefined {
+  const at = term.indexOf(query);
+  if (at < 0) return undefined;
+  if (at > 0) return 'substring';
+  return term.length === query.length ? 'exact' : 'prefix';
+}
 
 function rank(a: SearchMatch, b: SearchMatch): number {
-  if (a.exact !== b.exact) return a.exact ? -1 : 1;
+  if (a.tier !== b.tier) return TIER_ORDER[a.tier] - TIER_ORDER[b.tier];
   if (a.entry.count !== b.entry.count) return b.entry.count - a.entry.count;
   if (a.entry.folded.length !== b.entry.folded.length) {
     return a.entry.folded.length - b.entry.folded.length;
@@ -124,11 +135,10 @@ export function matchSearch(index: SearchIndex, query: string, limit = 5): Searc
   const groups: SearchGroup[] = [];
   for (const kind of searchKinds) {
     const entries = index.get(kind) ?? [];
-    const substring = SUBSTRING_KINDS.has(kind);
     const matches: SearchMatch[] = [];
     for (const entry of entries) {
-      const hit = substring ? entry.folded.includes(folded) : entry.folded.startsWith(folded);
-      if (hit) matches.push({ entry, exact: entry.folded === folded });
+      const tier = matchTier(entry.folded, folded);
+      if (tier !== undefined) matches.push({ entry, tier });
     }
     if (matches.length === 0) continue;
     matches.sort(rank);

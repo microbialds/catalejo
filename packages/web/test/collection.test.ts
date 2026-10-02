@@ -18,6 +18,8 @@ import {
   HEAT_STEPS,
   buildHeatmap,
   heatFill,
+  heatLegend,
+  heatLegendLabel,
   heatPercent,
   heatStep,
   heatTextOnInk,
@@ -266,6 +268,34 @@ describe('heatmap scale (palette.sequential.heatmap)', () => {
     ]);
     expect(heatPercent(0.284)).toBe(28);
     expect(heatPercent(0.995)).toBe(100);
+  });
+
+  it('labels the legend with the integer percents each step holds (§8)', () => {
+    const legend = heatLegend();
+    expect(legend.map((entry) => entry.step)).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+    expect(legend.map((entry) => entry.fill)).toEqual([undefined, ...palette.sequential.heatmap]);
+    expect(legend.map(heatLegendLabel)).toEqual([
+      strings.heatmapLegendZero,
+      strings.heatmapLegendRange('1', '14'),
+      strings.heatmapLegendRange('15', '28'),
+      strings.heatmapLegendRange('29', '42'),
+      strings.heatmapLegendRange('43', '57'),
+      strings.heatmapLegendRange('58', '71'),
+      strings.heatmapLegendRange('72', '85'),
+      strings.heatmapLegendRange('86', '100'),
+    ]);
+    // Each range agrees with the mapping: every integer percent in it maps to
+    // its step, the ranges tile 1 to 100 without gaps, and zero takes no step.
+    expect(heatStep(0)).toBe(legend[0]?.step);
+    let next = 1;
+    for (const entry of legend.slice(1)) {
+      expect(entry.min).toBe(next);
+      for (let percent = entry.min; percent <= entry.max; percent += 1) {
+        expect(heatStep(percent / 100), `${String(percent)}%`).toBe(entry.step);
+      }
+      next = entry.max + 1;
+    }
+    expect(next).toBe(101);
   });
 
   it('builds rows per group and columns per class present, in palette order', () => {

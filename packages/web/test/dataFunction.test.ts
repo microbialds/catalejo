@@ -1,11 +1,19 @@
 // The Pages Function that serves release files under /data/ from R2
-// (requirements §9 and §10, data contract §6), exercised with a fake bucket.
+// (requirements §9 and §10, data contract §6), exercised with a fake bucket:
+// the manifest at /data/manifest.json, every other file at
+// /data/r/<release_id>/<path> for the pointer's release only.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  IMMUTABLE,
   onRequest,
+  RELEASE_SCOPE,
   parseRange,
   POINTER_TTL_MS,
+  requestedRange,
   resetPointerCache,
+  singleEtag,
+  STALE_HEADER,
+  STALE_VALUE,
 } from '../functions/data/[[path]]';
 import type {
   Env,
@@ -15,7 +23,13 @@ import type {
   R2Object,
   R2ObjectBody,
 } from '../functions/types';
-import { parseRange as devParseRange } from '../vite/releaseData';
+import {
+  parseRange as devParseRange,
+  IMMUTABLE as DEV_IMMUTABLE,
+  RELEASE_SCOPE as DEV_RELEASE_SCOPE,
+  STALE_HEADER as DEV_STALE_HEADER,
+  STALE_VALUE as DEV_STALE_VALUE,
+} from '../vite/releaseData';
 
 interface Stored {
   bytes: Uint8Array<ArrayBuffer>;
@@ -41,29 +55,39 @@ function fakeBucket(objects: Record<string, Stored>) {
       ? {}
       : { httpMetadata: { contentType: stored.contentType } }),
   });
-  const bucket: R2Bucket = {
-    get(key, options) {
-      calls.push(options === undefined ? { method: 'get', key } : { method: 'get', key, options });
-      const stored = objects[key];
-      if (stored === undefined) return Promise.resolve(null);
-      let bytes = stored.bytes;
-      const range = options?.range;
-      if (range !== undefined) {
-        const size = bytes.byteLength;
-        if ('suffix' in range) {
-          bytes = bytes.slice(Math.max(0, size - range.suffix));
-        } else {
-          const offset = range.offset ?? 0;
-          bytes = bytes.slice(offset, range.length === undefined ? size : offset + range.length);
+  // R2 returns the metadata without a body when onlyIf fails, refuses (throws
+  // for) a range that starts past the end, and clamps a length past the end.
+  const get = (key: string, options?: R2GetOptions): Promise<R2ObjectBody | R2Object | null> => {
+    calls.push(options === undefined ? { method: 'get', key } : { method: 'get', key, options });
+    const stored = objects[key];
+    if (stored === undefined) return Promise.resolve(null);
+    const unchanged = options?.onlyIf?.etagDoesNotMatch;
+    if (unchanged !== undefined && unchanged === stored.etag) {
+      return Promise.resolve(meta(key, stored));
+    }
+    let bytes = stored.bytes;
+    const range = options?.range;
+    if (range !== undefined) {
+      const size = bytes.byteLength;
+      if ('suffix' in range) {
+        bytes = bytes.slice(Math.max(0, size - range.suffix));
+      } else {
+        const offset = range.offset ?? 0;
+        if (offset >= size) {
+          return Promise.reject(new Error('get: The requested range is not satisfiable (10039)'));
         }
+        bytes = bytes.slice(offset, range.length === undefined ? size : offset + range.length);
       }
-      const body: R2ObjectBody = {
-        ...meta(key, stored),
-        ...(range === undefined ? {} : { range }),
-        body: new Blob([bytes]).stream(),
-      };
-      return Promise.resolve(body);
-    },
+    }
+    const body: R2ObjectBody = {
+      ...meta(key, stored),
+      ...(range === undefined ? {} : { range }),
+      body: new Blob([bytes]).stream(),
+    };
+    return Promise.resolve(body);
+  };
+  const bucket: R2Bucket = {
+    get: get as R2Bucket['get'],
     head(key) {
       calls.push({ method: 'head', key });
       const stored = objects[key];
@@ -142,6 +166,8 @@ function context(segments: string[] | undefined, options: Options = {}) {
 const handle = (ctx: EventContext<Env, 'path'>) => Promise.resolve(onRequest(ctx));
 const bytesOf = async (response: Response) => new Uint8Array(await response.arrayBuffer());
 const group = (id: string): Partial<Env> => ({ CATALEJO_GROUP: id });
+/** The segments of /data/r/synth/<path>, the current release in baseObjects. */
+const scoped = (...path: string[]) => ['r', 'synth', ...path];
 
 beforeEach(() => {
   resetPointerCache();
@@ -199,7 +225,7 @@ describe('functions/data/[[path]] pointer resolution', () => {
       fake.calls.filter((call) => call.key === 'releases/current.json').length;
 
     await handle(context(['manifest.json'], { bucket: fake.bucket }).ctx);
-    await handle(context(['tables', 'genome.parquet'], { bucket: fake.bucket }).ctx);
+    await handle(context(scoped('tables', 'genome.parquet'), { bucket: fake.bucket }).ctx);
     expect(pointerReads()).toBe(1);
 
     vi.setSystemTime(Date.now() + POINTER_TTL_MS - 1);
@@ -266,7 +292,7 @@ describe('functions/data/[[path]] pointer resolution', () => {
 
 describe('functions/data/[[path]] isolation', () => {
   it("resolves another group's id under the group instance's own prefix", async () => {
-    const { ctx, calls } = context(['other-lab', 'manifest.json'], {
+    const { ctx, calls } = context(['r', 'synth', 'other-lab', 'manifest.json'], {
       env: group('amr-network'),
     });
     expect((await handle(ctx)).status).toBe(404);
@@ -276,17 +302,35 @@ describe('functions/data/[[path]] isolation', () => {
     ]);
   });
 
-  it('resolves another release id under the own release prefix', async () => {
-    const { ctx, calls } = context(['2026-09', 'manifest.json']);
+  it('resolves another release id inside a scoped path under the own release prefix', async () => {
+    const { ctx, calls } = context(['r', 'synth', '2026-09', 'manifest.json']);
     expect((await handle(ctx)).status).toBe(404);
     expect(calls[1]?.key).toBe('releases/synth/2026-09/manifest.json');
   });
 
+  it.each([
+    [['2026-09', 'manifest.json']],
+    [['tables', 'genome.parquet']],
+    [['current.json']],
+    [['amr-network', 'manifest.json']],
+    [['r']],
+    [['r', 'synth']],
+    [['R', 'synth', 'manifest.json']],
+    [['manifest.json', 'x']],
+  ])('answers 404 for the unscoped path %j without reading the bucket', async (segments) => {
+    const { ctx, calls, next } = context(segments);
+    const response = await handle(ctx);
+    expect(response.status).toBe(404);
+    expect(response.headers.get(STALE_HEADER)).toBeNull();
+    expect(calls).toEqual([]);
+    expect(next).not.toHaveBeenCalled();
+  });
+
   it.each([[[] as string[]], [['amr-network']]])(
-    'never serves a pointer file through /data/current.json (groups %j)',
+    'never serves a pointer file through /data/r/<release_id>/current.json (groups %j)',
     async (groups) => {
       const env = groups.length === 0 ? {} : group(groups[0] ?? '');
-      const { ctx, calls } = context(['current.json'], { env });
+      const { ctx, calls } = context(['r', 'synth', 'current.json'], { env });
       expect((await handle(ctx)).status).toBe(404);
       const last = calls.at(-1)?.key ?? '';
       expect(last.endsWith('/current.json')).toBe(true);
@@ -308,6 +352,10 @@ describe('functions/data/[[path]] isolation', () => {
     [['tables', '%5c..']],
     [['tables', 'genome.parquet%00']],
     [['tables', '%E0%A4%A']],
+    [['r', '..', 'manifest.json']],
+    [['r', '%2e%2e', 'current.json']],
+    [['r', 'synth', '..', '..', 'current.json']],
+    [['r', 'synth', 'tables%2f..%2f..', 'current.json']],
   ])('rejects the unsafe path %j without reading the bucket', async (segments) => {
     const { ctx, calls, next } = context(segments, { env: group('amr-network') });
     const response = await handle(ctx);
@@ -324,20 +372,19 @@ describe('functions/data/[[path]] isolation', () => {
 
   it('accepts the segments of a catch-all parameter given as one string', async () => {
     const { ctx, calls } = context(undefined);
-    ctx.params = { path: 'tables/genome.parquet' };
+    ctx.params = { path: 'r/synth/tables/genome.parquet' };
     expect((await handle(ctx)).status).toBe(200);
     expect(calls[1]?.key).toBe('releases/synth/tables/genome.parquet');
   });
 });
 
 describe('functions/data/[[path]] responses', () => {
-  it('serves a Parquet file whole with its type and revalidation headers', async () => {
-    const { ctx, calls } = context(['tables', 'genome.parquet']);
+  it('serves a Parquet file whole with its type and immutable caching', async () => {
+    const { ctx, calls } = context(scoped('tables', 'genome.parquet'));
     const response = await handle(ctx);
     expect(response.status).toBe(200);
     expect(response.headers.get('Content-Type')).toBe('application/vnd.apache.parquet');
-    expect(response.headers.get('Cache-Control')).toBe('no-cache');
-    expect(response.headers.get('Cache-Control')).not.toMatch(/immutable/);
+    expect(response.headers.get('Cache-Control')).toBe(IMMUTABLE);
     expect(response.headers.get('ETag')).toBe('"genome1"');
     expect(response.headers.get('Accept-Ranges')).toBe('bytes');
     expect(response.headers.get('Content-Length')).toBe(String(parquetBytes.byteLength));
@@ -351,19 +398,19 @@ describe('functions/data/[[path]] responses', () => {
     [['notes.bin'], 'application/x-catalejo-test'],
     [['unknown.bin'], 'application/octet-stream'],
   ])('sends %j as %s', async (segments, type) => {
-    const { ctx } = context(segments);
+    const { ctx } = context(scoped(...segments));
     expect((await handle(ctx)).headers.get('Content-Type')).toBe(type);
   });
 
   it('answers 404 for a missing object', async () => {
-    const { ctx } = context(['tables', 'missing.parquet']);
+    const { ctx } = context(scoped('tables', 'missing.parquet'));
     const response = await handle(ctx);
     expect(response.status).toBe(404);
     expect(response.headers.get('Cache-Control')).toBe('no-store');
   });
 
   it('answers a byte range with 206 and Content-Range', async () => {
-    const { ctx, calls } = context(['genomes', 'KPN', 'KPN0001', 'features.parquet'], {
+    const { ctx, calls } = context(scoped('genomes', 'KPN', 'KPN0001', 'features.parquet'), {
       headers: { Range: 'bytes=5-14' },
     });
     const response = await handle(ctx);
@@ -374,18 +421,19 @@ describe('functions/data/[[path]] responses', () => {
     expect(response.headers.get('Content-Length')).toBe('10');
     expect(response.headers.get('Accept-Ranges')).toBe('bytes');
     expect(response.headers.get('ETag')).toBe('"features1"');
-    expect(response.headers.get('Cache-Control')).toBe('no-cache');
+    expect(response.headers.get('Cache-Control')).toBe(IMMUTABLE);
     expect(await bytesOf(response)).toEqual(parquetBytes.slice(5, 15));
     const key = 'releases/synth/genomes/KPN/KPN0001/features.parquet';
     expect(calls.slice(1)).toEqual([
-      { method: 'head', key },
       { method: 'get', key, options: { range: { offset: 5, length: 10 } } },
     ]);
   });
 
   it('answers an open-ended range to the end of the object', async () => {
     const size = parquetBytes.byteLength;
-    const { ctx } = context(['tables', 'genome.parquet'], { headers: { Range: 'bytes=16-' } });
+    const { ctx } = context(scoped('tables', 'genome.parquet'), {
+      headers: { Range: 'bytes=16-' },
+    });
     const response = await handle(ctx);
     expect(response.status).toBe(206);
     expect(response.headers.get('Content-Range')).toBe(
@@ -396,7 +444,7 @@ describe('functions/data/[[path]] responses', () => {
 
   it('clamps a range past the end of the object', async () => {
     const size = parquetBytes.byteLength;
-    const { ctx } = context(['tables', 'genome.parquet'], {
+    const { ctx } = context(scoped('tables', 'genome.parquet'), {
       headers: { Range: 'bytes=10-9999' },
     });
     const response = await handle(ctx);
@@ -409,7 +457,7 @@ describe('functions/data/[[path]] responses', () => {
 
   it('answers a suffix range with the last bytes', async () => {
     const size = parquetBytes.byteLength;
-    const { ctx, calls } = context(['tables', 'genome.parquet'], {
+    const { ctx, calls } = context(scoped('tables', 'genome.parquet'), {
       headers: { Range: 'bytes=-4' },
     });
     const response = await handle(ctx);
@@ -419,12 +467,14 @@ describe('functions/data/[[path]] responses', () => {
     );
     expect(response.headers.get('Content-Length')).toBe('4');
     expect(await bytesOf(response)).toEqual(text('PAR1'));
-    expect(calls.at(-1)?.options).toEqual({ range: { offset: size - 4, length: 4 } });
+    expect(calls.at(-1)?.options).toEqual({ range: { suffix: 4 } });
   });
 
   it('answers a suffix range longer than the object with the whole object', async () => {
     const size = parquetBytes.byteLength;
-    const { ctx } = context(['tables', 'genome.parquet'], { headers: { Range: 'bytes=-9999' } });
+    const { ctx } = context(scoped('tables', 'genome.parquet'), {
+      headers: { Range: 'bytes=-9999' },
+    });
     const response = await handle(ctx);
     expect(response.status).toBe(206);
     expect(response.headers.get('Content-Range')).toBe(
@@ -437,17 +487,19 @@ describe('functions/data/[[path]] responses', () => {
     'answers 416 for the unsatisfiable range %s',
     async (range) => {
       const size = parquetBytes.byteLength;
-      const { ctx, calls } = context(['tables', 'genome.parquet'], { headers: { Range: range } });
+      const { ctx, calls } = context(scoped('tables', 'genome.parquet'), {
+        headers: { Range: range },
+      });
       const response = await handle(ctx);
       expect(response.status).toBe(416);
       expect(response.headers.get('Content-Range')).toBe(`bytes */${String(size)}`);
       expect(response.body).toBeNull();
-      expect(calls.filter((call) => call.method === 'get')).toHaveLength(1);
+      expect(calls.filter((call) => call.method === 'head')).toHaveLength(1);
     },
   );
 
   it('answers 416 for any range on an empty object', async () => {
-    const { ctx } = context(['empty.parquet'], { headers: { Range: 'bytes=0-' } });
+    const { ctx } = context(scoped('empty.parquet'), { headers: { Range: 'bytes=0-' } });
     const response = await handle(ctx);
     expect(response.status).toBe(416);
     expect(response.headers.get('Content-Range')).toBe('bytes */0');
@@ -456,7 +508,7 @@ describe('functions/data/[[path]] responses', () => {
   it.each([['items=0-3'], ['bytes=0-1, 4-5']])(
     'ignores the range %s and answers 200 with the whole object',
     async (range) => {
-      const { ctx } = context(['tables', 'genome.parquet'], { headers: { Range: range } });
+      const { ctx } = context(scoped('tables', 'genome.parquet'), { headers: { Range: range } });
       const response = await handle(ctx);
       expect(response.status).toBe(200);
       expect(response.headers.get('Content-Range')).toBeNull();
@@ -468,38 +520,42 @@ describe('functions/data/[[path]] responses', () => {
   it.each([['"genome1"'], ['W/"genome1"'], ['"other", "genome1"'], ['*']])(
     'answers 304 for If-None-Match %s',
     async (tag) => {
-      const { ctx } = context(['tables', 'genome.parquet'], {
+      const { ctx } = context(scoped('tables', 'genome.parquet'), {
         headers: { 'If-None-Match': tag },
       });
       const response = await handle(ctx);
       expect(response.status).toBe(304);
       expect(response.headers.get('ETag')).toBe('"genome1"');
-      expect(response.headers.get('Cache-Control')).toBe('no-cache');
+      expect(response.headers.get('Cache-Control')).toBe(IMMUTABLE);
       expect(response.body).toBeNull();
     },
   );
 
   it('answers 304 before applying a range', async () => {
-    const { ctx, calls } = context(['tables', 'genome.parquet'], {
+    const { ctx, calls } = context(scoped('tables', 'genome.parquet'), {
       headers: { 'If-None-Match': '"genome1"', Range: 'bytes=0-3' },
     });
     const response = await handle(ctx);
     expect(response.status).toBe(304);
     expect(response.headers.get('Content-Range')).toBeNull();
     expect(calls.slice(1)).toEqual([
-      { method: 'head', key: 'releases/synth/tables/genome.parquet' },
+      {
+        method: 'get',
+        key: 'releases/synth/tables/genome.parquet',
+        options: { range: { offset: 0, length: 4 }, onlyIf: { etagDoesNotMatch: 'genome1' } },
+      },
     ]);
   });
 
   it('answers 200 for a different If-None-Match', async () => {
-    const { ctx } = context(['tables', 'genome.parquet'], {
+    const { ctx } = context(scoped('tables', 'genome.parquet'), {
       headers: { 'If-None-Match': '"stale"' },
     });
     expect((await handle(ctx)).status).toBe(200);
   });
 
   it('answers HEAD from the object metadata without a body', async () => {
-    const { ctx, calls } = context(['tables', 'genome.parquet'], { method: 'HEAD' });
+    const { ctx, calls } = context(scoped('tables', 'genome.parquet'), { method: 'HEAD' });
     const response = await handle(ctx);
     expect(response.status).toBe(200);
     expect(response.headers.get('Content-Type')).toBe('application/vnd.apache.parquet');
@@ -513,7 +569,7 @@ describe('functions/data/[[path]] responses', () => {
   });
 
   it('answers HEAD with a range as 206 without a body', async () => {
-    const { ctx, calls } = context(['tables', 'genome.parquet'], {
+    const { ctx, calls } = context(scoped('tables', 'genome.parquet'), {
       method: 'HEAD',
       headers: { Range: 'bytes=0-3' },
     });
@@ -525,11 +581,11 @@ describe('functions/data/[[path]] responses', () => {
   });
 
   it('answers HEAD with 404 and 304 as GET does', async () => {
-    const missing = context(['tables', 'missing.parquet'], { method: 'HEAD' });
+    const missing = context(scoped('tables', 'missing.parquet'), { method: 'HEAD' });
     const missingResponse = await handle(missing.ctx);
     expect(missingResponse.status).toBe(404);
     expect(missingResponse.body).toBeNull();
-    const cached = context(['tables', 'genome.parquet'], {
+    const cached = context(scoped('tables', 'genome.parquet'), {
       method: 'HEAD',
       headers: { 'If-None-Match': '"genome1"' },
     });
@@ -553,6 +609,184 @@ describe('functions/data/[[path]] responses', () => {
     const response = await handle(ctx);
     expect(response.status).toBe(503);
     expect(await response.text()).toMatch(/RELEASES/);
+  });
+});
+
+describe('functions/data/[[path]] release scope (requirements §10)', () => {
+  it('serves /data/manifest.json from the pointer release with no-cache and its ETag', async () => {
+    const { ctx } = context(['manifest.json']);
+    const response = await handle(ctx);
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Cache-Control')).toBe('no-cache');
+    expect(response.headers.get('ETag')).toBe('"main-manifest"');
+    expect(response.headers.get(STALE_HEADER)).toBeNull();
+  });
+
+  it('answers 304 for the manifest through the onlyIf precondition', async () => {
+    const { ctx, calls } = context(['manifest.json'], {
+      headers: { 'If-None-Match': '"main-manifest"' },
+    });
+    const response = await handle(ctx);
+    expect(response.status).toBe(304);
+    expect(response.headers.get('Cache-Control')).toBe('no-cache');
+    expect(response.headers.get('ETag')).toBe('"main-manifest"');
+    expect(calls.slice(1)).toEqual([
+      {
+        method: 'get',
+        key: 'releases/synth/manifest.json',
+        options: { onlyIf: { etagDoesNotMatch: 'main-manifest' } },
+      },
+    ]);
+  });
+
+  it('serves a file of the current release, including its manifest, as immutable', async () => {
+    for (const segments of [scoped('tables', 'genome.parquet'), scoped('manifest.json')]) {
+      const { ctx } = context(segments);
+      const response = await handle(ctx);
+      expect(response.status).toBe(200);
+      expect(response.headers.get('Cache-Control')).toBe(IMMUTABLE);
+      expect(response.headers.get('Cache-Control')).toMatch(/immutable/);
+    }
+  });
+
+  it('serves the current release of a group instance under its group prefix', async () => {
+    const { ctx, calls } = context(scoped('tables', 'genome.parquet'), {
+      env: group('amr-network'),
+    });
+    const response = await handle(ctx);
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Cache-Control')).toBe(IMMUTABLE);
+    expect(calls.at(-1)?.key).toBe('releases/synth/amr-network/tables/genome.parquet');
+  });
+
+  it('refuses a release other than the current one with the stale header', async () => {
+    const { ctx, calls } = context(['r', '2026-09', 'manifest.json']);
+    const response = await handle(ctx);
+    expect(response.status).toBe(404);
+    expect(response.headers.get(STALE_HEADER)).toBe('stale');
+    expect(response.headers.get('Cache-Control')).toBe('no-store');
+    expect(response.headers.get('Content-Type')).toBe('text/plain; charset=utf-8');
+    expect(await response.text()).toMatch(/no longer current/);
+    expect(calls.map((call) => call.key)).toEqual(['releases/current.json']);
+  });
+
+  it('refuses the previous release once the pointer moves', async () => {
+    const objects: Record<string, Stored> = {
+      ...baseObjects(),
+      'releases/current.json': pointer('2026-09'),
+      'releases/2026-09/tables/genome.parquet': { bytes: parquetBytes, etag: 'g9' },
+    };
+    const old = context(scoped('tables', 'genome.parquet'), { objects });
+    const stale = await handle(old.ctx);
+    expect(stale.status).toBe(404);
+    expect(stale.headers.get(STALE_HEADER)).toBe('stale');
+    const current = context(['r', '2026-09', 'tables', 'genome.parquet'], { objects });
+    expect((await handle(current.ctx)).status).toBe(200);
+  });
+
+  it('refuses a stale release on HEAD with the header and no body', async () => {
+    const { ctx } = context(['r', 'other', 'tables', 'genome.parquet'], { method: 'HEAD' });
+    const response = await handle(ctx);
+    expect(response.status).toBe(404);
+    expect(response.headers.get(STALE_HEADER)).toBe('stale');
+    expect(response.body).toBeNull();
+  });
+
+  it('refuses a stale release for a group instance against the group pointer', async () => {
+    const objects = { ...baseObjects(), 'releases/amr-network/current.json': pointer('2026-09') };
+    const { ctx } = context(scoped('tables', 'genome.parquet'), {
+      objects,
+      env: group('amr-network'),
+    });
+    const response = await handle(ctx);
+    expect(response.status).toBe(404);
+    expect(response.headers.get(STALE_HEADER)).toBe('stale');
+  });
+});
+
+describe('functions/data/[[path]] one R2 operation per read', () => {
+  /** The bucket calls of one request once the pointer is cached. */
+  async function operations(segments: string[], options: Options = {}) {
+    const fake = fakeBucket(baseObjects());
+    await handle(context(['manifest.json'], { bucket: fake.bucket }).ctx);
+    fake.calls.length = 0;
+    const response = await handle(context(segments, { ...options, bucket: fake.bucket }).ctx);
+    await response.arrayBuffer();
+    return { response, calls: [...fake.calls] };
+  }
+
+  it.each([
+    ['a closed range', 'bytes=0-3', 206],
+    ['an open range', 'bytes=4-', 206],
+    ['a suffix range', 'bytes=-4', 206],
+    ['a range past the end', 'bytes=10-9999', 206],
+    ['no range', undefined, 200],
+  ])('reads %s with a single get()', async (_label, range, status) => {
+    const headers: Record<string, string> = range === undefined ? {} : { Range: range };
+    const { response, calls } = await operations(scoped('tables', 'genome.parquet'), { headers });
+    expect(response.status).toBe(status);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.method).toBe('get');
+  });
+
+  it('answers a conditional ranged read with a single get()', async () => {
+    const { response, calls } = await operations(scoped('tables', 'genome.parquet'), {
+      headers: { Range: 'bytes=0-3', 'If-None-Match': '"genome1"' },
+    });
+    expect(response.status).toBe(304);
+    expect(calls).toHaveLength(1);
+  });
+
+  it('answers HEAD with a single head()', async () => {
+    const { calls } = await operations(scoped('tables', 'genome.parquet'), { method: 'HEAD' });
+    expect(calls.map((call) => call.method)).toEqual(['head']);
+  });
+
+  it('answers a range that starts past the end with 416 after one more head()', async () => {
+    const { response, calls } = await operations(scoped('tables', 'genome.parquet'), {
+      headers: { Range: 'bytes=9999-' },
+    });
+    expect(response.status).toBe(416);
+    expect(calls.map((call) => call.method)).toEqual(['get', 'head']);
+  });
+});
+
+describe('requestedRange and singleEtag', () => {
+  it.each([
+    [undefined, 'ignore'],
+    ['items=0-1', 'ignore'],
+    ['bytes=0-1,4-5', 'ignore'],
+    ['bytes=0-9', { offset: 0, length: 10 }],
+    ['bytes=250-', { offset: 250 }],
+    ['bytes=-4', { suffix: 4 }],
+    ['bytes=9-3', 'unsatisfiable'],
+    ['bytes=-0', 'unsatisfiable'],
+    ['bytes=abc', 'unsatisfiable'],
+    ['bytes=-', 'unsatisfiable'],
+  ])('reads the Range header %j', (header, expected) => {
+    expect(requestedRange(header)).toEqual(expected);
+  });
+
+  it.each([
+    [null, undefined],
+    ['"abc"', 'abc'],
+    ['W/"abc"', 'abc'],
+    [' "abc" ', 'abc'],
+    ['*', undefined],
+    ['"a", "b"', undefined],
+    ['abc', undefined],
+    ['""', undefined],
+  ])('reads If-None-Match %j', (header, expected) => {
+    expect(singleEtag(header)).toBe(expected);
+  });
+});
+
+describe('the development server', () => {
+  it('uses the same scope, cache header and stale header as the Function', () => {
+    expect(DEV_RELEASE_SCOPE).toBe(RELEASE_SCOPE);
+    expect(DEV_IMMUTABLE).toBe(IMMUTABLE);
+    expect(DEV_STALE_HEADER).toBe(STALE_HEADER);
+    expect(DEV_STALE_VALUE).toBe(STALE_VALUE);
   });
 });
 

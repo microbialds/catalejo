@@ -17,10 +17,16 @@
 // sideways inside the panel instead of letting values spill into each other.
 // Columns are a hairline apart, so that eleven classes in B612 Mono fit the
 // panel at the 1440 px board width without scrolling.
+// Under the grid, at rest and expanded, a legend (§8 "legend included") lists
+// the white zero swatch with its border and the seven steps with the integer
+// percents each holds (collection/heatmap.ts heatLegend), in monospace; it
+// sits outside the grid's scroller and gives way to the note with the grid.
 import type { CSSProperties } from 'react';
 import {
   buildHeatmap,
   heatFill,
+  heatLegend,
+  heatLegendLabel,
   heatPercent,
   heatStep,
   heatTextOnInk,
@@ -43,6 +49,28 @@ import { PanelStatus } from './PanelStatus';
 
 /** The narrowest cell column: "100" at the cell size, plus one pixel of air. */
 const CELL_MIN_WIDTH = 'calc(3ch + 1px)';
+
+const LEGEND = heatLegend();
+
+function HeatLegend() {
+  return (
+    <ul
+      aria-label={strings.heatmapLegendLabel}
+      className="flex flex-wrap items-center gap-x-3 gap-y-1 pt-2 font-mono text-micro text-text-secondary max-compact:hidden"
+    >
+      {LEGEND.map((entry) => (
+        <li key={entry.step} className="flex items-center gap-1 whitespace-nowrap">
+          <span
+            aria-hidden="true"
+            className={`inline-block size-2.5 shrink-0 ${entry.fill === undefined ? 'border border-border-strong bg-panel' : ''}`}
+            {...(entry.fill === undefined ? {} : { style: { backgroundColor: entry.fill } })}
+          />
+          {heatLegendLabel(entry)}
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 export function HeatmapPanel({
   groups,
@@ -163,6 +191,7 @@ export function HeatmapPanel({
               ))}
             </div>
           </div>
+          <HeatLegend />
         </>
       )}
     </Panel>

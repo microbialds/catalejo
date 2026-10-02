@@ -8,6 +8,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AnnotationVersionNote } from '../src/components/AnnotationVersionNote';
+import { chipTarget, mutationGene } from '../src/components/FilterChips';
 import type { SearchRow } from '../src/data/searchIndex';
 import { RouterProvider } from '../src/router';
 import { decodeFilters, encodeFilters } from '../src/set/filters';
@@ -119,6 +120,34 @@ describe('filter chips', () => {
     expect(href.pathname).toBe(`/genes/element/${encodeURIComponent("aac(6')-Ib-cr5")}`);
     expect(decodeFilters(href.search)).toEqual(decodeFilters(window.location.search));
     expect(within(chips).getAllByRole('link')).toHaveLength(1);
+  });
+
+  it('links the gene of a point mutation to its Genes page, keeping the set (§5.9, G11)', () => {
+    const filters = { mutation: ['gyrA_S83I', 'blaSHV_C-112T', 'ompK35_E24insTer26'] };
+    renderApp(`/${encodeFilters(filters)}`, synth);
+    const chips = within(setBar()).getByRole('list', { name: strings.activeFiltersLabel });
+    for (const [value, gene] of [
+      ['gyrA_S83I', 'gyrA'],
+      ['blaSHV_C-112T', 'blaSHV'],
+      ['ompK35_E24insTer26', 'ompK35'],
+    ] as const) {
+      const link = within(chips).getByRole('link', { name: value });
+      const href = new URL(link.getAttribute('href') ?? '', 'http://localhost');
+      expect(href.pathname).toBe(`/genes/symbol/${gene}`);
+      expect(decodeFilters(href.search)).toEqual(decodeFilters(window.location.search));
+      expect(link.className.split(/\s+/)).toEqual(expect.arrayContaining(['font-mono', 'italic']));
+    }
+  });
+
+  it('splits a mutation at its last underscore, and links nothing without one', () => {
+    expect(mutationGene('gyrA_S83I')).toBe('gyrA');
+    expect(mutationGene('aac_3_IIa_S80I')).toBe('aac_3_IIa');
+    expect(mutationGene('gyrA')).toBeUndefined();
+    expect(mutationGene('_S83I')).toBeUndefined();
+    expect(mutationGene('gyrA_')).toBeUndefined();
+    expect(chipTarget({ key: 'mutation', value: 'parC_S80I' })).toBe('/genes/symbol/parC');
+    expect(chipTarget({ key: 'mutation', value: 'parC' })).toBeUndefined();
+    expect(chipTarget({ key: 'presence_amr', value: 'blaKPC-2' })).toBe('/genes/element/blaKPC-2');
   });
 });
 

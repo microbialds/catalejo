@@ -18,7 +18,12 @@
 // the current set at deferred priority; the panels are memoized. So the click
 // renders the rail and the set bar only, the set's queries run without the
 // charts and the table redrawing in between, and the counts reach the rail in
-// an urgent render before the charts and the table follow.
+// an urgent render before the charts and the table follow. While the charts
+// and the table hold the view of an older set, PanelHeldContext tells their
+// panels, which show "Updating" and are aria-busy after a short delay
+// (components/panelUpdating.ts); the QC scatter is held also while its own
+// points load. The context reaches the panels' frames only, so their bodies
+// do not redraw when it flips.
 import { memo, useDeferredValue, useMemo, useState } from 'react';
 import { mixesAssemblies } from '../collection/facets';
 import { speciesGroups } from '../collection/species';
@@ -26,12 +31,14 @@ import { CounterStrip } from '../components/CounterStrip';
 import type { Counter } from '../components/CounterStrip';
 import { Drawer } from '../components/Drawer';
 import type { PanelExpansion } from '../components/Panel';
+import { PanelHeldContext } from '../components/panelUpdating';
 import type { ExportKind } from '../components/ExportMenu';
 import { annotationVersionWarning } from '../data/annotationVersions';
 import { useManifest } from '../data/manifest';
 import type { Manifest } from '../data/manifest';
 import { countersOf } from '../data/setEngine';
 import type { SetSummary } from '../data/setEngine';
+import { filtersKey } from '../set/filters';
 import { SetView, useGenomeSet } from '../set/store';
 import type { GenomeSetStore } from '../set/store';
 import { strings } from '../strings';
@@ -133,6 +140,10 @@ export function Collection() {
   );
   const chartWarning = useMemo(() => warningOf(manifest, chartValue), [manifest, chartValue]);
   const chartMixed = chartValue !== undefined && mixesAssemblies(chartValue);
+  // The charts and the table show an older set than the current one.
+  const chartsHeld =
+    chartValue !== undefined && filtersKey(view.store.filters) !== filtersKey(filters);
+  const qcHeld = chartsHeld || (qc.pending && qc.value !== undefined);
 
   const totals = value === undefined ? undefined : countersOf(value.bySpecies);
   const counters: Counter[] = [
@@ -179,44 +190,52 @@ export function Collection() {
         <h1 className="sr-only">{strings.pageCollection}</h1>
         <CounterStrip label={strings.countersLabel} counters={counters} />
         <SetView store={view.store}>
-          <div
-            className={rowClass(
-              TOP_ROW,
-              expanded,
-              'grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.3fr)]',
-            )}
-          >
-            <SpeciesPanel
-              groups={chartGroups}
-              failed={summary.failed}
-              expansion={expansions.species}
-            />
-            <SequenceTypePanel
-              summary={chartValue}
-              failed={summary.failed}
-              expansion={expansions.st}
-            />
-            <HeatmapPanel
-              groups={chartGroups}
-              rows={chartValue?.amrClassBySpecies}
-              failed={summary.failed}
-              warning={chartWarning}
-              mixed={chartMixed}
-              expansion={expansions.heatmap}
-            />
-          </div>
-          <div
-            className={rowClass(SECOND_ROW, expanded, 'grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]')}
-          >
-            <YearPanel
-              groups={chartGroups}
-              rows={chartValue?.bySpeciesYear}
-              failed={summary.failed}
-              expansion={expansions.year}
-            />
-            <QcPanel points={qc.value} failed={qc.failed} expansion={expansions.qc} />
-          </div>
-          <GenomeTablePanel expansion={expansions.table} />
+          <PanelHeldContext value={chartsHeld}>
+            <div
+              className={rowClass(
+                TOP_ROW,
+                expanded,
+                'grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.3fr)]',
+              )}
+            >
+              <SpeciesPanel
+                groups={chartGroups}
+                failed={summary.failed}
+                expansion={expansions.species}
+              />
+              <SequenceTypePanel
+                summary={chartValue}
+                failed={summary.failed}
+                expansion={expansions.st}
+              />
+              <HeatmapPanel
+                groups={chartGroups}
+                rows={chartValue?.amrClassBySpecies}
+                failed={summary.failed}
+                warning={chartWarning}
+                mixed={chartMixed}
+                expansion={expansions.heatmap}
+              />
+            </div>
+            <div
+              className={rowClass(
+                SECOND_ROW,
+                expanded,
+                'grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]',
+              )}
+            >
+              <YearPanel
+                groups={chartGroups}
+                rows={chartValue?.bySpeciesYear}
+                failed={summary.failed}
+                expansion={expansions.year}
+              />
+              <PanelHeldContext value={qcHeld}>
+                <QcPanel points={qc.value} failed={qc.failed} expansion={expansions.qc} />
+              </PanelHeldContext>
+            </div>
+            <GenomeTablePanel expansion={expansions.table} />
+          </PanelHeldContext>
         </SetView>
       </div>
     </div>

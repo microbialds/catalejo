@@ -171,6 +171,10 @@ export const strings = {
   schemaMismatch: (found: string, range: string) =>
     `This release uses schema version ${found}, which this application does not support. Supported schema versions: ${range}.`,
 
+  // Release changes (requirements §10)
+  releaseStale: 'A newer release is available. Reload the page to continue.',
+  releaseReload: 'Reload',
+
   // Not found (requirements §6.11; the page with global search arrives in milestone 2)
   notFoundTitle: 'Page not found',
   notFoundStatement: 'No page exists at this address.',
@@ -217,6 +221,9 @@ export const strings = {
   panelCollapseName: (title: string) => `Collapse ${title}`,
   panelLoading: 'Loading',
   panelLoadFailed: 'The counts could not be loaded.',
+  // A panel still showing the previous set's view while the current set's
+  // results load (requirements §6.1, §9).
+  panelUpdating: 'Updating',
   chartOther: 'Other',
   speciesBarName: (species: string, formatted: string, count: number) =>
     `${species}, ${genomeCount(formatted, count)}`,
@@ -232,6 +239,9 @@ export const strings = {
   heatmapCellName: (species: string, drugClass: string, percent: string) =>
     `${species}, ${drugClass}: ${percent}% of genomes`,
   heatmapPercent: (percent: string) => percent,
+  heatmapLegendLabel: 'Shading of the heatmap cells',
+  heatmapLegendZero: '0%',
+  heatmapLegendRange: (min: string, max: string) => `${min}–${max}%`,
   footnoteMixedAssemblies:
     'This set mixes sequencing platforms or assembly statuses. Short-read assemblies fragment at repeats and undercount mobile elements.',
   yearUndated: (count: string) => `${count} without an isolation date not shown`,

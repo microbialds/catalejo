@@ -25,7 +25,7 @@ const toggleClass =
   'drawer:hidden rounded-control border border-control-border bg-panel px-3 py-1.75 text-control font-bold text-ink';
 
 export function SetBar({ count, chips, search, actions }: SetBarProps) {
-  const { drawerRegistered, drawerOpen, toggleDrawer } = useLayout();
+  const { drawerRegistered, drawerOpen, toggleDrawer, drawerToggle } = useLayout();
   return (
     <header
       aria-label={strings.setBarLabel}
@@ -33,6 +33,7 @@ export function SetBar({ count, chips, search, actions }: SetBarProps) {
     >
       {drawerRegistered && (
         <button
+          ref={drawerToggle}
           type="button"
           className={toggleClass}
           aria-expanded={drawerOpen}

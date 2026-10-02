@@ -18,7 +18,7 @@
 // complete-genomes toggle, the global search and the actions. When a
 // filtered set has no genome, the main area shows only the empty-set
 // message (requirements §5.2).
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useManifest } from '../data/manifest';
 import { useSetCount } from '../data/setEngineContext';
@@ -91,6 +91,7 @@ function useLayoutState(pathname: string): LayoutState {
   // change closes them without an effect.
   const [drawerOpenAt, setDrawerOpenAt] = useState<string | null>(null);
   const [drawerCount, setDrawerCount] = useState(0);
+  const drawerToggle = useRef<HTMLButtonElement>(null);
   const drawerOpen = drawerOpenAt === pathname;
   const toggleDrawer = useCallback(() => {
     setDrawerOpenAt((current) => (current === pathname ? null : pathname));
@@ -111,6 +112,7 @@ function useLayoutState(pathname: string): LayoutState {
       toggleDrawer,
       closeDrawer,
       registerDrawer,
+      drawerToggle,
     }),
     [drawerCount, drawerOpen, toggleDrawer, closeDrawer, registerDrawer],
   );

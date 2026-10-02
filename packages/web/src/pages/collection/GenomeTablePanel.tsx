@@ -49,6 +49,7 @@ import {
 } from '../../collection/genomeTable';
 import type { GenomeColumn, GenomeRow } from '../../collection/genomeTable';
 import { Button } from '../../components/Button';
+import { Checkbox } from '../../components/Checkbox';
 import { useDismiss } from '../../components/useDismiss';
 import { Link } from '../../components/Link';
 import { Panel } from '../../components/Panel';
@@ -318,14 +319,10 @@ export function GenomeTablePanel({ expansion }: { expansion?: PanelExpansion }) 
     {
       id: 'select',
       header: (
-        <input
-          type="checkbox"
-          className="m-0 size-3.25 accent-ink align-middle"
+        <Checkbox
           aria-label={strings.tableSelectPage}
           checked={pageRows.length > 0 && pageSelected === pageRows.length}
-          ref={(element) => {
-            if (element !== null) element.indeterminate = somePageRowsSelected;
-          }}
+          indeterminate={somePageRowsSelected}
           onChange={(event) => {
             table.toggleAllPageRowsSelected(event.target.checked);
           }}
@@ -364,10 +361,8 @@ export function GenomeTablePanel({ expansion }: { expansion?: PanelExpansion }) 
         id: original.genome_id,
         selected: isSelected,
         cells: () => [
-          <input
+          <Checkbox
             key="select"
-            type="checkbox"
-            className="m-0 size-3.25 accent-ink align-middle"
             aria-label={strings.tableSelectRow(original.genome_id)}
             checked={isSelected}
             onChange={(event) => {
@@ -409,9 +404,7 @@ export function GenomeTablePanel({ expansion }: { expansion?: PanelExpansion }) 
                 const definition = COLUMN_BY_ID.get(column.id as GenomeColumn['id']);
                 return (
                   <label key={column.id} className="flex items-center gap-2 text-control">
-                    <input
-                      type="checkbox"
-                      className="m-0 accent-ink"
+                    <Checkbox
                       checked={column.getIsVisible()}
                       disabled={!column.getCanHide()}
                       onChange={(event) => {

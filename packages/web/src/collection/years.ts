@@ -3,9 +3,17 @@
 // isolation year of the set, gaps included, each stacked by the chart groups
 // of ./species.ts in rank order from the bottom. Genomes without an
 // isolation date are not drawn; the panel states how many.
+//
+// Clicks (§6.1, "narrows the set to the clicked element, replacing the
+// values already chosen in the fields it names"): a year label stands for
+// the whole column and sets the year filter to that single year; a segment
+// stands for one chart group in one year and sets the species filter to the
+// group's species (several for "Other") and the year filter to that year.
 import type { SpeciesYearRow } from '../data/setEngine';
+import { withKey } from '../set/filters';
+import type { GenomeFilters } from '../set/filters';
 import type { ChartGroup } from './species';
-import { groupOfSpecies } from './species';
+import { groupOfSpecies, withSpecies } from './species';
 
 export interface YearSegment {
   group: ChartGroup;
@@ -70,4 +78,21 @@ export function buildYearChart(
 export function yearLabelStep(columns: number, maxLabels: number): number {
   if (columns <= maxLabels || maxLabels <= 0) return 1;
   return Math.ceil(columns / maxLabels);
+}
+
+/** The filters after clicking a year label: the year filter becomes that year. */
+export function withYear(filters: GenomeFilters, year: number): GenomeFilters {
+  return withKey(filters, 'year', { min: year, max: year });
+}
+
+/**
+ * The filters after clicking a year segment: the species filter becomes the
+ * segment's species and the year filter that year; other fields are kept.
+ */
+export function withYearSegment(
+  filters: GenomeFilters,
+  codes: readonly string[],
+  year: number,
+): GenomeFilters {
+  return withYear(withSpecies(filters, codes), year);
 }

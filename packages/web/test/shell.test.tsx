@@ -318,6 +318,37 @@ describe('narrow viewports (requirements §5.10)', () => {
     expect(menu?.className.split(/\s+/)).toContain('max-compact:hidden');
   });
 
+  it('closes the Menu on Escape, returning the focus to it (§9)', () => {
+    renderApp('/', synth);
+    const button = screen.getByRole('button', { name: strings.menuToggle });
+    fireEvent.click(button);
+    expect(button.getAttribute('aria-expanded')).toBe('true');
+    const link = within(nav()).getByRole('link', { name: strings.pageGenomes });
+    link.focus();
+    fireEvent.keyDown(link, { key: 'Escape' });
+    expect(button.getAttribute('aria-expanded')).toBe('false');
+    expect(document.activeElement).toBe(button);
+  });
+
+  it('closes the Menu on a pointer down outside it, without activating what lies there', () => {
+    renderApp('/', synth);
+    const button = screen.getByRole('button', { name: strings.menuToggle });
+    fireEvent.click(button);
+    // A press inside the menu keeps it open.
+    fireEvent.pointerDown(within(nav()).getByRole('link', { name: strings.pageGenomes }));
+    expect(button.getAttribute('aria-expanded')).toBe('true');
+    const main = screen.getByRole('main');
+    const onClick = vi.fn();
+    main.addEventListener('click', onClick);
+    fireEvent.pointerDown(main);
+    expect(button.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(main);
+    expect(onClick).not.toHaveBeenCalled();
+    fireEvent.pointerDown(main);
+    fireEvent.click(main);
+    expect(onClick).toHaveBeenCalledTimes(1);
+  });
+
   function renderWithDrawer(state: ManifestState) {
     window.history.replaceState(null, '', '/');
     return render(

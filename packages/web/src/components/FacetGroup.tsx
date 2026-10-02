@@ -9,6 +9,7 @@
 import type { ReactNode } from 'react';
 import { formatCount } from '../format';
 import { strings } from '../strings';
+import { Checkbox } from './Checkbox';
 
 export function FacetGroup({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -37,9 +38,7 @@ export function FacetOption({ checked, onToggle, label, name, count, mark }: Fac
   const empty = count === 0 && !checked;
   return (
     <label className="grid cursor-pointer grid-cols-[13px_minmax(0,1fr)_38px] items-center gap-2 text-control">
-      <input
-        type="checkbox"
-        className="m-0 size-3.25 accent-ink"
+      <Checkbox
         checked={checked}
         aria-label={strings.facetOptionName(name, shown, count)}
         onChange={(event) => {

@@ -181,6 +181,137 @@ test.describe('C2 clicking a chart element or a facet value adds its chip', () =
   });
 });
 
+test.describe('C2 a bar, a heatmap cell or a year replaces the values of the fields it names', () => {
+  // Requirements §6.1 (0.7): "narrows the set to the clicked element,
+  // replacing the values already chosen in the fields it names". The cases
+  // are the critic's round 3 reproductions.
+  test('a heatmap cell replaces the drug class already chosen', async ({ page }, testInfo) => {
+    test.skip(
+      widthOf(testInfo) === 390,
+      'below 900 px the heatmap is replaced by the wide-screen note (requirements §5.10)',
+    );
+    const sen = species('SEN');
+    await page.goto(`/${encodeFilters({ drug_class: ['aminoglycoside'] })}`);
+    await collectionReady(page);
+    const heatmap = mainArea(page).getByRole('table', { name: strings.panelAmrClass });
+    await heatmap
+      .getByRole('button', {
+        name: new RegExp(
+          `^${escapeRegExp(`${sen.canonical_name}, ${strings.drugClassQuinolone}: `)}`,
+        ),
+      })
+      .click();
+    await expect
+      .poll(() => urlFilters(page))
+      .toEqual({
+        drug_class: ['quinolone'],
+        species_code: ['SEN'],
+      });
+    await expect(
+      chipRemove(setBar(page), `${strings.chipPrefixDrugClass} ${strings.drugClassAminoglycoside}`),
+    ).toHaveCount(0);
+    const expected = db.numbers(
+      `SELECT count(DISTINCT genome_id) AS n FROM ${parquet('summaries/amr_class_by_genome.parquet')} ` +
+        `WHERE species_code = 'SEN' AND drug_class = 'quinolone'`,
+    );
+    expect(await settledSetCount(page)).toBe(expected.n);
+  });
+
+  test('an ST bar replaces the STs already chosen', async ({ page }) => {
+    await page.goto(`/${encodeFilters({ species_code: ['KPN'], st: ['147', '258'] })}`);
+    await collectionReady(page);
+    await panel(page, stPanelName('KPN'))
+      .getByRole('button', { name: new RegExp(`^${escapeRegExp(strings.chipSt('258'))}, `) })
+      .click();
+    await expect.poll(() => urlFilters(page)).toEqual({ species_code: ['KPN'], st: ['258'] });
+    const expected = db.numbers(
+      `SELECT count(*) AS n FROM ${GENOME} WHERE species_code = 'KPN' AND st = '258'`,
+    );
+    expect(await settledSetCount(page)).toBe(expected.n);
+  });
+
+  test('a year segment sets its species and its year; a year label only the year', async ({
+    page,
+  }) => {
+    const kpn = species('KPN');
+    await page.goto(
+      `/${encodeFilters({ species_code: ['KPN', 'SEN'], year: { min: 2015, max: 2018 } })}`,
+    );
+    await collectionReady(page);
+    const years = panel(page, strings.panelYear);
+    const segment = years
+      .getByRole('button', { name: new RegExp(`^${escapeRegExp(kpn.canonical_name)}, \\d{4}: `) })
+      .first();
+    const name = (await segment.getAttribute('aria-label')) ?? '';
+    const value = Number(/, (\d{4}): /.exec(name)?.[1]);
+    await segment.click();
+    await expect
+      .poll(() => urlFilters(page))
+      .toEqual({
+        species_code: ['KPN'],
+        year: { max: value, min: value },
+      });
+
+    await page.goto(
+      `/${encodeFilters({ species_code: ['KPN', 'SEN'], year: { min: 2015, max: 2018 } })}`,
+    );
+    await collectionReady(page);
+    const label = years.getByRole('button', { name: /^\d{4}: / }).first();
+    const labelYear = Number(((await label.getAttribute('aria-label')) ?? '').slice(0, 4));
+    await label.click();
+    await expect
+      .poll(() => urlFilters(page))
+      .toEqual({
+        species_code: ['KPN', 'SEN'],
+        year: { max: labelYear, min: labelYear },
+      });
+  });
+
+  test('a facet value still adds an alternative', async ({ page }) => {
+    await page.goto(`/${encodeFilters({ species_code: ['KPN'] })}`);
+    await collectionReady(page);
+    const rail = await openFacets(page);
+    await facetOption(rail, species('SEN').canonical_name).check();
+    await expect.poll(() => urlFilters(page)).toEqual({ species_code: ['KPN', 'SEN'] });
+  });
+});
+
+test('a press that dismisses the drawer or the Columns popover activates nothing under it', async ({
+  page,
+}, testInfo) => {
+  // Critic round 3, observation 4 (requirements §5.10, §6.1, §9).
+  const width = widthOf(testInfo);
+  test.skip(
+    width === 390,
+    'the heatmap is not drawn below 900 px; the menu case is in global.spec.ts',
+  );
+  await page.goto('/');
+  await collectionReady(page);
+  const heatmap = mainArea(page).getByRole('table', { name: strings.panelAmrClass });
+  const cell = heatmap.getByRole('row').nth(1).getByRole('button').last();
+  if (width === 1024) {
+    const toggle = setBar(page).getByRole('button', { name: strings.drawerToggle, exact: true });
+    await openFacets(page);
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await cell.click();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(urlFilters(page)).toEqual({});
+    expect(new URL(page.url()).search).toBe('');
+  }
+  // The Columns popover of the genome table, at both widths.
+  const columns = mainArea(page).getByRole('button', { name: strings.tableColumns, exact: true });
+  await columns.click();
+  await expect(columns).toHaveAttribute('aria-expanded', 'true');
+  await cell.click();
+  await expect(columns).toHaveAttribute('aria-expanded', 'false');
+  expect(new URL(page.url()).search).toBe('');
+  // With nothing open, the same click applies the cell.
+  await cell.click();
+  await expect
+    .poll(() => Object.keys(urlFilters(page)).sort())
+    .toEqual(['drug_class', 'species_code']);
+});
+
 /** The chip text of a percent bound, as set/fields.ts formats it. */
 function percent(value: number): string {
   return String(Number(value.toFixed(2)));

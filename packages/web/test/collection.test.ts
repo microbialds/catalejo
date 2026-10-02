@@ -22,7 +22,9 @@ import {
   heatLegendLabel,
   heatPercent,
   heatStep,
+  heatStepOfPercent,
   heatTextOnInk,
+  withHeatCell,
 } from '../src/collection/heatmap';
 import {
   brushBounds,
@@ -49,7 +51,7 @@ import {
   withSpecies,
 } from '../src/collection/species';
 import type { SpeciesCount } from '../src/collection/species';
-import { buildYearChart, yearLabelStep } from '../src/collection/years';
+import { buildYearChart, withYear, withYearSegment, yearLabelStep } from '../src/collection/years';
 import type { QcPoint, SetSummary, SpeciesCountRow } from '../src/data/setEngine';
 import { palette } from '../src/generated/palette';
 import { platformConfig } from '../src/generated/platform';
@@ -217,6 +219,25 @@ describe('sequence type panel (requirements §6.1; C8)', () => {
     expect(strings.chipSt('ST258-1LV')).toBe('ST258-1LV');
   });
 
+  it('clicking a bar replaces the species and the STs already chosen (§6.1, C2)', () => {
+    const bar = { values: ['258'], isOther: false, genomeCount: 9 };
+    // The critic's case: KPN with ST147 and ST258, then the ST258 bar.
+    expect(withStBar({ species_code: ['KPN'], st: ['147', '258'] }, 'KPN', bar)).toEqual({
+      species_code: ['KPN'],
+      st: ['258'],
+    });
+    expect(withStBar({ st: ['11'], source_type: ['food'] }, 'KPN', bar)).toEqual({
+      source_type: ['food'],
+      species_code: ['KPN'],
+      st: ['258'],
+    });
+    const other = { values: ['25', '15'], isOther: true, genomeCount: 6 };
+    expect(withStBar({ species_code: ['KPN'], st: ['258'] }, 'KPN', other)).toEqual({
+      species_code: ['KPN'],
+      st: ['15', '25'],
+    });
+  });
+
   it('clicking a bar filters by the species and its STs', () => {
     const bar = { values: ['258'], isOther: false, genomeCount: 9 };
     expect(withStBar({}, 'KPN', bar)).toEqual({ species_code: ['KPN'], st: ['258'] });
@@ -233,21 +254,66 @@ describe('sequence type panel (requirements §6.1; C8)', () => {
   });
 });
 
+describe('heatmap cell click (requirements §6.1; C2)', () => {
+  it('replaces the species and the drug class already chosen', () => {
+    // The critic's case: aminoglycoside chosen, then the S. enterica quinolone cell.
+    expect(withHeatCell({ drug_class: ['aminoglycoside'] }, ['SEN'], 'quinolone')).toEqual({
+      drug_class: ['quinolone'],
+      species_code: ['SEN'],
+    });
+    expect(
+      withHeatCell(
+        { drug_class: ['carbapenem'], species_code: ['ECO', 'KPN'] },
+        ['KPN'],
+        'beta_lactam',
+      ),
+    ).toEqual({ drug_class: ['beta_lactam'], species_code: ['KPN'] });
+  });
+
+  it('keeps the other fields and sets the species of "Other"', () => {
+    expect(withHeatCell({ source_type: ['food'] }, ['SPN', 'EHO'], 'macrolide')).toEqual({
+      drug_class: ['macrolide'],
+      source_type: ['food'],
+      species_code: ['EHO', 'SPN'],
+    });
+  });
+});
+
 describe('heatmap scale (palette.sequential.heatmap)', () => {
   it('maps a fraction above zero to one of the seven steps, zero to none', () => {
     expect(HEAT_SCALE).toEqual(palette.sequential.heatmap);
     expect(HEAT_STEPS).toBe(7);
     expect(heatStep(0)).toBe(0);
     expect(heatStep(0.01)).toBe(1);
-    expect(heatStep(1 / 7 - 1e-9)).toBe(1);
-    expect(heatStep(1 / 7)).toBe(2);
+    expect(heatStep(0.144)).toBe(1);
+    expect(heatStep(0.15)).toBe(2);
     expect(heatStep(0.49)).toBe(4);
     expect(heatStep(0.5)).toBe(4);
-    expect(heatStep(4 / 7)).toBe(5);
-    expect(heatStep(6 / 7 - 1e-9)).toBe(6);
-    expect(heatStep(6 / 7)).toBe(7);
+    expect(heatStep(0.58)).toBe(5);
+    expect(heatStep(0.86)).toBe(7);
     expect(heatStep(0.99)).toBe(7);
     expect(heatStep(1)).toBe(7);
+  });
+
+  it('paints the step of the integer percent the cell prints (critic round 3, observation 1)', () => {
+    // 2 of 14 prints 14, 4 of 7 prints 57, 5 of 7 prints 71: each paints the
+    // step whose legend range holds the printed number.
+    const cases: [number, number, number][] = [
+      [2 / 14, 14, 1],
+      [1 / 7, 14, 1],
+      [2 / 7, 29, 3],
+      [3 / 7, 43, 4],
+      [4 / 7, 57, 4],
+      [5 / 7, 71, 5],
+      [6 / 7, 86, 7],
+    ];
+    for (const [fraction, printed, step] of cases) {
+      expect(heatPercent(fraction)).toBe(printed);
+      expect(heatStep(fraction)).toBe(step);
+      expect(heatStepOfPercent(printed)).toBe(step);
+    }
+    expect(heatStepOfPercent(0)).toBe(0);
+    expect(heatPercent(0)).toBe(0);
   });
 
   it('fills each step solid with its palette color and leaves zero on the panel', () => {
@@ -291,11 +357,23 @@ describe('heatmap scale (palette.sequential.heatmap)', () => {
     for (const entry of legend.slice(1)) {
       expect(entry.min).toBe(next);
       for (let percent = entry.min; percent <= entry.max; percent += 1) {
-        expect(heatStep(percent / 100), `${String(percent)}%`).toBe(entry.step);
+        expect(heatStepOfPercent(percent), `${String(percent)}%`).toBe(entry.step);
       }
       next = entry.max + 1;
     }
     expect(next).toBe(101);
+    // For every integer 1 to 100, a cell whose fraction prints that integer
+    // paints the step of the legend range that holds it.
+    for (let percent = 1; percent <= 100; percent += 1) {
+      const entry = legend.find((item) => item.min <= percent && percent <= item.max);
+      for (const fraction of [percent / 100, (percent - 0.49) / 100, (percent + 0.49) / 100]) {
+        if (fraction > 1) continue;
+        expect(heatPercent(fraction), String(fraction)).toBe(percent);
+        expect(heatStep(fraction), `${String(percent)}% from ${String(fraction)}`).toBe(
+          entry?.step,
+        );
+      }
+    }
   });
 
   it('builds rows per group and columns per class present, in palette order', () => {
@@ -421,6 +499,26 @@ describe('QC scatter and brush (C3)', () => {
         { completenessMin: 90, contaminationMax: 5 },
       ),
     ).toEqual({ completeness_min: 90, contamination_max: 5, species_code: ['KPN'] });
+  });
+});
+
+describe('year clicks (requirements §6.1; C2)', () => {
+  it('a year label sets only the year, replacing the range already chosen', () => {
+    expect(withYear({ year: { min: 2015, max: 2018 }, species_code: ['KPN'] }, 2016)).toEqual({
+      species_code: ['KPN'],
+      year: { min: 2016, max: 2016 },
+    });
+  });
+
+  it('a segment sets its species and its year', () => {
+    expect(
+      withYearSegment({ species_code: ['KPN', 'SEN'], year: { min: 2015 } }, ['SAU'], 2019),
+    ).toEqual({ species_code: ['SAU'], year: { min: 2019, max: 2019 } });
+    expect(withYearSegment({ country: ['CL'] }, ['SPN', 'EHO'], 2020)).toEqual({
+      country: ['CL'],
+      species_code: ['EHO', 'SPN'],
+      year: { min: 2020, max: 2020 },
+    });
   });
 });
 

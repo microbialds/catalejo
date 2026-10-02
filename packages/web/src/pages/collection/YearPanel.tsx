@@ -2,17 +2,18 @@
 // collection board, second panel row). One column per isolation year, gaps
 // included, stacked by the chart groups in rank order from the bottom, in
 // the species colors and gray for "Other" (the yellow with its ink outline).
-// Every segment and every year label is a button that adds the year as a
-// filter ({min: y, max: y}). Genomes without an isolation date are not drawn;
-// the subtitle states how many.
-import { buildYearChart, yearLabelStep } from '../../collection/years';
+// Every segment and every year label is a button: a year label sets the
+// year filter to that year ({min: y, max: y}); a segment also sets the
+// species filter to the segment's species, "Other" to the species it holds
+// (collection/years.ts withYear, withYearSegment). Genomes without an
+// isolation date are not drawn; the subtitle states how many.
+import { buildYearChart, withYear, withYearSegment, yearLabelStep } from '../../collection/years';
 import { markStyle } from '../../collection/species';
 import type { ChartGroup } from '../../collection/species';
 import { Panel } from '../../components/Panel';
 import type { PanelExpansion } from '../../components/Panel';
 import type { SpeciesYearRow } from '../../data/setEngine';
 import { formatCount } from '../../format';
-import { withKey } from '../../set/filters';
 import { useGenomeSet } from '../../set/store';
 import { strings } from '../../strings';
 import { PanelStatus } from './PanelStatus';
@@ -34,7 +35,7 @@ export function YearPanel({
   const chart =
     groups !== undefined && rows !== undefined ? buildYearChart(groups, rows) : undefined;
   const pick = (year: number) => {
-    updateFilters((current) => withKey(current, 'year', { min: year, max: year }));
+    updateFilters((current) => withYear(current, year));
   };
   const step = yearLabelStep(chart?.columns.length ?? 0, MAX_LABELS);
   const subtitle =
@@ -74,7 +75,9 @@ export function YearPanel({
                       aria-label={name}
                       title={name}
                       onClick={() => {
-                        pick(column.year);
+                        updateFilters((current) =>
+                          withYearSegment(current, segment.group.codes, column.year),
+                        );
                       }}
                       className="block w-full shrink-0"
                       style={{

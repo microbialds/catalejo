@@ -11,6 +11,7 @@ import { genomeSetDocument, genomeSetText } from '../set/exchange';
 import { useGenomeSet } from '../set/store';
 import { strings } from '../strings';
 import { Button } from './Button';
+import { Checkbox } from './Checkbox';
 
 const STATUS_MS = 3000;
 
@@ -18,9 +19,7 @@ export function CompleteToggle() {
   const { completeOnly, setCompleteOnly } = useGenomeSet();
   return (
     <label className="flex items-center gap-1.5 text-control whitespace-nowrap text-ink">
-      <input
-        type="checkbox"
-        className="m-0 accent-ink"
+      <Checkbox
         checked={completeOnly}
         onChange={(event) => {
           setCompleteOnly(event.target.checked);

@@ -229,7 +229,7 @@ describe('collection page', () => {
     expect(current()).toEqual({ drug_class: ['carbapenem'], species_code: ['KPN'] });
   });
 
-  it('adds the year from a segment and states the undated genomes (C2)', async () => {
+  it('narrows to the species and the year of a segment and states the undated genomes (C2)', async () => {
     await rendered();
     const year = panel(strings.panelYear);
     expect(within(year).getByText(new RegExp(strings.yearUndated('4')))).toBeTruthy();
@@ -238,6 +238,13 @@ describe('collection page', () => {
         name: strings.yearSegmentName('Klebsiella pneumoniae', 2019, '27', 27),
       }),
     );
+    expect(current()).toEqual({ species_code: ['KPN'], year: { max: 2019, min: 2019 } });
+  });
+
+  it('narrows to the year alone from a year label (C2)', async () => {
+    await rendered();
+    const year = panel(strings.panelYear);
+    fireEvent.click(within(year).getByRole('button', { name: /^2019: / }));
     expect(current()).toEqual({ year: { max: 2019, min: 2019 } });
   });
 

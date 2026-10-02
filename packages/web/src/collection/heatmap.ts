@@ -4,22 +4,28 @@
 // set in palette order. A cell is the fraction of the row's genomes with at
 // least one hit in the class, drawn as a solid fill from the seven steps of
 // palette.sequential.heatmap (light to dark), never at reduced opacity.
-// A fraction above zero falls in one of seven equal bins, so that 1/7 and
-// above leave the first step and 6/7 and above reach the last. A cell at zero
-// takes no step and stays on the panel white, so that "no genome" never
-// reads as the lightest nonzero step. Values are shown as integer percent;
-// cell text is chrome.on_ink on the last three steps and chrome.ink on the
-// first four and on zero (the contrast stated in config/palette.yaml).
+// Values are shown as integer percent, and the step is a function of that
+// printed integer (heatStepOfPercent), so that the number in a cell, its
+// fill and the legend range holding the number always agree: an integer
+// percent p above zero falls in one of seven equal bins of 1 to 100
+// (floor(7p / 100) + 1, capped at 7), which gives 1-14, 15-28, 29-42,
+// 43-57, 58-71, 72-85 and 86-100. A cell that prints 0 takes no step and
+// stays on the panel white, so that "no genome" never reads as the lightest
+// nonzero step (a fraction above zero that rounds to 0 prints 0 and stays
+// white, as its number says; the synthetic release has none). Cell text is
+// chrome.on_ink on the last three steps and chrome.ink on the first four and
+// on zero (the contrast stated in config/palette.yaml).
 // The legend (§6.1, §8 "legend included") lists the zero swatch and the seven
-// steps with the integer percents each step holds, read from heatStep itself
-// so that the labels never drift from the cells.
+// steps with the integer percents each step holds, read from
+// heatStepOfPercent itself so that the labels never drift from the cells.
 import type { AmrClassRow } from '../data/setEngine';
 import { palette } from '../generated/palette';
-import { compareText } from '../set/filters';
+import { compareText, withKey } from '../set/filters';
+import type { GenomeFilters } from '../set/filters';
 import { drugClassOrder } from '../set/fields';
 import { strings } from '../strings';
 import type { ChartGroup } from './species';
-import { groupOfSpecies } from './species';
+import { groupOfSpecies, withSpecies } from './species';
 
 /** The steps of the scale, light to dark. */
 export const HEAT_SCALE: readonly string[] = palette.sequential.heatmap;
@@ -29,10 +35,15 @@ export const HEAT_STEPS = HEAT_SCALE.length;
 /** Steps from this one up carry chrome.on_ink text (the last three). */
 const FIRST_ON_INK_STEP = HEAT_STEPS - 2;
 
-/** The step of a fraction: 0 for none, else 1 to HEAT_STEPS. */
+/** The step of a printed integer percent: 0 for 0, else 1 to HEAT_STEPS. */
+export function heatStepOfPercent(percent: number): number {
+  if (!(percent > 0)) return 0;
+  return Math.min(HEAT_STEPS, Math.floor((percent * HEAT_STEPS) / 100) + 1);
+}
+
+/** The step of a fraction, through the integer percent its cell prints. */
 export function heatStep(fraction: number): number {
-  if (!(fraction > 0)) return 0;
-  return Math.min(HEAT_STEPS, Math.floor(fraction * HEAT_STEPS) + 1);
+  return heatStepOfPercent(heatPercent(fraction));
 }
 
 /** The solid fill of a step; undefined for zero, which stays on the panel. */
@@ -47,7 +58,7 @@ export function heatTextOnInk(step: number): boolean {
 
 /** The integer percent shown in a cell. */
 export function heatPercent(fraction: number): number {
-  return Math.round(fraction * 100);
+  return fraction > 0 ? Math.round(fraction * 100) : 0;
 }
 
 export interface HeatLegendEntry {
@@ -62,12 +73,12 @@ export interface HeatLegendEntry {
 
 /**
  * The legend of the scale: zero, then each step with the integer percents p
- * (1 to 100) for which heatStep(p / 100) is that step.
+ * (1 to 100) for which heatStepOfPercent(p) is that step.
  */
 export function heatLegend(): HeatLegendEntry[] {
   const entries: HeatLegendEntry[] = [{ step: 0, fill: undefined, min: 0, max: 0 }];
   for (let percent = 1; percent <= 100; percent += 1) {
-    const step = heatStep(percent / 100);
+    const step = heatStepOfPercent(percent);
     const known = entries.find((entry) => entry.step === step);
     if (known === undefined)
       entries.push({ step, fill: heatFill(step), min: percent, max: percent });
@@ -135,4 +146,18 @@ export function buildHeatmap(groups: readonly ChartGroup[], rows: readonly AmrCl
       }),
     })),
   };
+}
+
+/**
+ * The filters after clicking a heatmap cell (requirements §6.1 "replacing
+ * the values already chosen in the fields it names"): the species filter
+ * becomes the row's species and the drug class filter exactly the cell's
+ * class, so the set narrows to the clicked element; other fields are kept.
+ */
+export function withHeatCell(
+  filters: GenomeFilters,
+  codes: readonly string[],
+  drugClass: string,
+): GenomeFilters {
+  return withKey(withSpecies(filters, codes), 'drug_class', [drugClass]);
 }

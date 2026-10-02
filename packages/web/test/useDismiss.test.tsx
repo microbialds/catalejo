@@ -2,14 +2,15 @@
 // The shared popover dismissal (requirements §9, keyboard reachable controls;
 // §6.1, column selection): Escape closes and returns the focus to the
 // trigger, a pointer down outside closes and leaves the focus alone, a
-// pointer down inside keeps the popover open, and an Escape another handler
-// consumed is ignored.
+// pointer down inside keeps the popover open, an Escape another handler
+// consumed is ignored, and the click that ends a dismissing press activates
+// nothing (critic round 3, observation 4) unless it toggles another popover.
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { useRef, useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useDismiss } from '../src/components/useDismiss';
 
-function Popover({ onClose }: { onClose?: () => void }) {
+function Popover({ onClose, onOutside }: { onClose?: () => void; onOutside?: () => void }) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -47,7 +48,9 @@ function Popover({ onClose }: { onClose?: () => void }) {
           </fieldset>
         )}
       </div>
-      <button type="button">outside</button>
+      <button type="button" onClick={onOutside}>
+        outside
+      </button>
     </div>
   );
 }
@@ -90,7 +93,11 @@ function open() {
   expect(popover()).not.toBeNull();
 }
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  // A test that ends on a press without its click: the next press begins.
+  fireEvent.pointerDown(window);
+});
 
 describe('useDismiss', () => {
   it('closes on Escape from inside the popover and returns the focus to the trigger', () => {
@@ -189,5 +196,52 @@ describe('useDismiss', () => {
     fireEvent.keyDown(document.body, { key: 'Escape' });
     expect(screen.queryByRole('group', { name: 'drawer' })).toBeNull();
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'drawer trigger' }));
+  });
+
+  it('swallows the click of the press that dismissed, and only that one', () => {
+    const onOutside = vi.fn();
+    render(<Popover onOutside={onOutside} />);
+    open();
+    const outside = screen.getByRole('button', { name: 'outside' });
+    fireEvent.pointerDown(outside);
+    expect(popover()).toBeNull();
+    fireEvent.pointerUp(outside);
+    fireEvent.click(outside);
+    expect(onOutside).not.toHaveBeenCalled();
+    // The next press is a press like any other.
+    fireEvent.pointerDown(outside);
+    fireEvent.pointerUp(outside);
+    fireEvent.click(outside);
+    expect(onOutside).toHaveBeenCalledTimes(1);
+  });
+
+  it('drops the swallow when the dismissing press ends without a click', async () => {
+    const onOutside = vi.fn();
+    render(<Popover onOutside={onOutside} />);
+    open();
+    const outside = screen.getByRole('button', { name: 'outside' });
+    fireEvent.pointerDown(outside);
+    fireEvent.pointerUp(document.body);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    // A click that no press of this test began (keyboard activation, say).
+    fireEvent.click(outside);
+    expect(onOutside).toHaveBeenCalledTimes(1);
+  });
+
+  it('lets a press on another popover toggle close this one and open that one', () => {
+    render(
+      <>
+        <Detached label="drawer" />
+        <Popover />
+      </>,
+    );
+    open();
+    const drawerTrigger = screen.getByRole('button', { name: 'drawer trigger' });
+    fireEvent.pointerDown(drawerTrigger);
+    expect(popover()).toBeNull();
+    fireEvent.click(drawerTrigger);
+    expect(screen.queryByRole('group', { name: 'drawer' })).not.toBeNull();
   });
 });

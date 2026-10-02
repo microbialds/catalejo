@@ -8,7 +8,7 @@
 // a statement instead of bars.
 import type { SpeciesStRow } from '../data/setEngine';
 import type { GenomeFilters } from '../set/filters';
-import { compareText, withKey, withValue } from '../set/filters';
+import { compareText, withKey } from '../set/filters';
 import { rankSpecies } from './species';
 
 export const TOP_STS = 5;
@@ -77,12 +77,13 @@ export function stPanel(rows: readonly SpeciesStRow[], speciesCode: string): StP
 }
 
 /**
- * The filters after clicking an ST bar: the species filter becomes exactly
- * the panel's species (so the set is the bar's genomes, never the same ST
- * number of another species' scheme), and the bar's STs are added.
+ * The filters after clicking an ST bar (requirements §6.1 "replacing the
+ * values already chosen in the fields it names"): the species filter becomes
+ * exactly the panel's species (so the set is the bar's genomes, never the
+ * same ST number of another species' scheme), and the ST filter becomes
+ * exactly the bar's STs (one, or the STs the "other" bar stands for); other
+ * fields are kept.
  */
 export function withStBar(filters: GenomeFilters, speciesCode: string, bar: StBar): GenomeFilters {
-  let next = withKey(filters, 'species_code', [speciesCode]);
-  for (const value of bar.values) next = withValue(next, 'st', value);
-  return next;
+  return withKey(withKey(filters, 'species_code', [speciesCode]), 'st', [...bar.values]);
 }

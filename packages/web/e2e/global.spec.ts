@@ -490,6 +490,129 @@ test('G3 colors come from the palette and the chrome tokens; the chrome is achro
   }
 });
 
+/** A palette hex as the rgb() text getComputedStyle reports. */
+function rgb(hex: string): string {
+  const value = Number.parseInt(hex.slice(1), 16);
+  return `rgb(${String(value >> 16)}, ${String((value >> 8) & 255)}, ${String(value & 255)})`;
+}
+
+interface CheckboxPaint {
+  appearance: string;
+  border: string[];
+  background: string;
+  radius: string;
+  /** The stroke of the visible mark, or null when no mark shows. */
+  mark: string | null;
+  outline: string;
+}
+
+/** How a checkbox is painted: its box from computed styles, its mark from the SVG sibling. */
+async function checkboxPaint(box: Locator): Promise<CheckboxPaint> {
+  return box.evaluate((element) => {
+    const style = getComputedStyle(element);
+    const shown = [...(element.parentElement?.querySelectorAll('svg') ?? [])].find(
+      (svg) => getComputedStyle(svg).display !== 'none',
+    );
+    const path = shown?.querySelector('path');
+    return {
+      appearance: style.appearance,
+      border: ['top', 'right', 'bottom', 'left'].map((side) =>
+        [
+          style.getPropertyValue(`border-${side}-width`),
+          style.getPropertyValue(`border-${side}-style`),
+          style.getPropertyValue(`border-${side}-color`),
+        ].join(' '),
+      ),
+      background: style.backgroundColor,
+      radius: style.borderTopLeftRadius,
+      mark: path === null || path === undefined ? null : getComputedStyle(path).stroke,
+      outline:
+        style.outlineStyle === 'none' ? 'none' : `${style.outlineWidth} ${style.outlineColor}`,
+    };
+  });
+}
+
+function expectedPaint(border: string, background: string, mark: string | null): CheckboxPaint {
+  return {
+    appearance: 'none',
+    border: Array.from({ length: 4 }, () => `${tokens.shape.hairline} solid ${rgb(border)}`),
+    background: rgb(background),
+    radius: tokens.shape.radius_control,
+    mark: mark === null ? null : rgb(mark),
+    outline: 'none',
+  };
+}
+
+test('G3 checkboxes are drawn from the palette, not by the browser', async ({ page }) => {
+  // Critic round 3: native checkboxes painted #767676 and #d1d1d1. Every box
+  // is the Checkbox component (appearance none) in chrome tokens only.
+  const chrome = palette.chrome;
+  const unchecked = expectedPaint(chrome.control_border, chrome.panel, null);
+  const checked = expectedPaint(chrome.ink, chrome.ink, chrome.on_ink);
+  const disabledChecked = expectedPaint(chrome.text_label, chrome.panel, chrome.text_label);
+
+  await page.goto('/');
+  await collectionReady(page);
+  // Every checkbox on the page, rail included, has no native appearance.
+  const rail = await openFacets(page);
+  const appearances = await page
+    .locator('input[type="checkbox"]')
+    .evaluateAll((boxes) => [...new Set(boxes.map((box) => getComputedStyle(box).appearance))]);
+  expect(appearances).toEqual(['none']);
+
+  // A facet value, unchecked then checked.
+  const facet = facetOption(rail, strings.sourceTypeFood);
+  expect(await checkboxPaint(facet), 'facet box unchecked').toEqual(unchecked);
+  await facet.check();
+  await expect(facet).toBeChecked();
+  expect(await checkboxPaint(facet), 'facet box checked').toEqual(checked);
+  await facet.uncheck();
+  await expect.poll(() => urlFilters(page)).toEqual({});
+  // Below 1200 px the rail is a drawer over the table; Escape closes it.
+  const drawerToggle = setBar(page).getByRole('button', {
+    name: strings.drawerToggle,
+    exact: true,
+  });
+  if (await drawerToggle.isVisible()) {
+    await page.keyboard.press('Escape');
+    await expect(drawerToggle).toHaveAttribute('aria-expanded', 'false');
+  }
+
+  // "Complete genomes only" in the set bar.
+  const complete = setBar(page).getByRole('checkbox', { name: strings.completeOnly });
+  if (await complete.isVisible()) {
+    expect(await checkboxPaint(complete), 'complete genomes box').toEqual(unchecked);
+  }
+
+  // The table: a row box and the select-all box in its mixed state.
+  const table = mainArea(page).getByRole('table', { name: strings.panelGenomes, exact: true });
+  const row = table.locator('tbody tr').first().getByRole('checkbox');
+  await row.check();
+  expect(await checkboxPaint(row), 'row box checked').toEqual(checked);
+  const all = table.getByRole('checkbox', { name: strings.tableSelectPage });
+  expect(await all.evaluate((box) => (box as HTMLInputElement).indeterminate)).toBe(true);
+  expect(await checkboxPaint(all), 'select-all box mixed').toEqual(checked);
+  await row.uncheck();
+
+  // The Columns popover: a hideable column and the disabled "Genome" box.
+  await mainArea(page).getByRole('button', { name: strings.tableColumns, exact: true }).click();
+  const columns = mainArea(page).getByRole('group', { name: strings.tableColumnsLabel });
+  const genome = columns.getByRole('checkbox', { name: strings.tableColumnGenome, exact: true });
+  await expect(genome).toBeDisabled();
+  expect(await checkboxPaint(genome), 'disabled checked box').toEqual(disabledChecked);
+  const country = columns.getByRole('checkbox', { name: strings.tableColumnCountry, exact: true });
+  expect(await checkboxPaint(country), 'column box unchecked').toEqual(unchecked);
+
+  // Keyboard focus shows the hairline ink outline.
+  await country.focus();
+  await page.keyboard.press('Shift+Tab');
+  await page.keyboard.press('Tab');
+  await expect(country).toBeFocused();
+  expect((await checkboxPaint(country)).outline, 'focused box').toBe(
+    `${tokens.shape.hairline} ${rgb(chrome.ink)}`,
+  );
+});
+
 test('G3 links: underlined at rest in running text, on hover and focus in tables, chips and the facet rail', async ({
   page,
 }) => {
@@ -1225,6 +1348,67 @@ test('the facet drawer closes on Escape from anywhere and on a pointer down outs
   await counters(page).click();
   await expect(rail).toBeHidden();
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+});
+
+test('the compact Menu closes on Escape and on a pointer down outside, activating nothing', async ({
+  page,
+}, testInfo) => {
+  // Requirements §5.10 and §9; critic round 3, observations 2 and 4.
+  test.skip(widthOf(testInfo) !== 390, 'the Menu exists below 900 px');
+  await page.goto('/');
+  await collectionReady(page);
+  const menu = page.getByRole('button', { name: strings.menuToggle, exact: true });
+
+  await menu.click();
+  await expect(navigation(page)).toBeVisible();
+  await navigation(page).getByRole('link').first().focus();
+  await page.keyboard.press('Escape');
+  await expect(navigation(page)).toBeHidden();
+  await expect(menu).toHaveAttribute('aria-expanded', 'false');
+  await expect(menu).toBeFocused();
+
+  // An outside press closes it and does not apply the bar under the pointer.
+  await menu.click();
+  await expect(navigation(page)).toBeVisible();
+  const sau = manifest.species.find((row) => row.species_code === 'SAU');
+  const bar = panel(page, strings.panelSpecies).getByRole('button', {
+    name: new RegExp(`^${escapeRegExp(sau?.canonical_name ?? 'SAU')}, `),
+  });
+  await bar.click();
+  await expect(navigation(page)).toBeHidden();
+  expect(new URL(page.url()).search).toBe('');
+  await bar.click();
+  await expect.poll(() => Object.keys(urlFilters(page))).toEqual(['species_code']);
+});
+
+test('the search field shows a visible focus (§9)', async ({ page }) => {
+  // Critic round 3, observation 3: the underline thickens to 2 px ink and the
+  // field takes the hairline ink outline of every focused control.
+  await page.goto('/methods');
+  await shellReady(page);
+  const field = setBar(page).getByRole('combobox');
+  const paint = () =>
+    field.evaluate((input) => {
+      const label = input.closest('label');
+      const style = label === null ? null : getComputedStyle(label);
+      return {
+        underline: style === null ? '' : `${style.borderBottomWidth} ${style.borderBottomColor}`,
+        outline:
+          style === null || style.outlineStyle === 'none'
+            ? 'none'
+            : `${style.outlineWidth} ${style.outlineStyle} ${style.outlineColor}`,
+      };
+    });
+  const ink = rgb(palette.chrome.ink);
+  expect(await paint(), 'at rest').toEqual({ underline: `1px ${ink}`, outline: 'none' });
+  await field.focus();
+  expect(await paint(), 'focused').toEqual({
+    underline: `2px ${ink}`,
+    outline: `${tokens.shape.hairline} solid ${ink}`,
+  });
+  await page.keyboard.press('Escape');
+  await field.blur();
+  expect(await paint(), 'after blur').toEqual({ underline: `1px ${ink}`, outline: 'none' });
 });
 
 test('G13 annotation version warning for the mixed-version species', async ({ page }) => {

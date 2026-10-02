@@ -6,7 +6,13 @@
    tables, chips, pills, counters and the facet rail carry the link-quiet
    utility: no underline at rest, the underline on hover and on keyboard
    focus. link-running underlines a link-like control (a text button) at
-   rest, for the controls whose tier src/linkTier.ts sets. */
+   rest, for the controls whose tier src/linkTier.ts sets.
+
+   Focus (requirements §9, visible focus). Every focusable element shows the
+   hairline ink outline of :focus-visible. An underlined field (the global
+   search) draws its input without an outline and carries underline-field on
+   its label: while the input has the focus, the underline thickens to 2 px
+   and the label takes the same outline as every other control. */
 @import 'tailwindcss';
 @import './generated/tokens.css';
 
@@ -58,5 +64,15 @@
 
   &:disabled {
     text-decoration-line: none;
+  }
+}
+
+@utility underline-field {
+  border-bottom: var(--shape-hairline) solid var(--color-ink);
+
+  &:focus-within {
+    border-bottom-width: 2px;
+    outline: var(--shape-hairline) solid var(--color-ink);
+    outline-offset: 2px;
   }
 }

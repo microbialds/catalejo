@@ -6,7 +6,9 @@
 // options, Enter opens the active one, or the genome when the text is exactly
 // one genome identifier, and Escape closes the list, then clears the field.
 // Genome and gene targets keep the current set; a sequence type target is a
-// filter and replaces it.
+// filter and replaces it. The field shows its focus (§9) through the
+// underline-field utility of index.css: a 2 px ink underline and the hairline
+// ink outline of every focused control.
 import { useId, useMemo, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { useManifest } from '../data/manifest';
@@ -140,7 +142,7 @@ export function GlobalSearch() {
   );
   return (
     <div className="relative">
-      <label className="flex h-7.5 w-70 items-center gap-2 border-b border-ink px-0.5 max-drawer:w-52">
+      <label className="flex h-7.5 w-70 items-center gap-2 px-0.5 underline-field max-drawer:w-52">
         <span className="sr-only">{strings.searchLabel}</span>
         <input
           type="text"

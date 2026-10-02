@@ -1,8 +1,19 @@
 // Dismissal of popovers and drawers (requirements §9, keyboard reachable
 // controls; §6.1, column selection; §5.2, the add filter menu; §5.10, the
-// facet drawer). While a popover is open, Escape closes it wherever the focus
-// is and returns the focus to the control that opened it, and a pointer down
-// outside its root closes it and leaves the focus where the pointer put it.
+// facet drawer and the compact navigation menu). While a popover is open,
+// Escape closes it wherever the focus is and returns the focus to the
+// control that opened it, and a pointer down outside its root closes it and
+// leaves the focus where the pointer put it.
+// The press that dismisses does nothing else: the click that ends it is
+// swallowed (a capture listener on the window, before React's), so that
+// closing the drawer over a heatmap cell, a bar or a facet never also
+// applies that element as a filter. The swallow lasts for that one press
+// only; it is dropped right after the pointer up or cancel when no click
+// follows (a drag, a release elsewhere), and at the latest when the next
+// press begins. One exception: a press on another disclosure control (an
+// element with aria-expanded, such as "Menu", "Filters", "Columns", "+ add
+// filter" or a panel's "expand") closes this popover and still toggles that
+// one, so that moving between popovers takes one click.
 // The root usually contains the trigger, so a press on the trigger itself is
 // left to the trigger's own toggle; a trigger that lies elsewhere (the set
 // bar's "Filters" button for the facet drawer) is passed in `inside`, with
@@ -28,6 +39,49 @@ export interface DismissOptions {
 /** The open popovers, the last opened last; only it answers Escape. */
 const openStack: object[] = [];
 
+/** Whether a press on this target toggles another popover (aria-expanded). */
+function isDisclosure(target: EventTarget | null): boolean {
+  return target instanceof Element && target.closest('[aria-expanded]') !== null;
+}
+
+/** Drops the armed swallow, when one is armed. */
+let disarmSwallow: (() => void) | undefined;
+
+/**
+ * Swallows the click that ends the current press, if one follows. Several
+ * popovers closed by the same press arm it once.
+ */
+function swallowNextClick(pressed: Node): void {
+  if (disarmSwallow !== undefined) return;
+  const swallow = (event: MouseEvent) => {
+    // The click of a press targets the pressed element or an ancestor of it
+    // (where the pointer up landed elsewhere); any other click is not it.
+    if (!(event.target instanceof Node) || !event.target.contains(pressed)) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    disarm();
+  };
+  // The click of a press is dispatched in the same task as its pointer up,
+  // so a timer set on pointer up runs after it.
+  const later = () => {
+    window.setTimeout(disarm, 0);
+  };
+  const disarm = () => {
+    window.removeEventListener('click', swallow, true);
+    window.removeEventListener('pointerup', later, true);
+    window.removeEventListener('pointercancel', later, true);
+    window.removeEventListener('pointerdown', disarm, true);
+    if (disarmSwallow === disarm) disarmSwallow = undefined;
+  };
+  window.addEventListener('click', swallow, true);
+  window.addEventListener('pointerup', later, true);
+  window.addEventListener('pointercancel', later, true);
+  // Added while the dismissing pointer down is past the window's capture
+  // phase, so it answers only the next press.
+  window.addEventListener('pointerdown', disarm, true);
+  disarmSwallow = disarm;
+}
+
 export function useDismiss(
   open: boolean,
   { root, trigger, inside, onClose }: DismissOptions,
@@ -49,7 +103,9 @@ export function useDismiss(
       root.current?.contains(target) === true ||
       (others.current ?? []).some((ref) => ref.current?.contains(target) === true);
     const onPointer = (event: PointerEvent) => {
-      if (root.current !== null && !contains(event.target as Node)) close.current();
+      if (root.current === null || contains(event.target as Node)) return;
+      close.current();
+      if (!isDisclosure(event.target)) swallowNextClick(event.target as Node);
     };
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented) return;

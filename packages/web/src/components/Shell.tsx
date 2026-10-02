@@ -8,7 +8,10 @@
 // Viewport (§5.10): from 900 px the left column stays in view while the page
 // scrolls. Below 900 px (breakpoint_compact) the grid stacks and the column
 // becomes a top bar with the wordmark and a "Menu" text button that opens the
-// navigation and footer; the menu closes when the path changes. Below 1200 px
+// navigation and footer; the menu closes when the path changes, on Escape
+// (the focus returns to "Menu") and on a pointer down outside the top bar
+// (components/useDismiss.ts, §9), and when the viewport widens to 900 px,
+// where the column shows the navigation without it. Below 1200 px
 // (breakpoint_drawer) a page's facet rail becomes a drawer through
 // LayoutContext (components/Drawer.tsx).
 //
@@ -18,11 +21,12 @@
 // complete-genomes toggle, the global search and the actions. When a
 // filtered set has no genome, the main area shows only the empty-set
 // message (requirements §5.2).
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useManifest } from '../data/manifest';
 import { useSetCount } from '../data/setEngineContext';
 import { formatCount, formatPipeline } from '../format';
+import { tokens } from '../generated/tokens';
 import { LayoutContext } from '../layout';
 import { CHROME_LINK } from '../linkTier';
 import type { LayoutState } from '../layout';
@@ -39,6 +43,7 @@ import { Link } from './Link';
 import { Navigation } from './Navigation';
 import { SetBar } from './SetBar';
 import { CompleteToggle, SetActions } from './SetActions';
+import { useDismiss } from './useDismiss';
 
 const MENU_ID = 'shell-menu';
 
@@ -157,14 +162,39 @@ function ShellLayout({ children }: { children: ReactNode }) {
   const toggleMenu = () => {
     setMenuOpenAt(menuOpen ? null : pathname);
   };
+  const closeMenu = useCallback(() => {
+    setMenuOpenAt(null);
+  }, []);
+  const menuRoot = useRef<HTMLDivElement>(null);
+  const menuButton = useRef<HTMLButtonElement>(null);
+  useDismiss(menuOpen, { root: menuRoot, trigger: menuButton, onClose: closeMenu });
+  // An open menu has no meaning from the compact breakpoint up, where the
+  // column always shows the navigation (and "Menu", the only way to open it,
+  // is hidden); it closes when the viewport widens past the breakpoint, so
+  // that its dismissal does not hold the next click on the page.
+  useEffect(() => {
+    if (!menuOpen || typeof window.matchMedia !== 'function') return;
+    const wide = window.matchMedia(`(min-width: ${tokens.layout.breakpoint_compact})`);
+    const onChange = () => {
+      if (wide.matches) closeMenu();
+    };
+    wide.addEventListener('change', onChange);
+    return () => {
+      wide.removeEventListener('change', onChange);
+    };
+  }, [menuOpen, closeMenu]);
 
   return (
     <LayoutContext value={layout}>
       <div className="grid min-h-screen grid-cols-[var(--spacing-sidebar-width)_minmax(0,1fr)] bg-background text-base text-ink max-compact:grid-cols-1 max-compact:grid-rows-[auto_minmax(0,1fr)]">
-        <div className="flex flex-col border-r border-border-strong bg-sidebar pt-5.5 pb-4.5 compact:sticky compact:top-0 compact:h-screen compact:self-start max-compact:border-r-0 max-compact:border-b max-compact:py-3">
+        <div
+          ref={menuRoot}
+          className="flex flex-col border-r border-border-strong bg-sidebar pt-5.5 pb-4.5 compact:sticky compact:top-0 compact:h-screen compact:self-start max-compact:border-r-0 max-compact:border-b max-compact:py-3"
+        >
           <div className="flex items-start justify-between gap-2 max-compact:items-center">
             <Wordmark />
             <button
+              ref={menuButton}
               type="button"
               className="mr-nav-item-padding-x rounded-control border border-control-border bg-panel px-3 py-1.75 text-control font-bold text-ink compact:hidden"
               aria-expanded={menuOpen}

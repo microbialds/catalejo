@@ -23,6 +23,7 @@ import type { FilterEntry, FilterKey, ListKey } from '../set/filters';
 import { useGenomeSet } from '../set/store';
 import { strings } from '../strings';
 import { Button, buttonClass } from './Button';
+import { Checkbox } from './Checkbox';
 import { useDismiss } from './useDismiss';
 
 const MAX_SHOWN = 200;
@@ -226,9 +227,7 @@ function ListPicker({
           {shown.map(({ option, label }) => (
             <li key={option.value}>
               <label className="grid cursor-pointer grid-cols-[13px_minmax(0,1fr)_auto] items-center gap-2 text-control">
-                <input
-                  type="checkbox"
-                  className="m-0 accent-ink"
+                <Checkbox
                   checked={selected.has(option.value)}
                   onChange={(event) => {
                     toggle(option.value, event.target.checked);

@@ -4,7 +4,9 @@
 // 1, so that every painted color is a palette color as is, and no text a
 // reader needs is set in chrome.text_faint (decorative only in
 // config/palette.yaml; AA contrast, §9) unless its line carries a
-// "decorative" allow comment. The scan covers src/ without src/generated/.
+// "decorative" allow comment, and no native checkbox is rendered outside
+// components/Checkbox.tsx, which draws it from the palette (G3, critic round
+// 3). The scan covers src/ without src/generated/.
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -82,6 +84,25 @@ describe('design rule detector', () => {
       'input.css:1 text-text-faint',
       'input.css:2 color: text-faint',
     ]);
+  });
+
+  it('catches a native checkbox outside the Checkbox component', () => {
+    const source = [
+      '// <input type="checkbox"> in a comment does not count',
+      'export const A = () => (',
+      '  <label>',
+      '    <input type="checkbox" checked={x} />',
+      '    <input type={"checkbox"} />',
+      '    <input type="text" />',
+      '    <Checkbox checked={x} />',
+      '  </label>',
+      ');',
+    ].join('\n');
+    expect(describeFindings(findDesignInScript(source, 'src/components/FacetGroup.tsx'))).toEqual([
+      'src/components/FacetGroup.tsx:4 type="checkbox" (use components/Checkbox)',
+      'src/components/FacetGroup.tsx:5 type="checkbox" (use components/Checkbox)',
+    ]);
+    expect(findDesignInScript(source, 'src/components/Checkbox.tsx')).toEqual([]);
   });
 
   it('catches opacity, the serif variable and uppercase in stylesheets, not in comments', () => {

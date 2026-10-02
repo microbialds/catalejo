@@ -7,8 +7,11 @@
 // keeps for decoration only and which fails the AA contrast of §9 on the
 // panel and chassis colors; a line that truly is decoration carries a comment
 // with the word "decorative" (for example `{/* decorative */}`), which allows
-// it. Scripts are read through the TypeScript compiler, so comments never
-// count otherwise; stylesheets have their comments removed first.
+// it. Controls: no raw type="checkbox" outside src/components/Checkbox.tsx,
+// since a native checkbox paints browser grays outside the palette (G3;
+// §7, each component once). Scripts are read through the TypeScript
+// compiler, so comments never count otherwise; stylesheets have their
+// comments removed first.
 import ts from 'typescript';
 
 export interface DesignFinding {
@@ -102,6 +105,9 @@ function literalValue(node: ts.Node | undefined): string | undefined {
   return undefined;
 }
 
+/** The one file that may render a native checkbox. */
+const CHECKBOX_COMPONENT = /(?:^|[\\/])components[\\/]Checkbox\.tsx$/;
+
 /** Design rule violations in a TypeScript or TSX source. */
 export function findDesignInScript(source: string, file = 'input.tsx'): DesignFinding[] {
   const kind = file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
@@ -135,6 +141,15 @@ export function findDesignInScript(source: string, file = 'input.tsx'): DesignFi
         const value = literalValue(node.initializer);
         if (value === undefined || !opaque(value)) add(node, `${name}: ${value ?? 'computed'}`);
       }
+    }
+    // <input type="checkbox"> outside the Checkbox component.
+    if (
+      ts.isJsxAttribute(node) &&
+      propertyName(node.name) === 'type' &&
+      literalValue(node.initializer) === 'checkbox' &&
+      !CHECKBOX_COMPONENT.test(file)
+    ) {
+      add(node, 'type="checkbox" (use components/Checkbox)');
     }
     if (ts.isShorthandPropertyAssignment(node) && OPACITY_PROPERTIES.has(node.name.text)) {
       add(node, `${node.name.text}: computed`);

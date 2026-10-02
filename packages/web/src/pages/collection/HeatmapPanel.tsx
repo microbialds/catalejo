@@ -4,8 +4,9 @@
 // the set in palette order with short labels; each cell is a button with a
 // solid fill from the sequential heatmap scale (collection/heatmap.ts; zero
 // stays on the panel white) showing the integer
-// percent of the row's genomes with a hit in the class, and clicking it adds
-// the species and the class as filters. The panel carries the annotation
+// percent of the row's genomes with a hit in the class, and clicking it sets
+// the species filter to the row's species and the class filter to exactly
+// the cell's class (collection/heatmap.ts withHeatCell). The panel carries the annotation
 // version note when the set mixes database versions, and the §5.5 footnote
 // when it mixes platforms or assembly statuses. Below the compact breakpoint
 // the grid is replaced by a note that it needs a wider screen. A species
@@ -30,8 +31,8 @@ import {
   heatPercent,
   heatStep,
   heatTextOnInk,
+  withHeatCell,
 } from '../../collection/heatmap';
-import { withSpecies } from '../../collection/species';
 import type { ChartGroup } from '../../collection/species';
 import { Link } from '../../components/Link';
 import { Panel } from '../../components/Panel';
@@ -42,7 +43,6 @@ import type { AmrClassRow } from '../../data/setEngine';
 import { AnnotationVersionNote } from '../../components/AnnotationVersionNote';
 import { QUIET_LINK } from '../../linkTier';
 import { drugClassLabel, drugClassShortLabel } from '../../set/fields';
-import { withValue } from '../../set/filters';
 import { useGenomeSet } from '../../set/store';
 import { strings } from '../../strings';
 import { PanelStatus } from './PanelStatus';
@@ -170,11 +170,7 @@ export function HeatmapPanel({
                           title={name}
                           onClick={() => {
                             updateFilters((current) =>
-                              withValue(
-                                withSpecies(current, row.group.codes),
-                                'drug_class',
-                                cell.drugClass,
-                              ),
+                              withHeatCell(current, row.group.codes, cell.drugClass),
                             );
                           }}
                           className={`flex h-6 w-full items-center justify-center overflow-hidden ${

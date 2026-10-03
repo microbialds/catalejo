@@ -106,6 +106,139 @@ describe('genome list page (/genomes)', () => {
     }, pageWait);
   });
 
+  it('prints completeness and contamination as integer percents, exact on hover (§6.1)', async () => {
+    await rendered(
+      '/genomes?cols=genome_id,checkm2_completeness,checkm2_contamination',
+      stubEngine({ aggregate: tableAggregate() }),
+    );
+    const row = within(table()).getAllByRole('row')[1];
+    if (row === undefined) throw new Error('no body row');
+    const cells = within(row).getAllByRole('cell');
+    // Select, genome, completeness 99.12, contamination 0.5.
+    expect(cells[2]?.textContent).toBe('99%');
+    expect(cells[2]?.querySelector('[title]')?.getAttribute('title')).toBe(
+      strings.valuePercent('99.12'),
+    );
+    expect(cells[3]?.textContent).toBe('1%');
+    expect(cells[3]?.querySelector('[title]')?.getAttribute('title')).toBe(
+      strings.valuePercent('0.50'),
+    );
+  });
+
+  it('shows the typing chip values of the page in a Typing column (§6.1)', async () => {
+    const typingSql: string[] = [];
+    const engine = stubEngine({
+      aggregate: tableAggregate([], {
+        sql: typingSql,
+        rows: [
+          { genome_id: 'KPN0001', source_tool: 'kleborate', key: 'O_locus', value: 'O2afg' },
+          { genome_id: 'KPN0001', source_tool: 'kleborate', key: 'K_locus', value: 'KL64' },
+        ],
+      }),
+    });
+    const withTyping = ready(
+      manifestFixture({ files: [{ path: 'tables/typing.parquet', bytes: 1, sha256: 'x' }] }),
+    );
+    renderApp('/genomes', withTyping, engine);
+    await within(main()).findByText(`KL64${strings.separator}O2afg`, {}, pageWait);
+    const header = within(table()).getByRole('columnheader', { name: strings.tableColumnTyping });
+    // Not sortable: a plain header.
+    expect(within(header).queryByRole('button')).toBeNull();
+    const cell = within(main()).getByText(`KL64${strings.separator}O2afg`);
+    expect(cell.className.split(/\s+/)).toContain('font-mono');
+    // A genome without typing values shows the missing-value mark.
+    const second = within(table()).getAllByRole('row')[2];
+    const typingIndex = within(table())
+      .getAllByRole('columnheader')
+      .findIndex((th) => th.textContent === strings.tableColumnTyping);
+    expect(second?.querySelectorAll('td')[typingIndex]?.textContent).toBe(strings.valueMissing);
+    expect(typingSql).toHaveLength(1);
+    expect(typingSql[0]).toContain("'KPN0001'");
+    expect(typingSql[0]).toContain("'KPN0050'");
+  });
+
+  it('asks for no typing when the release has no typing table', async () => {
+    const typingSql: string[] = [];
+    await rendered('/genomes', stubEngine({ aggregate: tableAggregate([], { sql: typingSql }) }));
+    expect(typingSql).toHaveLength(0);
+    expect(
+      within(table()).getByRole('columnheader', { name: strings.tableColumnTyping }),
+    ).toBeTruthy();
+  });
+
+  it('keeps the sort, the page and the columns in the URL (§5.3)', async () => {
+    const sql: string[] = [];
+    const filters = { country: ['CL'] };
+    // Two pages of the set.
+    const engine = stubEngine({
+      countSet: () => Promise.resolve(100),
+      aggregate: tableAggregate(sql),
+    });
+    await rendered(`/genomes${encodeFilters(filters)}`, engine);
+    const pushes = vi.spyOn(window.history, 'pushState');
+    fireEvent.click(
+      within(table()).getByRole('button', { name: strings.tableSortBy(strings.tableColumnAmr) }),
+    );
+    await waitFor(() => {
+      expect(new URL(window.location.href).searchParams.get('sort')).toBe('amr_gene_count:desc');
+    });
+    fireEvent.click(within(main()).getByRole('button', { name: strings.tableNext }));
+    await within(table()).findByRole('link', { name: 'KPN0051' }, pageWait);
+    fireEvent.click(within(main()).getByRole('button', { name: strings.tableColumns }));
+    fireEvent.click(within(main()).getByRole('checkbox', { name: strings.tableColumnN50 }));
+    expect(pushes).toHaveBeenCalledTimes(3);
+    const search = new URL(window.location.href).searchParams;
+    expect(search.get('page')).toBe('2');
+    expect(search.get('cols')?.split(',')).toContain('n50');
+    expect(decodeFilters(window.location.search)).toEqual(filters);
+    expect(window.location.search.indexOf('q=')).toBe(1);
+    expect(sql.at(-1)).toMatch(
+      /ORDER BY t\.amr_gene_count DESC NULLS LAST, t\.genome_id ASC LIMIT 50 OFFSET 50$/,
+    );
+
+    // Back undoes the column, then the page.
+    await act(async () => {
+      window.history.back();
+      await new Promise((done) => setTimeout(done, 50));
+    });
+    await waitFor(() => {
+      expect(new URL(window.location.href).searchParams.get('cols')).toBeNull();
+    });
+    expect(
+      within(table()).queryByRole('columnheader', { name: new RegExp(strings.tableColumnN50) }),
+    ).toBeNull();
+  });
+
+  it('opens a URL with a view in that view, and a new set returns to the first page', async () => {
+    const sql: string[] = [];
+    await rendered(
+      '/genomes?sort=n50:asc&page=2&cols=genome_id,n50',
+      stubEngine({ aggregate: tableAggregate(sql) }),
+    );
+    await within(table()).findByRole('link', { name: 'KPN0051' }, pageWait);
+    expect(sql.at(-1)).toMatch(
+      /ORDER BY t\.n50 ASC NULLS LAST, t\.genome_id ASC LIMIT 50 OFFSET 50$/,
+    );
+    expect(
+      within(table())
+        .getAllByRole('columnheader')
+        .map((th) => th.textContent),
+    ).toEqual([
+      '',
+      strings.tableColumnGenome,
+      `${strings.tableColumnN50}${strings.tableSortedAscending}`,
+    ]);
+    const st = within(table()).queryAllByRole('link', { name: 'ST258' });
+    expect(st).toHaveLength(0);
+    // A species link of the table is a new set: no page, same sort and columns.
+    fireEvent.click(within(main()).getByRole('button', { name: strings.tableColumns }));
+    fireEvent.click(within(main()).getByRole('checkbox', { name: strings.tableColumnSpecies }));
+    const species = within(table()).getAllByTitle('Klebsiella pneumoniae')[0]?.closest('a');
+    expect(species?.getAttribute('href')).toBe(
+      `/${encodeFilters({ species_code: ['KPN'] })}&sort=n50:asc&cols=genome_id,species_code,n50`,
+    );
+  });
+
   it('uses the selection as the set after confirming', async () => {
     await rendered('/genomes', stubEngine({ aggregate: tableAggregate() }));
     for (const id of ['KPN0003', 'KPN0001']) {

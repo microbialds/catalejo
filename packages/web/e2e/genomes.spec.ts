@@ -3,13 +3,15 @@
 // synthetic release: the table alone, without the facet rail or its drawer,
 // with the Genomes navigation item active; 50 rows a page in identifier
 // order, sorting by a count column, and "Use as set" replacing the set with
-// the selected identifiers after the confirmation. Expected rows are read in
-// Node from tables/genome.parquet (e2e/support/synth.ts). The layout checks
+// the selected identifiers after the confirmation, and the Typing column with
+// the typing chip values of a KPN and a SEN genome. Expected rows are read in
+// Node from tables/genome.parquet and tables/typing.parquet
+// (e2e/support/synth.ts). The layout checks
 // hold at 1440, 1024 and 390 px; the 390 project runs this file only when
 // playwright.config.ts lists it.
 import { expect, test } from '@playwright/test';
 import { formatCount } from '../src/format';
-import { compareText } from '../src/set/filters';
+import { compareText, encodeFilters } from '../src/set/filters';
 import { strings } from '../src/strings';
 import {
   facetRail,
@@ -138,4 +140,54 @@ test('"Use as set" on the genome list replaces the set with the selection', asyn
   expect(new URL(page.url()).pathname).toBe('/genomes');
   expect(urlFilters(page)).toEqual({ genome_id: selected });
   await expect.poll(() => tableIds(page)).toEqual(selected);
+});
+
+test('the Typing column shows the K and O loci of a KPN genome and the serovar of a SEN genome', async ({
+  page,
+}) => {
+  // Requirements §6.1: the typing chip keys of config/typing_display.yaml,
+  // without the sequence type and the scores, in configured order.
+  const TYPING = parquet('tables/typing.parquet');
+  const value = (genomeId: string, tool: string, key: string): string | undefined => {
+    const row = db.rows(
+      `SELECT value FROM ${TYPING} WHERE genome_id = '${genomeId}' AND source_tool = '${tool}' ` +
+        `AND key = '${key}'`,
+    )[0];
+    return row === undefined ? undefined : String(row.value);
+  };
+  const first = (tool: string, key: string): string =>
+    String(
+      db.rows(
+        `SELECT min(genome_id) AS genome_id FROM ${TYPING} WHERE source_tool = '${tool}' AND key = '${key}'`,
+      )[0]?.genome_id,
+    );
+  const kpn = first('kleborate', 'K_locus');
+  const sen = first('sistr', 'serovar');
+  expect(kpn.startsWith('KPN')).toBe(true);
+  expect(sen.startsWith('SEN')).toBe(true);
+  const kLocus = value(kpn, 'kleborate', 'K_locus') ?? '';
+  const oLocus = value(kpn, 'kleborate', 'O_locus') ?? '';
+  const serovar = value(sen, 'sistr', 'serovar') ?? '';
+  const senText = [serovar, value(sen, 'sistr', 'cgmlst_ST')]
+    .filter((text) => text !== undefined)
+    .join(strings.separator);
+
+  await page.goto(`/genomes${encodeFilters({ genome_id: [kpn, sen] })}`);
+  await genomesReady(page);
+  const table = genomeTable(page);
+  const headers = await table.getByRole('columnheader').allInnerTexts();
+  const column = headers.findIndex((text) => text.trim() === strings.tableColumnTyping);
+  expect(column).toBeGreaterThan(0);
+  // Not sortable: no sort control in its header.
+  await expect(table.getByRole('columnheader').nth(column).getByRole('button')).toHaveCount(0);
+  const typingCell = (genomeId: string) =>
+    table
+      .locator('tbody tr')
+      .filter({ has: page.getByRole('link', { name: genomeId, exact: true }) })
+      .locator('td')
+      .nth(column);
+  await expect(typingCell(kpn)).toHaveText(`${kLocus}${strings.separator}${oLocus}`);
+  await expect(typingCell(sen)).toContainText(serovar);
+  await expect(typingCell(sen)).toHaveText(senText);
+  await expect(typingCell(kpn).locator('.font-mono')).toHaveCount(1);
 });

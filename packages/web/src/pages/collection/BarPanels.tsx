@@ -2,8 +2,8 @@
 // (requirements §6.1, §5.4; checklist C2, C7, C8; collection board, first
 // panel row). Each bar is a button whose accessible name states the value
 // and count; clicking it adds the filter as a chip. Species bars draw the
-// chart groups of collection/species.ts (the eight largest species and
-// "Other"); clicking a species makes the species filter that species, and
+// chart groups of collection/species.ts (up to eight species with a registry
+// color, the largest in the set, and "Other"); clicking a species makes the species filter that species, and
 // clicking "Other" makes it all the species in it. The ST panel draws the top
 // STs of one species (collection/sequenceTypes.ts) in that species' color, or
 // a statement when the species has no ST scheme. The species name in the ST

@@ -64,7 +64,13 @@ export const strings = {
   addFilterMenuLabel: 'Add filter',
   removeFilter: (label: string) => `Remove filter ${label}`,
   removeFilterGlyph: '×',
+  // The chips that do not fit on one line (requirements §5.1).
+  moreFilters: (count: number) => `+${String(count)} more`,
+  allFiltersLabel: 'All filters of the set',
   completeOnly: 'Complete genomes only',
+  // The set actions grouped behind one control at narrow widths (requirements §5.1).
+  setMenuToggle: 'Set',
+  setMenuLabel: 'Set actions',
   shareLink: 'Share link',
   linkCopied: 'Link copied',
   linkCopyFailed: 'The link could not be copied',
@@ -278,6 +284,7 @@ export const strings = {
   tableColumnContigs: 'Contigs',
   tableColumnN50: 'N50',
   tableColumnGc: 'GC',
+  tableColumnTyping: 'Typing',
   tableColumns: 'Columns',
   tableColumnsLabel: 'Columns shown in the table',
   tableSortBy: (column: string) => `Sort by ${column}`,

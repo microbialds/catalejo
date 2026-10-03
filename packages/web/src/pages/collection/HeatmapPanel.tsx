@@ -1,6 +1,6 @@
 // Resistance class by species heatmap (requirements §6.1, §5.5, §5.6,
 // §5.10; checklist C2, G12, G13; collection board, third panel). Rows are
-// the chart groups (eight species and "Other"), columns the drug classes of
+// the chart groups (up to eight colored species and "Other"), columns the drug classes of
 // the set in palette order with short labels; each cell is a button with a
 // solid fill from the sequential heatmap scale (collection/heatmap.ts; zero
 // stays on the panel white) showing the integer

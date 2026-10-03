@@ -1,5 +1,6 @@
-// Writes src/generated/ from config/palette.yaml and config/design-tokens.yaml
-// (requirements §5.4 and §7). Run with `pnpm generate`; predev, prebuild,
+// Writes src/generated/ and public/favicon.svg from config/ (palette.yaml,
+// design-tokens.yaml, platform.yaml, export-presets.yaml, typing_display.yaml;
+// requirements §5.4, §6.1 and §7). Run with `pnpm generate`; predev, prebuild,
 // pretest and pretypecheck run it too.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';

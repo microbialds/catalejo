@@ -3,8 +3,12 @@
 // matches by substring for every kind without regard to case, ranks within a
 // kind exact matches, then prefix matches, then other substrings, each by
 // genome count, groups results by kind in a fixed order with counts, and
-// completes well within 200 ms on a loaded index of 50,000 rows.
+// completes well within 200 ms on a loaded index of 50,000 rows. Requirements
+// §5.3 and §5.9: a result opens its target with the view parameters of the
+// current URL; a sequence type replaces the set and resets `page` only.
 import { describe, expect, it } from 'vitest';
+import { decodeFilters } from '../src/set/filters';
+import { decodeTableView } from '../src/tableView';
 import {
   buildSearchIndex,
   exactGenomeMatch,
@@ -12,6 +16,7 @@ import {
   matchTier,
   readSearchRows,
   searchKinds,
+  searchTargetHref,
 } from '../src/data/searchIndex';
 import type { SearchKind, SearchRow } from '../src/data/searchIndex';
 
@@ -165,6 +170,54 @@ describe('search index', () => {
         { term: 'y', kind: 'other', target: '/', species_code: 'KPN', count: 1 },
       ]),
     ).toEqual([row('gene', 'x', '/genes/symbol/x', 'KPN', 2)]);
+  });
+});
+
+describe('search target href (requirements §5.3, §5.9)', () => {
+  const st11 = '/?q=%7B%22species_code%22%3A%5B%22KPN%22%5D%2C%22st%22%3A%5B%2211%22%5D%7D';
+  const st11Q = 'q=%7B%22species_code%22%3A%5B%22KPN%22%5D%2C%22st%22%3A%5B%2211%22%5D%7D';
+  const current =
+    '?q=%7B%22species_code%22%3A%5B%22ECO%22%5D%7D&ids=ECO0001,ECO0002&sort=n50:desc&page=3' +
+    '&cols=genome_id,species_code,n50&tab=x';
+
+  it('replaces the set of an ST target, drops page and keeps sort, cols and the rest', () => {
+    const href = searchTargetHref(st11, current);
+    expect(href).toBe(`/?${st11Q}&sort=n50:desc&cols=genome_id,species_code,n50&tab=x`);
+    const search = href.slice(href.indexOf('?'));
+    expect(decodeFilters(search)).toEqual({ species_code: ['KPN'], st: ['11'] });
+    const view = decodeTableView(search);
+    expect(view.sort).toEqual({ id: 'n50', desc: true });
+    expect(view.pageIndex).toBe(0);
+    expect(view.columns).toEqual(['genome_id', 'species_code', 'n50']);
+  });
+
+  it('keeps page when the ST target names the current set, since the set does not change', () => {
+    expect(searchTargetHref(st11, `?${st11Q}&page=2&sort=n50:asc`)).toBe(
+      `/?${st11Q}&page=2&sort=n50:asc`,
+    );
+  });
+
+  it('replaces a curated set and explicit list with the ST target set', () => {
+    expect(searchTargetHref(st11, '?set=outbreak-2024&ids=KPN0001&cols=genome_id,n50')).toBe(
+      `/?${st11Q}&cols=genome_id,n50`,
+    );
+  });
+
+  it('opens an ST target alone from the whole release without view parameters', () => {
+    expect(searchTargetHref(st11, '')).toBe(`/?${st11Q}`);
+    expect(searchTargetHref(st11, '?page=4')).toBe(`/?${st11Q}`);
+  });
+
+  it('keeps the whole current query, page included, for genome and gene targets', () => {
+    expect(searchTargetHref('/genomes/KPN0001', current)).toBe(`/genomes/KPN0001${current}`);
+    expect(searchTargetHref('/genes/symbol/gyrA', current)).toBe(`/genes/symbol/gyrA${current}`);
+    expect(searchTargetHref('/genomes/KPN0001', '')).toBe('/genomes/KPN0001');
+  });
+
+  it('lets the non-set parameters of a target parameters replace those of the same name', () => {
+    expect(searchTargetHref('/genes?search=DNA%20gyrase', '?sort=n50:asc&search=old&page=2')).toBe(
+      '/genes?sort=n50:asc&page=2&search=DNA%20gyrase',
+    );
   });
 });
 

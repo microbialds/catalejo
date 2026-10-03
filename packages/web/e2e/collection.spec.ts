@@ -13,10 +13,11 @@ import { compareText, encodeFilters } from '../src/set/filters';
 import type { GenomeFilters } from '../src/set/filters';
 import { strings } from '../src/strings';
 import {
-  chipRemove,
+  barChipLabels,
   collectionReady,
   counterValues,
   escapeRegExp,
+  expectBarChip,
   facetOption,
   genomeTable,
   mainArea,
@@ -123,7 +124,7 @@ test.describe('C2 clicking a chart element or a facet value adds its chip', () =
         ),
       })
       .click();
-    await expect(chipRemove(setBar(page), sau.canonical_name)).toBeVisible();
+    await expectBarChip(page, sau.canonical_name);
     expect(urlFilters(page)).toEqual({ species_code: ['SAU'] });
     await expect(setCount(page)).toHaveText(formatCount(sau.genome_count));
   });
@@ -149,8 +150,8 @@ test.describe('C2 clicking a chart element or a facet value adds its chip', () =
       drug_class: [drugClass?.key],
       species_code: ['KPN'],
     });
-    await expect(chipRemove(setBar(page), kpn.canonical_name)).toBeVisible();
-    await expect(chipRemove(setBar(page), `${strings.chipPrefixDrugClass} ${label}`)).toBeVisible();
+    await expectBarChip(page, kpn.canonical_name);
+    await expectBarChip(page, `${strings.chipPrefixDrugClass} ${label}`);
   });
 
   test('a facet value', async ({ page }) => {
@@ -158,9 +159,7 @@ test.describe('C2 clicking a chart element or a facet value adds its chip', () =
     await collectionReady(page);
     const rail = await openFacets(page);
     await facetOption(rail, strings.sourceTypeClinical).check();
-    await expect(
-      chipRemove(setBar(page), `${strings.chipPrefixSourceType} ${strings.sourceTypeClinical}`),
-    ).toBeVisible();
+    await expectBarChip(page, `${strings.chipPrefixSourceType} ${strings.sourceTypeClinical}`);
     expect(urlFilters(page)).toEqual({ source_type: ['clinical'] });
   });
 
@@ -172,7 +171,7 @@ test.describe('C2 clicking a chart element or a facet value adds its chip', () =
       .first();
     const value = Number(((await year.getAttribute('aria-label')) ?? '').slice(0, 4));
     await year.click();
-    await expect(chipRemove(setBar(page), strings.chipYear(value))).toBeVisible();
+    await expectBarChip(page, strings.chipYear(value));
     expect(urlFilters(page)).toEqual({ year: { max: value, min: value } });
     const expected = db.numbers(
       `SELECT count(*) AS n FROM ${GENOME} WHERE year(isolation_date) = ${String(value)}`,
@@ -207,9 +206,9 @@ test.describe('C2 a bar, a heatmap cell or a year replaces the values of the fie
         drug_class: ['quinolone'],
         species_code: ['SEN'],
       });
-    await expect(
-      chipRemove(setBar(page), `${strings.chipPrefixDrugClass} ${strings.drugClassAminoglycoside}`),
-    ).toHaveCount(0);
+    expect(await barChipLabels(page)).not.toContain(
+      `${strings.chipPrefixDrugClass} ${strings.drugClassAminoglycoside}`,
+    );
     const expected = db.numbers(
       `SELECT count(DISTINCT genome_id) AS n FROM ${parquet('summaries/amr_class_by_genome.parquet')} ` +
         `WHERE species_code = 'SEN' AND drug_class = 'quinolone'`,
@@ -344,9 +343,8 @@ test('C3 brushing the QC scatter adds completeness and contamination filters', a
   expect(Number.isFinite(completeness)).toBe(true);
   expect(Number.isFinite(contamination)).toBe(true);
   expect(Object.keys(filters).sort()).toEqual(['completeness_min', 'contamination_max']);
-  const bar = setBar(page);
-  await expect(chipRemove(bar, strings.chipCompleteness(percent(completeness)))).toBeVisible();
-  await expect(chipRemove(bar, strings.chipContamination(percent(contamination)))).toBeVisible();
+  await expectBarChip(page, strings.chipCompleteness(percent(completeness)));
+  await expectBarChip(page, strings.chipContamination(percent(contamination)));
   const expected = db.numbers(
     `SELECT count(*) AS n FROM ${GENOME} WHERE checkm2_completeness >= ${String(completeness)} ` +
       `AND checkm2_contamination <= ${String(contamination)}`,
@@ -478,6 +476,30 @@ test('C5 the table sorts, pages by 50, selects rows and "Use as set" yields them
         `SELECT genome_id FROM ${GENOME} ORDER BY amr_gene_count ASC NULLS LAST, genome_id LIMIT 50`,
       ),
     );
+
+  // Completeness prints integer percents with the exact value on hover, and
+  // sorts on the exact value (requirements §6.1).
+  const complName = strings.tableSortBy(strings.tableColumnCompleteness);
+  await table.getByRole('button', { name: complName, exact: true }).click();
+  const byCompleteness = db.rows(
+    `SELECT genome_id, checkm2_completeness AS c FROM ${GENOME} ` +
+      `ORDER BY checkm2_completeness DESC NULLS LAST, genome_id LIMIT 50`,
+  );
+  await expect
+    .poll(() => tableIds(page))
+    .toEqual(byCompleteness.map((row) => String(row.genome_id)));
+  const headers = await table.getByRole('columnheader').allInnerTexts();
+  const complColumn = headers.findIndex((text) =>
+    text.trim().startsWith(strings.tableColumnCompleteness),
+  );
+  const top = byCompleteness[0];
+  const exact = Number(top?.c);
+  const topCell = table.locator('tbody tr').first().locator('td').nth(complColumn);
+  await expect(topCell).toHaveText(strings.valuePercent(String(Math.round(exact))));
+  await expect(topCell.locator('[title]')).toHaveAttribute(
+    'title',
+    strings.valuePercent(exact.toFixed(2)),
+  );
 
   // Paging by 50: page 2 holds rows 51 to 100.
   await page.goto('/');
@@ -659,34 +681,53 @@ test('C6 heatmap values stay inside their cells from 1200 to 1440 px', async ({
   }
 });
 
-test('C7 the smallest species are "Other" in charts, not in the table, facets or chips', async ({
+test('C7 species without a registry color, and colored species beyond the eighth, are "Other" in charts only', async ({
   page,
 }, testInfo) => {
-  const ranked = [...manifest.species].sort(
-    (a, b) => b.genome_count - a.genome_count || compareText(a.species_code, b.species_code),
+  // Requirements §5.4 and §6.1: charts draw individually only the species
+  // with a registry color (a color_index, data contract §4.9; the summaries
+  // carry species.other otherwise), up to chart_species_max, ranked by genome
+  // count in the set, ties by code; every other species joins "Other".
+  // Tables, chips and facets keep every species individual.
+  const other = palette.species.other.toLowerCase();
+  const colorOf = new Map(
+    db
+      .rows(`SELECT species_code, color FROM ${parquet('summaries/counts_by_species.parquet')}`)
+      .map((row) => [String(row.species_code), String(row.color).toLowerCase()]),
   );
-  expect(ranked.length).toBeGreaterThan(platformConfig.chartSpeciesMax);
-  const other = ranked.slice(platformConfig.chartSpeciesMax);
-  expect(other.map((row) => row.species_code).sort()).toEqual(['EHO', 'SPN']);
-  const otherCount = other.reduce((total, row) => total + row.genome_count, 0);
+  const uncolored = manifest.species.filter((row) => colorOf.get(row.species_code) === other);
+  expect(uncolored.map((row) => row.species_code).sort()).toEqual(['EHO', 'SPN']);
+  const drawn = manifest.species
+    .filter((row) => colorOf.get(row.species_code) !== other)
+    .sort((a, b) => b.genome_count - a.genome_count || compareText(a.species_code, b.species_code))
+    .slice(0, platformConfig.chartSpeciesMax);
+  const grouped = manifest.species.filter(
+    (row) => !drawn.some((kept) => kept.species_code === row.species_code),
+  );
+  expect(grouped.map((row) => row.species_code).sort()).toEqual(['EHO', 'SPN']);
+  const otherCount = grouped.reduce((total, row) => total + row.genome_count, 0);
+  const otherBarName = (count: number) =>
+    strings.speciesBarName(strings.chartOther, formatCount(count), count);
 
   await page.goto('/');
   await collectionReady(page);
   const bars = panel(page, strings.panelSpecies);
   await expect(
-    bars.getByRole('button', {
-      name: strings.speciesBarName(strings.chartOther, formatCount(otherCount), otherCount),
-      exact: true,
-    }),
+    bars.getByRole('button', { name: otherBarName(otherCount), exact: true }),
   ).toBeVisible();
   await expect(bars.getByRole('button', { name: /, [\d,]+ genomes$/ })).toHaveCount(
-    platformConfig.chartSpeciesMax + 1,
+    drawn.length + 1,
   );
+  for (const row of drawn) {
+    await expect(
+      bars.getByRole('button', { name: new RegExp(`^${escapeRegExp(row.canonical_name)}, `) }),
+    ).toHaveCount(1);
+  }
   const years = panel(page, strings.panelYear);
   await expect(
     years.getByRole('button', { name: new RegExp(`^${strings.chartOther}, \\d{4}: `) }).first(),
   ).toBeAttached();
-  for (const row of other) {
+  for (const row of grouped) {
     const name = new RegExp(`^${escapeRegExp(row.canonical_name)}, `);
     await expect(bars.getByRole('button', { name })).toHaveCount(0);
     await expect(years.getByRole('button', { name })).toHaveCount(0);
@@ -696,7 +737,7 @@ test('C7 the smallest species are "Other" in charts, not in the table, facets or
     await expect(
       heatmap.getByRole('rowheader').filter({ hasText: strings.chartOther }),
     ).toHaveCount(1);
-    for (const row of other) {
+    for (const row of grouped) {
       await expect(heatmap.locator(`[title="${row.canonical_name}"]`)).toHaveCount(0);
     }
   }
@@ -711,11 +752,11 @@ test('C7 the smallest species are "Other" in charts, not in the table, facets or
   await expect(pager(page)).toContainText(strings.tablePageOf('2', '2'));
   await expect.poll(async () => (await tableSpecies()).length).toBe(manifest.genome_count - 50);
   for (const name of await tableSpecies()) seen.add(name);
-  for (const row of other) expect(seen.has(row.canonical_name), row.canonical_name).toBe(true);
+  for (const row of grouped) expect(seen.has(row.canonical_name), row.canonical_name).toBe(true);
 
-  // The facet lists them individually, and a chip names the species in full.
+  // The facet lists them individually.
   const rail = await openFacets(page);
-  for (const row of other) {
+  for (const row of grouped) {
     await expect(
       rail.getByRole('checkbox', {
         name: strings.facetOptionName(
@@ -727,15 +768,33 @@ test('C7 the smallest species are "Other" in charts, not in the table, facets or
       }),
     ).toBeVisible();
   }
+
+  // A set filtered to SPN, which has no registry color, shows only "Other" in
+  // the species chart; its chip names the species in full.
   const spn = species('SPN');
   await facetOption(rail, spn.canonical_name).check();
-  await expect(chipRemove(setBar(page), spn.canonical_name)).toBeVisible();
-  await expect(
-    setBar(page)
-      .getByRole('list', { name: strings.activeFiltersLabel })
-      .getByText(spn.canonical_name, { exact: true }),
-  ).toBeVisible();
   expect(urlFilters(page)).toEqual({ species_code: ['SPN'] });
+  await expectBarChip(page, spn.canonical_name);
+  await expect(bars.getByRole('button', { name: /, [\d,]+ genomes$/ })).toHaveCount(1);
+  await expect(
+    bars.getByRole('button', { name: otherBarName(spn.genome_count), exact: true }),
+  ).toBeVisible();
+  await expect(
+    bars.getByRole('button', { name: new RegExp(`^${escapeRegExp(spn.canonical_name)}, `) }),
+  ).toHaveCount(0);
+
+  // Clicking "Other" sets the species it holds (C2): from the whole release,
+  // both uncolored species, each with its own chip.
+  await page.goto('/');
+  await collectionReady(page);
+  await bars.getByRole('button', { name: otherBarName(otherCount), exact: true }).click();
+  await expect
+    .poll(() => urlFilters(page))
+    .toEqual({ species_code: grouped.map((row) => row.species_code).sort(compareText) });
+  await expect(setCount(page)).toHaveText(formatCount(otherCount));
+  expect([...(await barChipLabels(page))].sort()).toEqual(
+    grouped.map((row) => row.canonical_name).sort(),
+  );
 });
 
 test('C8 a species without an ST scheme shows the statement instead of bars', async ({ page }) => {

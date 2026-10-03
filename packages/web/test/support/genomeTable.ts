@@ -1,7 +1,9 @@
 // Pages of genome table rows for component tests (requirements §6.1, §5.3;
 // collection/genomeTable.ts): 50 Klebsiella rows per page, numbered from the
 // page's offset, and an `aggregate` stub that records the table's SQL and
-// answers with the page its OFFSET names.
+// answers with the page its OFFSET names. The Typing column's query
+// (src/data/typing.ts) is answered with the given typing rows, none by
+// default, and recorded apart, so `sql` holds the page queries only.
 import type { AggregateBuilder } from '../../src/data/setEngine';
 import { ENGINE_TABLES } from '../../src/data/setEngine';
 import { palette } from '../../src/generated/palette';
@@ -33,8 +35,15 @@ export function genomeRows(page: number) {
   });
 }
 
+export interface TypingStub {
+  /** Rows of tables/typing.parquet (genome_id, source_tool, key, value). */
+  rows?: Record<string, unknown>[];
+  /** The typing queries asked. */
+  sql?: string[];
+}
+
 /** An engine `aggregate` answering the table's page queries; SQL goes to `sql`. */
-export function tableAggregate(sql: string[] = []) {
+export function tableAggregate(sql: string[] = [], typing: TypingStub = {}) {
   return async <T>(_filters: GenomeFilters, build: AggregateBuilder): Promise<T[]> => {
     const text = await build({
       set: '(SET)',
@@ -42,6 +51,10 @@ export function tableAggregate(sql: string[] = []) {
       tables: ENGINE_TABLES,
       relation: (path) => Promise.resolve(`read_parquet('${path}')`),
     });
+    if (text.includes('tables/typing.parquet')) {
+      typing.sql?.push(text);
+      return (typing.rows ?? []) as T[];
+    }
     sql.push(text);
     const offset = /OFFSET (\d+)$/.exec(text)?.[1] ?? '0';
     return genomeRows(Number(offset) / 50) as T[];

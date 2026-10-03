@@ -7,6 +7,7 @@
 // the element blaKPC-2. Results are grouped by kind in a fixed order and
 // ranked within each kind: exact matches first, then prefix matches, then
 // other substring matches, each by genome count, then by length and term.
+import { SET_PARAMS, decodeFilters, encodeFilters } from '../set/filters';
 
 export type SearchKind =
   'genome_id' | 'accession' | 'gene' | 'element' | 'cluster' | 'product' | 'st';
@@ -155,7 +156,7 @@ export function exactGenomeMatch(index: SearchIndex, query: string): SearchEntry
   return found.length === 1 ? found[0] : undefined;
 }
 
-const SET_PARAM_NAMES: ReadonlySet<string> = new Set(['q', 'ids', 'set']);
+const SET_PARAM_NAMES: ReadonlySet<string> = new Set<string>(SET_PARAMS);
 
 function paramName(part: string): string {
   const mark = part.indexOf('=');
@@ -167,21 +168,43 @@ function paramName(part: string): string {
   }
 }
 
+function queryParts(search: string): string[] {
+  return (search.startsWith('?') ? search.slice(1) : search)
+    .split('&')
+    .filter((part) => part !== '');
+}
+
 /**
- * The href a search result opens (requirements §5.9). A target that carries
- * set parameters (a sequence type, `/?q=...`) is itself a filter and replaces
- * the query; any other target keeps the current query, with the target's own
- * parameters (`/genes?search=...`) replacing those of the same name.
+ * The href a search result opens (requirements §5.3, §5.9). A target that
+ * carries set parameters (a sequence type, `/?q=...`) is itself a filter: its
+ * set parameters replace those of the current query, `page` is dropped when
+ * the set changes, and `sort`, `cols` and every other parameter of the
+ * current query are kept (encodeFilters). Any other target keeps the whole
+ * current query. In both cases the target's own non-set parameters
+ * (`/genes?search=...`) replace those of the same name.
  */
 export function searchTargetHref(target: string, currentSearch: string): string {
   const mark = target.indexOf('?');
   const path = mark >= 0 ? target.slice(0, mark) : target;
-  const own = (mark >= 0 ? target.slice(mark + 1) : '').split('&').filter((part) => part !== '');
-  const current = (currentSearch.startsWith('?') ? currentSearch.slice(1) : currentSearch)
-    .split('&')
-    .filter((part) => part !== '');
+  const ownSearch = mark >= 0 ? target.slice(mark + 1) : '';
+  const own = queryParts(ownSearch);
   const ownNames = new Set(own.map(paramName));
-  if ([...ownNames].some((name) => SET_PARAM_NAMES.has(name))) return target;
-  const parts = [...current.filter((part) => !ownNames.has(paramName(part))), ...own];
+  const current = queryParts(currentSearch).filter((part) => !ownNames.has(paramName(part)));
+  if (![...ownNames].some((name) => SET_PARAM_NAMES.has(name))) {
+    const parts = [...current, ...own];
+    return parts.length === 0 ? path : `${path}?${parts.join('&')}`;
+  }
+  // encodeFilters compares the target's set with the set of the current
+  // query and drops `page` only when they differ, so the current set
+  // parameters stay in what it receives.
+  const kept = queryParts(currentSearch).filter((part) => {
+    const name = paramName(part);
+    return SET_PARAM_NAMES.has(name) || !ownNames.has(name);
+  });
+  const query = encodeFilters(decodeFilters(ownSearch), kept.join('&'));
+  const parts = [
+    ...queryParts(query),
+    ...own.filter((part) => !SET_PARAM_NAMES.has(paramName(part))),
+  ];
   return parts.length === 0 ? path : `${path}?${parts.join('&')}`;
 }

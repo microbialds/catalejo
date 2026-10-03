@@ -4,7 +4,10 @@
 // of its own, for the current set: sorting, paging by 50, the column chooser,
 // row selection with "Use as set" after a confirmation, and the same links
 // (genome identifiers to their genome page keeping the set, species and STs
-// to the collection filtered by them). The table export menu is shown at all
+// to the collection filtered by them). The sort, the page and the visible
+// columns are the same URL view parameters as on the collection page
+// (`sort=`, `page=`, `cols=` after the set parameters, §5.3; src/tableView.ts),
+// so they carry over between / and /genomes. The table export menu is shown at all
 // times, since the panel already spans the page. There is no facet rail and
 // no drawer; filters are changed from the set bar. An empty set never
 // reaches this page: the shell shows the empty-set message instead (§5.2).

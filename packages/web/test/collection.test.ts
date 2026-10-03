@@ -10,6 +10,7 @@ import {
   GENOME_COLUMNS,
   TABLE_PAGE_SIZE,
   genomePageSql,
+  isSortable,
   orderClause,
   pageCount,
 } from '../src/collection/genomeTable';
@@ -44,6 +45,7 @@ import {
 } from '../src/collection/sequenceTypes';
 import {
   OTHER_KEY,
+  hasRegistryColor,
   markStyle,
   rankSpecies,
   speciesGroups,
@@ -66,9 +68,25 @@ function species(code: string, count: number, color: string = colors[0]): Specie
   return { species_code: code, canonical_name: `${code} name`, color, genome_count: count };
 }
 
-/** The synthetic release's species counts, from its manifest. */
+/**
+ * The synthetic release's species uncolored in its registry (no color_index,
+ * data contract §4.9): their summary color is species.other. The engine test
+ * in collectionData.test.ts reads the same from the release summaries.
+ */
+const SYNTH_UNCOLORED = new Set(['SPN', 'EHO']);
+
+/** The synthetic release's species counts, from its manifest, with their registry colors. */
 function synthSpecies(): SpeciesCount[] {
-  return readSynthManifest().species.map((row) => species(row.species_code, row.genome_count));
+  let next = 0;
+  return readSynthManifest()
+    .species.slice()
+    .sort((a, b) => b.genome_count - a.genome_count)
+    .map((row) => {
+      const color = SYNTH_UNCOLORED.has(row.species_code)
+        ? palette.species.other
+        : (colors[next++ % colors.length] ?? colors[0]);
+      return species(row.species_code, row.genome_count, color);
+    });
 }
 
 describe('"Other" grouping (requirements §5.4, §6.1; C7)', () => {
@@ -104,13 +122,56 @@ describe('"Other" grouping (requirements §5.4, §6.1; C7)', () => {
     });
   });
 
-  it('has no "Other" with eight species or fewer', () => {
-    const eight = synthSpecies()
-      .sort((a, b) => b.genome_count - a.genome_count)
-      .slice(0, 8);
+  it('has no "Other" with eight colored species or fewer', () => {
+    const eight = synthSpecies().filter((row) => !SYNTH_UNCOLORED.has(row.species_code));
+    expect(eight).toHaveLength(8);
     const groups = speciesGroups(eight);
     expect(groups).toHaveLength(8);
     expect(groups.some((group) => group.key === OTHER_KEY)).toBe(false);
+  });
+
+  it('groups an uncolored species even when it is the largest in the set', () => {
+    const groups = speciesGroups([
+      species('SPN', 40, palette.species.other),
+      species('KPN', 3, colors[0]),
+      species('ECO', 2, colors[4]),
+    ]);
+    expect(groups.map((group) => group.key)).toEqual(['KPN', 'ECO', OTHER_KEY]);
+    expect(groups.at(-1)).toMatchObject({ codes: ['SPN'], genomeCount: 40 });
+  });
+
+  it('draws a set of only uncolored species as a single "Other" bar', () => {
+    const groups = speciesGroups([
+      species('SPN', 4, palette.species.other),
+      species('EHO', 3, palette.species.other.toUpperCase()),
+    ]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toMatchObject({
+      key: OTHER_KEY,
+      label: strings.chartOther,
+      isSpecies: false,
+      color: palette.species.other,
+      codes: ['SPN', 'EHO'],
+      genomeCount: 7,
+    });
+  });
+
+  it('groups uncolored species and colored species beyond the eighth together', () => {
+    const colored = Array.from({ length: 9 }, (_, i) =>
+      species(`S${String(i)}A`, 20 - i, colors[i % colors.length] ?? colors[0]),
+    );
+    const groups = speciesGroups([...colored, species('UNC', 30, palette.species.other)]);
+    expect(groups.map((group) => group.key)).toEqual([
+      ...colored.slice(0, 8).map((row) => row.species_code),
+      OTHER_KEY,
+    ]);
+    expect(groups.at(-1)?.codes).toEqual(['UNC', 'S8A']);
+  });
+
+  it('tells a registry color from the Other gray in any case', () => {
+    expect(hasRegistryColor(colors[0])).toBe(true);
+    expect(hasRegistryColor(palette.species.other)).toBe(false);
+    expect(hasRegistryColor(palette.species.other.toUpperCase())).toBe(false);
   });
 
   it('groups a single ninth species', () => {
@@ -689,7 +750,23 @@ describe('genome table SQL (C5)', () => {
     expect(clause).toBe('ORDER BY t.genome_id ASC');
   });
 
+  it('does not sort by the Typing column', () => {
+    expect(isSortable('typing')).toBe(false);
+    expect(isSortable('checkm2_completeness')).toBe(true);
+    expect(orderClause({ id: 'typing', desc: true })).toBe('ORDER BY t.genome_id ASC');
+  });
+
+  it('sorts completeness and contamination on the exact value', () => {
+    expect(orderClause({ id: 'checkm2_completeness', desc: true })).toBe(
+      'ORDER BY t.checkm2_completeness DESC NULLS LAST, t.genome_id ASC',
+    );
+    expect(orderClause({ id: 'checkm2_contamination', desc: false })).toBe(
+      'ORDER BY t.checkm2_contamination ASC NULLS LAST, t.genome_id ASC',
+    );
+  });
+
   it('offers the board columns by default and the chooser columns hidden', () => {
+    // Requirements 0.8 §6.1: the Typing column is shown by default, after Compl. as on the board.
     expect(GENOME_COLUMNS.filter((c) => c.defaultVisible).map((c) => c.header)).toEqual([
       strings.tableColumnGenome,
       strings.tableColumnSpecies,
@@ -699,6 +776,7 @@ describe('genome table SQL (C5)', () => {
       strings.tableColumnAmr,
       strings.tableColumnPlasmids,
       strings.tableColumnCompleteness,
+      strings.tableColumnTyping,
     ]);
     expect(GENOME_COLUMNS.filter((c) => !c.defaultVisible).map((c) => c.id)).toEqual([
       'country',

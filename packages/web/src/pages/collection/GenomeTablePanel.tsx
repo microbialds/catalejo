@@ -1,8 +1,15 @@
-// Genome table of the collection page (requirements §6.1, §5.2, §5.9;
+// Genome table of the collection page (requirements §6.1, §5.2, §5.3, §5.9;
 // checklist C5, G2, G11; collection board, table). TanStack Table in manual
-// mode holds the sorting, paging, column visibility and row selection state,
+// mode draws the sorting, paging, column visibility and row selection state,
 // while sorting and paging run in DuckDB (collection/genomeTable.ts): one
-// page of 50 rows per request, total pages from the set count. Genome
+// page of 50 rows per request, total pages from the set count. The sort, the
+// page and the visible columns live in the URL after the set parameters
+// (src/tableView.ts, §5.3): each change pushes a history entry, so Back
+// restores it, a reload keeps it, and a change of set drops the page and
+// keeps the sort and the columns. After the rows of a page, the Typing
+// column's values are read for its genomes (src/data/typing.ts), so the page
+// settles once. Completeness and contamination print integer percents with
+// the exact value in the cell's title (§6.1). Genome
 // identifiers link to their genome page keeping the set; species and STs
 // link to the collection filtered by them (links that are themselves
 // filters), in the quiet link tier of tables (§5.4). Selection is kept by
@@ -57,16 +64,21 @@ import type { PanelExpansion } from '../../components/Panel';
 import { SpeciesName, Swatch } from '../../components/Species';
 import { Table } from '../../components/Table';
 import type { TableColumn, TableRow } from '../../components/Table';
+import { useManifest } from '../../data/manifest';
 import type { SetEngine } from '../../data/setEngine';
 import { useEngineQuery, useSetCount } from '../../data/setEngineContext';
+import { TYPING_FILE, readTyping } from '../../data/typing';
 import { formatCount } from '../../format';
 import { QUIET_LINK } from '../../linkTier';
 import { palette } from '../../generated/palette';
+import { useRouter } from '../../router';
 import { vocabularyLabel } from '../../set/fields';
-import { filtersKey } from '../../set/filters';
+import { decodeFilters, filtersKey } from '../../set/filters';
 import type { GenomeFilters } from '../../set/filters';
 import { useGenomeSet } from '../../set/store';
 import { strings } from '../../strings';
+import { canonicalColumns, decodeTableView, encodeTableView, tableViewKey } from '../../tableView';
+import type { TableView } from '../../tableView';
 import { useSettled } from './data';
 
 const features = tableFeatures({
@@ -85,9 +97,10 @@ const COLUMN_BY_ID = new Map(GENOME_COLUMNS.map((column) => [column.id, column])
 // The table's results render at low priority, behind the facet rail (C4).
 const LOW_PRIORITY = { priority: 'low' } as const;
 
-const initialVisibility: ColumnVisibilityState = Object.fromEntries(
-  GENOME_COLUMNS.map((column) => [column.id, column.defaultVisible]),
-);
+function visibilityOf(columns: readonly string[]): ColumnVisibilityState {
+  const shown = new Set(columns);
+  return Object.fromEntries(GENOME_COLUMNS.map((column) => [column.id, shown.has(column.id)]));
+}
 
 function resolve<T>(updater: Updater<T>, current: T): T {
   return typeof updater === 'function' ? (updater as (old: T) => T)(current) : updater;
@@ -112,6 +125,20 @@ function count(value: number | null): ReactNode {
 function percent(value: number | null): ReactNode {
   const text = fixed(value, 1);
   return mono(text === null ? null : strings.valuePercent(text));
+}
+
+/**
+ * A CheckM2 percent as an integer, with the exact value (two decimals, the
+ * precision CheckM2 writes; the FLOAT column reads back with float noise) in
+ * the title (§6.1).
+ */
+function wholePercent(value: number | null): ReactNode {
+  if (value === null) return missing();
+  return (
+    <span className="font-mono" title={strings.valuePercent(value.toFixed(2))}>
+      {strings.valuePercent(String(Math.round(value)))}
+    </span>
+  );
 }
 
 function useCellRenderer() {
@@ -171,7 +198,13 @@ function cell(
     case 'plasmid_contig_count':
       return count(row.plasmid_contig_count);
     case 'checkm2_completeness':
-      return percent(row.checkm2_completeness);
+      return wholePercent(row.checkm2_completeness);
+    case 'typing':
+      return row.typing === null ? (
+        missing()
+      ) : (
+        <span className="font-mono text-text-secondary">{row.typing}</span>
+      );
     case 'country':
       return mono(row.country);
     case 'platform':
@@ -181,7 +214,7 @@ function cell(
         ? missing()
         : vocabularyLabel('assembly_status', row.assembly_status);
     case 'checkm2_contamination':
-      return percent(row.checkm2_contamination);
+      return wholePercent(row.checkm2_contamination);
     case 'genome_size': {
       const text = row.genome_size === null ? null : (row.genome_size / 1e6).toFixed(2);
       return mono(text === null ? null : strings.valueMegabases(text));
@@ -200,17 +233,62 @@ interface Keyed<T> {
   value: T;
 }
 
+/** The view a set is drawn with, and the set it was taken for. */
+interface AdoptedView {
+  key: string;
+  view: TableView;
+  viewKey: string;
+}
+
+/**
+ * The table view to draw for the set `setKey`. On the collection page the
+ * table may draw an older set than the URL's while the new one loads (see
+ * ../Collection.tsx); the URL's view belongs to the URL's set, so it is taken
+ * only once the table draws that set, and until then the table keeps the view
+ * it had, on the first page for a set other than the one it was taken for.
+ */
+function useTableView(setKey: string): TableView {
+  const { search } = useRouter();
+  const urlView = useMemo(() => decodeTableView(search), [search]);
+  const urlSetKey = useMemo(() => filtersKey(decodeFilters(search)), [search]);
+  const urlViewKey = tableViewKey(urlView);
+  const [adopted, setAdopted] = useState<AdoptedView>({
+    key: setKey,
+    view: urlView,
+    viewKey: urlViewKey,
+  });
+  let current = adopted;
+  if (urlSetKey === setKey && (adopted.key !== setKey || adopted.viewKey !== urlViewKey)) {
+    current = { key: setKey, view: urlView, viewKey: urlViewKey };
+    setAdopted(current);
+  }
+  return current.key === setKey ? current.view : { ...current.view, pageIndex: 0 };
+}
+
+/** Pushes a new table view onto the history, keeping the rest of the query (§5.3). */
+function useWriteTableView(): (next: TableView) => void {
+  const { navigate } = useRouter();
+  return useCallback(
+    (next: TableView) => {
+      const { pathname, search, hash } = window.location;
+      navigate(`${pathname}${hash}`, { replaceQuery: encodeTableView(next, search) });
+    },
+    [navigate],
+  );
+}
+
 export function GenomeTablePanel({ expansion }: { expansion?: PanelExpansion }) {
   const { filters, replaceWithIds } = useGenomeSet();
+  const manifest = useManifest();
+  const hasTyping = manifest?.files.some((file) => file.path === TYPING_FILE) ?? false;
   const setKey = filtersKey(filters);
   const total = useSetCount(filters, LOW_PRIORITY);
+  const view = useTableView(setKey);
+  const writeView = useWriteTableView();
 
-  // Sorting, the page and the selection belong to one set: a new set starts
-  // on the first page with nothing selected (derived during render).
-  const [sorting, setSorting] = useState<Keyed<SortingState>>({ key: setKey, value: [] });
-  const [pageIndex, setPageIndex] = useState<Keyed<number>>({ key: setKey, value: 0 });
+  // The selection belongs to one set: a new set starts with nothing selected
+  // (derived during render). The sort, the page and the columns are the URL's.
   const [selection, setSelection] = useState<Keyed<RowSelectionState>>({ key: setKey, value: {} });
-  const [visibility, setVisibility] = useState<ColumnVisibilityState>(initialVisibility);
   const [confirming, setConfirming] = useState(false);
   const useAsSetButton = useRef<HTMLButtonElement>(null);
   const [chooserOpen, setChooserOpen] = useState(false);
@@ -222,8 +300,15 @@ export function GenomeTablePanel({ expansion }: { expansion?: PanelExpansion }) 
   // Escape closes the column chooser and returns the focus to "Columns"; a
   // pointer down outside it closes it (requirements §9).
   useDismiss(chooserOpen, { root: chooserRoot, trigger: chooserButton, onClose: closeChooser });
-  const sortingState = sorting.key === setKey ? sorting.value : [];
-  const page = pageIndex.key === setKey ? pageIndex.value : 0;
+  const pages = pageCount(total ?? 0);
+  const sort = view.sort;
+  // A page past the last one, from an edited URL, shows the last page.
+  const page = total === undefined ? view.pageIndex : Math.min(view.pageIndex, pages - 1);
+  const sortingState: SortingState = useMemo(
+    () => (sort === undefined ? [] : [{ id: sort.id, desc: sort.desc }]),
+    [sort],
+  );
+  const visibility = useMemo(() => visibilityOf(view.columns), [view.columns]);
   const selected = selection.key === setKey ? selection.value : NO_SELECTION;
   const pagination: PaginationState = { pageIndex: page, pageSize: TABLE_PAGE_SIZE };
   // As a row's selection toggle does in TanStack Table: true when on, absent when off.
@@ -239,19 +324,28 @@ export function GenomeTablePanel({ expansion }: { expansion?: PanelExpansion }) 
     [setKey],
   );
 
-  const sort = sortingState[0];
   const sortKey = sort === undefined ? '' : `${sort.id}:${sort.desc ? 'desc' : 'asc'}`;
   const run = useMemo(
     () => async (engine: SetEngine) => {
-      const rows = await engine.aggregate(
-        filters,
-        (context) => genomePageSql(context, sort, page),
-        'low',
-      );
+      const rows = (
+        await engine.aggregate(filters, (context) => genomePageSql(context, sort, page), 'low')
+      ).map(genomeRow);
+      // The Typing column's values for this page; without them the cells
+      // show the missing-value mark, and the page still shows.
+      const typing = hasTyping
+        ? await readTyping(
+            engine,
+            filters,
+            rows.map((row) => row.genome_id),
+          ).catch(() => new Map<string, string>())
+        : new Map<string, string>();
       // The rows carry their page, which the pager states (see below).
-      return { page, rows: rows.map(genomeRow) };
+      return {
+        page,
+        rows: rows.map((row) => ({ ...row, typing: typing.get(row.genome_id) ?? null })),
+      };
     },
-    [filters, sort, page],
+    [filters, sort, page, hasTyping],
   );
   const result = useEngineQuery(`table:${setKey}:${sortKey}:${String(page)}`, run, LOW_PRIORITY);
   const rowsState = useSettled(result);
@@ -269,6 +363,7 @@ export function GenomeTablePanel({ expansion }: { expansion?: PanelExpansion }) 
             id: column.id,
             header: column.header,
             enableHiding: column.id !== 'genome_id',
+            enableSorting: column.orderBy.length > 0,
             sortDescFirst: column.numeric,
           }),
         ),
@@ -292,23 +387,31 @@ export function GenomeTablePanel({ expansion }: { expansion?: PanelExpansion }) 
       rowSelection: selected,
       columnVisibility: visibility,
     },
+    // A new sort starts on the first page; a new page or new columns keep the rest.
     onSortingChange: (updater) => {
-      setSorting({ key: setKey, value: resolve(updater, sortingState) });
-      setPageIndex({ key: setKey, value: 0 });
+      const next = resolve(updater, sortingState)[0];
+      writeView({
+        ...view,
+        sort: next === undefined ? undefined : { id: next.id, desc: next.desc },
+        pageIndex: 0,
+      });
     },
     onPaginationChange: (updater) => {
-      setPageIndex({ key: setKey, value: resolve(updater, pagination).pageIndex });
+      writeView({ ...view, pageIndex: resolve(updater, pagination).pageIndex });
     },
     onRowSelectionChange: (updater) => {
       setSelection({ key: setKey, value: resolve(updater, selected) });
     },
     onColumnVisibilityChange: (updater) => {
-      setVisibility((current) => resolve(updater, current));
+      const next = resolve(updater, visibility);
+      const shownIds = GENOME_COLUMNS.filter((column) => next[column.id] === true).map(
+        (column) => column.id,
+      );
+      writeView({ ...view, columns: canonicalColumns(shownIds) ?? view.columns });
     },
   });
 
   const selectedIds = Object.keys(selected).filter((id) => selected[id] === true);
-  const pages = pageCount(total ?? 0);
   const visibleColumns = table.getVisibleLeafColumns();
 
   const pageRows = table.getRowModel().rows;
@@ -337,11 +440,15 @@ export function GenomeTablePanel({ expansion }: { expansion?: PanelExpansion }) 
         id: column.id,
         header,
         numeric: definition?.numeric ?? false,
-        sort: column.getIsSorted(),
-        onSort: () => {
-          column.toggleSorting(undefined, false);
-        },
-        sortName: strings.tableSortBy(header),
+        ...(column.getCanSort()
+          ? {
+              sort: column.getIsSorted(),
+              onSort: () => {
+                column.toggleSorting(undefined, false);
+              },
+              sortName: strings.tableSortBy(header),
+            }
+          : {}),
       };
     }),
   ];

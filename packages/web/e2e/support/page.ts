@@ -1,8 +1,9 @@
 // Page helpers shared by the Playwright specs: the shell's landmarks by their
 // accessible names from src/strings.ts, the controls that exist only at
 // narrow widths (the "Menu" toggle below 900 px, the "Filters" drawer toggle
-// below 1200 px, requirements §5.10), the current set decoded from the URL
-// (§5.3), and a recorder of every request the page makes (§9).
+// below 1200 px, requirements §5.10, and the set bar's "Set" control and
+// "+N more" chips, §5.1), the current set decoded from the URL (§5.3), and a
+// recorder of every request the page makes (§9).
 import { expect } from '@playwright/test';
 import type { BrowserContext, Locator, Page, TestInfo } from '@playwright/test';
 import { decodeFilters } from '../../src/set/filters';
@@ -132,6 +133,96 @@ export function facetOption(rail: Locator, value: string): Locator {
 /** The remove control of the chip whose label is `text` (prefix and value). */
 export function chipRemove(scope: Locator, text: string): Locator {
   return scope.getByRole('button', { name: strings.removeFilter(text), exact: true });
+}
+
+/** The set bar's "+N more" control, present when some chips do not fit on its line (§5.1). */
+export function moreFilters(page: Page): Locator {
+  return setBar(page).getByRole('button', { name: /^\+\d+ more$/ });
+}
+
+/** The popover list of every chip, opened from "+N more". */
+export function allChips(page: Page): Locator {
+  return setBar(page).getByRole('list', { name: strings.allFiltersLabel });
+}
+
+/**
+ * `pick` within the set bar's chips, where it shows: on the bar's line, or in
+ * the "+N more" popover, which this opens when the line does not show it
+ * (requirements §5.1). Returns the visible locator.
+ */
+export async function inBarChips(page: Page, pick: (chips: Locator) => Locator): Promise<Locator> {
+  const line = pick(setBar(page).getByRole('list', { name: strings.activeFiltersLabel }));
+  const more = moreFilters(page);
+  await expect(line.or(more).first()).toBeVisible({ timeout: 20_000 });
+  if (await line.isVisible()) return line;
+  if ((await more.getAttribute('aria-expanded')) !== 'true') await more.click();
+  const listed = pick(allChips(page));
+  await expect(listed).toBeVisible();
+  return listed;
+}
+
+/** Closes the "+N more" popover when it is open; Escape returns the focus to the control. */
+export async function closeAllChips(page: Page): Promise<void> {
+  const more = moreFilters(page);
+  if ((await more.count()) > 0 && (await more.getAttribute('aria-expanded')) === 'true') {
+    await page.keyboard.press('Escape');
+    await expect(allChips(page)).toBeHidden();
+  }
+}
+
+/** Expects the chip whose label is `text` in the set bar, on its line or behind "+N more". */
+export async function expectBarChip(page: Page, text: string): Promise<void> {
+  await inBarChips(page, (chips) => chipRemove(chips, text));
+  await closeAllChips(page);
+}
+
+/** The labels of every chip of the set bar, the ones behind "+N more" included, in order. */
+export async function barChipLabels(page: Page): Promise<string[]> {
+  const more = moreFilters(page);
+  const hidden = (await more.count()) > 0;
+  if (hidden && (await more.getAttribute('aria-expanded')) !== 'true') await more.click();
+  const scope = hidden
+    ? allChips(page)
+    : setBar(page).getByRole('list', { name: strings.activeFiltersLabel });
+  const names = await scope
+    .getByRole('button', { name: new RegExp(`^${escapeRegExp(strings.removeFilter(''))}`) })
+    .evaluateAll((buttons) => buttons.map((button) => button.getAttribute('aria-label') ?? ''));
+  if (hidden) await closeAllChips(page);
+  const prefix = strings.removeFilter('');
+  return names.map((name) => name.slice(prefix.length));
+}
+
+/**
+ * Opens the set bar's "Set" control where the actions are grouped behind it
+ * (below 1200 px, components/Shell.tsx); returns the scope that holds "+ add
+ * filter", "complete genomes only", "Share link" and "Save set".
+ */
+export async function setActions(page: Page): Promise<Locator> {
+  const bar = setBar(page);
+  const toggle = bar.getByRole('button', { name: strings.setMenuToggle, exact: true });
+  if (!(await toggle.isVisible())) return bar;
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+  const panel = bar.getByRole('dialog', { name: strings.setMenuLabel });
+  await expect(panel).toBeVisible();
+  return panel;
+}
+
+/**
+ * The global search field: in the set bar, or below 900 px at the top of the
+ * navigation menu, which this opens (requirements §5.1).
+ */
+export async function searchField(page: Page): Promise<Locator> {
+  const inBar = setBar(page).getByRole('combobox');
+  if (await inBar.isVisible()) return inBar;
+  const toggle = page.getByRole('button', { name: strings.menuToggle, exact: true });
+  if ((await toggle.isVisible()) && (await toggle.getAttribute('aria-expanded')) === 'false') {
+    await toggle.click();
+  }
+  const field = page
+    .locator(`#${(await toggle.getAttribute('aria-controls')) ?? ''}`)
+    .getByRole('combobox');
+  await expect(field).toBeVisible();
+  return field;
 }
 
 /** The filters of the current URL. */

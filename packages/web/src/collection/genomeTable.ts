@@ -2,9 +2,13 @@
 // collection board, table). Sorting and paging run in DuckDB over the set's
 // rows of genome_facts: ORDER BY the sorted column with nulls last and
 // genome_id as the tiebreak, so every page is deterministic, then LIMIT 50
-// OFFSET. Only the columns listed here can be sorted, so no name from the
-// interface state reaches the SQL. Species sort by canonical name, read from
-// summaries/counts_by_species.parquet; STs sort numerically when all digits.
+// OFFSET. Only the sortable columns listed here can be sorted, so no name
+// from the interface state or the URL (src/tableView.ts) reaches the SQL.
+// Species sort by canonical name, read from summaries/counts_by_species.parquet;
+// STs sort numerically when all digits. Completeness and contamination sort
+// on the exact value although the cells print integer percents. The Typing
+// column holds the typing chip values of the page's genomes, read after the
+// page from tables/typing.parquet (src/data/typing.ts); it does not sort.
 import type { AggregateContext } from '../data/setEngine';
 import { RELEASE_FILES } from '../data/setEngine';
 import { strings } from '../strings';
@@ -20,6 +24,7 @@ export type GenomeColumnId =
   | 'amr_gene_count'
   | 'plasmid_contig_count'
   | 'checkm2_completeness'
+  | 'typing'
   | 'country'
   | 'platform'
   | 'assembly_status'
@@ -32,11 +37,14 @@ export type GenomeColumnId =
 export interface GenomeColumn {
   id: GenomeColumnId;
   header: string;
-  /** Shown by default (the board's columns, without Typing). */
+  /** Shown by default (the board's columns). */
   defaultVisible: boolean;
   /** Numbers are right-aligned in monospace. */
   numeric: boolean;
-  /** The ORDER BY expressions over `t` (the set) and `s` (species names). */
+  /**
+   * The ORDER BY expressions over `t` (the set) and `s` (species names); a
+   * column without them does not sort.
+   */
   orderBy: readonly string[];
 }
 
@@ -96,6 +104,13 @@ export const GENOME_COLUMNS: readonly GenomeColumn[] = [
     defaultVisible: true,
     numeric: true,
     orderBy: ['t.checkm2_completeness'],
+  },
+  {
+    id: 'typing',
+    header: strings.tableColumnTyping,
+    defaultVisible: true,
+    numeric: false,
+    orderBy: [],
   },
   {
     id: 'country',
@@ -161,6 +176,16 @@ export function isGenomeColumnId(id: string): id is GenomeColumnId {
   return byId.has(id as GenomeColumnId);
 }
 
+/** Whether a column sorts (Typing does not). */
+export function isSortable(id: string): id is GenomeColumnId {
+  return isGenomeColumnId(id) && (byId.get(id)?.orderBy.length ?? 0) > 0;
+}
+
+/** The columns shown by default, in table order. */
+export const DEFAULT_COLUMN_IDS: readonly GenomeColumnId[] = GENOME_COLUMNS.filter(
+  (column) => column.defaultVisible,
+).map((column) => column.id);
+
 export interface TableSort {
   id: string;
   desc: boolean;
@@ -168,10 +193,10 @@ export interface TableSort {
 
 /** The ORDER BY clause: the sorted column, nulls last, then genome_id. */
 export function orderClause(sort: TableSort | undefined): string {
-  const column = sort !== undefined && isGenomeColumnId(sort.id) ? byId.get(sort.id) : undefined;
-  if (column === undefined || column.id === 'genome_id') {
+  const column = sort !== undefined && isSortable(sort.id) ? byId.get(sort.id) : undefined;
+  if (column === undefined) return 'ORDER BY t.genome_id ASC';
+  if (column.id === 'genome_id')
     return `ORDER BY t.genome_id ${sort?.desc === true ? 'DESC' : 'ASC'}`;
-  }
   const direction = sort?.desc === true ? 'DESC' : 'ASC';
   const parts = column.orderBy.map((expression) => `${expression} ${direction} NULLS LAST`);
   return `ORDER BY ${parts.join(', ')}, t.genome_id ASC`;
@@ -215,6 +240,8 @@ export interface GenomeRow {
   contig_count: number | null;
   n50: number | null;
   gc_content: number | null;
+  /** The typing chip values joined, null when none or not read yet. */
+  typing: string | null;
 }
 
 function textOrNull(value: unknown): string | null {
@@ -250,6 +277,7 @@ export function genomeRow(row: Record<string, unknown>): GenomeRow {
     contig_count: numberOrNull(row.contig_count),
     n50: numberOrNull(row.n50),
     gc_content: numberOrNull(row.gc_content),
+    typing: null,
   };
 }
 

@@ -31,7 +31,12 @@ export default defineConfig({
     },
     {
       name: 'chromium-390',
-      testMatch: ['**/global.spec.ts', '**/collection.spec.ts', '**/genomes.spec.ts'],
+      testMatch: [
+        '**/global.spec.ts',
+        '**/collection.spec.ts',
+        '**/genomes.spec.ts',
+        '**/tableView.spec.ts',
+      ],
       use: { ...devices['Desktop Chrome'], viewport: { width: 390, height: 844 } },
     },
   ],

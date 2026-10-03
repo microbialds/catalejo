@@ -1,10 +1,15 @@
 // Species groups of the collection charts (requirements §5.4, §6.1; checklist
-// C7). The species of a set are ranked by genome count, descending, ties by
-// species code ascending. When more than `chart_species_max` species are
-// present (config/platform.yaml), the first that many are drawn
-// individually and the rest are grouped as "Other" in the species bars, the
-// year chart and the heatmap rows; with that many or fewer there is no
-// "Other". Tables, chips and facets always show individual species.
+// C7). Charts draw individually only the species with a registry color, that
+// is with a color_index in species_registry (data contract §4.9); a species
+// without one carries the palette's species.other as its summary `color`.
+// Those species are ranked by genome count in the set, descending, ties by
+// species code ascending, and the first `chart_species_max`
+// (config/platform.yaml) are drawn individually; every other species, an
+// uncolored one however large or a colored one beyond that many, joins
+// "Other" in the species bars, the year chart and the heatmap rows, so that
+// the Other gray always means a group. When every species of the set is
+// drawn individually there is no "Other". Tables, chips and facets always
+// show individual species.
 //
 // Colors: an individual species keeps its registry color (the summaries'
 // `color`), "Other" is the palette's species.other. A mark in a species color
@@ -49,7 +54,16 @@ export function rankSpecies<T extends { species_code: string; genome_count: numb
     .sort((a, b) => b.genome_count - a.genome_count || compareText(a.species_code, b.species_code));
 }
 
-/** The chart groups of a set's species (requirements §6.1, "Other" rule). */
+/**
+ * Whether a species has a registry color: its color is not the palette's
+ * species.other, which the summaries carry for a species without a
+ * color_index (data contract §4.9).
+ */
+export function hasRegistryColor(color: string): boolean {
+  return color.toLowerCase() !== palette.species.other.toLowerCase();
+}
+
+/** The chart groups of a set's species (requirements §5.4, §6.1, "Other" rule). */
 export function speciesGroups(
   rows: readonly SpeciesCount[],
   max: number = platformConfig.chartSpeciesMax,
@@ -63,11 +77,13 @@ export function speciesGroups(
     codes: [row.species_code],
     genomeCount: row.genome_count,
   });
-  if (ranked.length <= max) return ranked.map(single);
-  const kept = ranked.slice(0, max).map(single);
-  const rest = ranked.slice(max);
+  const drawn = ranked.filter((row) => hasRegistryColor(row.color)).slice(0, max);
+  const kept = new Set(drawn.map((row) => row.species_code));
+  const rest = ranked.filter((row) => !kept.has(row.species_code));
+  const groups = drawn.map(single);
+  if (rest.length === 0) return groups;
   return [
-    ...kept,
+    ...groups,
     {
       key: OTHER_KEY,
       label: strings.chartOther,

@@ -8,9 +8,9 @@
 // Viewport (§5.10): from 900 px the left column stays in view while the page
 // scrolls. Below 900 px (breakpoint_compact) the grid stacks and the column
 // becomes a top bar with the wordmark and a "Menu" text button that opens the
-// navigation and footer; the menu closes when the path changes, on Escape
-// (the focus returns to "Menu"), on a pointer down outside the top bar, and
-// at the end of a press on another disclosure control such as "Filters", so
+// search field, the navigation and the footer; the menu closes when the path
+// or the set changes, on Escape (the focus returns to "Menu"), on a pointer
+// down outside the top bar, and at the end of a press on another disclosure control such as "Filters", so
 // that the press lands on that control before the menu leaves the page flow
 // (components/useDismiss.ts, §9), and when the viewport widens to 900 px,
 // where the column shows the navigation without it. Below 1200 px
@@ -23,6 +23,16 @@
 // complete-genomes toggle, the global search and the actions. When a
 // filtered set has no genome, the main area shows only the empty-set
 // message (requirements §5.2).
+//
+// The set bar keeps its 56 px height at every width (§5.1). Below
+// SET_MENU_BELOW, "+ add filter", "complete genomes only", "Share link" and
+// "Save set" are grouped behind the "Set" control (components/SetActions.tsx).
+// §5.1 places that grouping below 900 px; it is set at the drawer breakpoint
+// (1200 px) because at 1024 px the bar has 776 px inside its padding and the
+// inline controls, the search field, "Filters", the count and the phrase
+// need about 970 px with no chip at all (measured on the synthetic release).
+// Below the compact breakpoint the search field leaves the bar, which has no
+// room for it at 390 px, for the top of the navigation menu.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useManifest } from '../data/manifest';
@@ -39,15 +49,19 @@ import { SetProvider, useGenomeSet } from '../set/store';
 import { strings } from '../strings';
 import { AddFilterMenu } from './AddFilterMenu';
 import { EmptySet } from './EmptySet';
-import { FilterChips } from './FilterChips';
+import { BarFilterChips } from './FilterChips';
 import { GlobalSearch } from './GlobalSearch';
 import { Link } from './Link';
 import { Navigation } from './Navigation';
 import { SetBar } from './SetBar';
-import { CompleteToggle, SetActions } from './SetActions';
+import { CompleteToggle, SetActions, SetMenu } from './SetActions';
 import { useDismiss } from './useDismiss';
+import { useMinWidth } from './useMinWidth';
 
 const MENU_ID = 'shell-menu';
+
+/** The width below which the set actions are grouped behind "Set" (see above). */
+const SET_MENU_BELOW = tokens.layout.breakpoint_drawer;
 
 function Wordmark() {
   return (
@@ -125,23 +139,26 @@ function useLayoutState(pathname: string): LayoutState {
   );
 }
 
-function CurrentSet({ children }: { children: ReactNode }) {
+function CurrentSet({ children, compact }: { children: ReactNode; compact: boolean }) {
   const { filters } = useGenomeSet();
   const count = useSetCount(filters);
   const empty = count === 0 && !isWholeRelease(filters);
+  const grouped = !useMinWidth(SET_MENU_BELOW);
   return (
     <>
       <SetBar
         count={count}
-        chips={
-          <>
-            <FilterChips />
-            <AddFilterMenu />
-            <CompleteToggle />
-          </>
+        chips={<BarFilterChips />}
+        inline={
+          grouped ? undefined : (
+            <>
+              <AddFilterMenu />
+              <CompleteToggle />
+            </>
+          )
         }
-        search={<GlobalSearch />}
-        actions={<SetActions />}
+        search={compact ? undefined : <GlobalSearch />}
+        actions={grouped ? <SetMenu /> : <SetActions />}
       />
       <main className="relative flex min-w-0 grow flex-col">{empty ? <EmptySet /> : children}</main>
     </>
@@ -157,12 +174,16 @@ export function Shell({ children }: { children: ReactNode }) {
 }
 
 function ShellLayout({ children }: { children: ReactNode }) {
-  const { pathname } = useRouter();
+  const { pathname, search } = useRouter();
   const layout = useLayoutState(pathname);
+  const compact = !useMinWidth(tokens.layout.breakpoint_compact);
+  // The menu is keyed by the location, so that it closes when the path or the
+  // set changes (a search result opened from the menu, §5.1).
+  const location = `${pathname}${search}`;
   const [menuOpenAt, setMenuOpenAt] = useState<string | null>(null);
-  const menuOpen = menuOpenAt === pathname;
+  const menuOpen = menuOpenAt === location;
   const toggleMenu = () => {
-    setMenuOpenAt(menuOpen ? null : pathname);
+    setMenuOpenAt(menuOpen ? null : location);
   };
   const closeMenu = useCallback(() => {
     setMenuOpenAt(null);
@@ -210,13 +231,18 @@ function ShellLayout({ children }: { children: ReactNode }) {
             id={MENU_ID}
             className={`flex grow flex-col ${menuOpen ? 'max-compact:pt-4' : 'max-compact:hidden'}`}
           >
+            {compact && (
+              <div className="px-nav-item-padding-x pb-4">
+                <GlobalSearch placement="menu" />
+              </div>
+            )}
             <Navigation />
             <div className="grow max-compact:h-4 max-compact:grow-0" />
             <ReleaseFooter />
           </div>
         </div>
         <div className="flex min-w-0 flex-col">
-          <CurrentSet>{children}</CurrentSet>
+          <CurrentSet compact={compact}>{children}</CurrentSet>
         </div>
       </div>
     </LayoutContext>

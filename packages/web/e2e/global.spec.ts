@@ -21,18 +21,26 @@ import type { GenomeFilters } from '../src/set/filters';
 import { shortSpeciesName } from '../src/set/fields';
 import { strings } from '../src/strings';
 import {
+  allChips,
+  barChipLabels,
   chipRemove,
+  closeAllChips,
   collectionReady,
   counters,
   escapeRegExp,
+  expectBarChip,
   facetOption,
   facetRail,
+  inBarChips,
   mainArea,
+  moreFilters,
   navigation,
   openFacets,
   openMenu,
   panel,
   recordRequests,
+  searchField,
+  setActions,
   setBar,
   setCount,
   settledSetCount,
@@ -282,10 +290,7 @@ test('G2 typography of species, identifiers, counts and genes', async ({ page },
   // Gene and element names are italic monospace: a resistance determinant chip.
   await page.goto(`/${encodeFilters({ presence_amr: ['blaKPC-2'] })}`);
   await settledSetCount(page);
-  const chip = setBar(page)
-    .getByRole('list', { name: strings.activeFiltersLabel })
-    .getByText('blaKPC-2', { exact: true });
-  await expect(chip).toBeVisible();
+  const chip = await inBarChips(page, (chips) => chips.getByText('blaKPC-2', { exact: true }));
   const chipStyle = await chip.evaluate((element) => {
     const style = getComputedStyle(element);
     return { fontStyle: style.fontStyle, family: style.fontFamily };
@@ -578,10 +583,11 @@ test('G3 checkboxes are drawn from the palette, not by the browser', async ({ pa
     await expect(drawerToggle).toHaveAttribute('aria-expanded', 'false');
   }
 
-  // "Complete genomes only" in the set bar.
-  const complete = setBar(page).getByRole('checkbox', { name: strings.completeOnly });
-  if (await complete.isVisible()) {
-    expect(await checkboxPaint(complete), 'complete genomes box').toEqual(unchecked);
+  // "Complete genomes only" in the set bar, behind "Set" below 1200 px.
+  const complete = (await setActions(page)).getByRole('checkbox', { name: strings.completeOnly });
+  expect(await checkboxPaint(complete), 'complete genomes box').toEqual(unchecked);
+  if (await setBar(page).getByRole('dialog', { name: strings.setMenuLabel }).isVisible()) {
+    await page.keyboard.press('Escape');
   }
 
   // The table: a row box and the select-all box in its mixed state.
@@ -668,9 +674,7 @@ test('G3 links: underlined at rest in running text, on hover and focus in tables
   await settledSetCount(page);
   await expectQuietLink(
     page,
-    setBar(page)
-      .getByRole('list', { name: strings.activeFiltersLabel })
-      .getByRole('link', { name: 'blaKPC-2', exact: true }),
+    await inBarChips(page, (chips) => chips.getByRole('link', { name: 'blaKPC-2', exact: true })),
     'chip link',
   );
 
@@ -859,9 +863,18 @@ test('G6 set bar: large numeral, phrase, chips, add filter, Share link, Save set
   expect(firstFamily(numeral.family)).toBe(MONO);
   expect(numeral.size).toBe(tokens.typography.sizes.set_count);
   await expect(bar.getByText(strings.setBarPhrase, { exact: true })).toBeVisible();
-  await expect(bar.getByRole('button', { name: strings.addFilter, exact: true })).toBeVisible();
-  await expect(bar.getByRole('button', { name: strings.shareLink, exact: true })).toBeVisible();
-  await expect(bar.getByRole('button', { name: strings.saveSet, exact: true })).toBeVisible();
+  // Below 1200 px the actions are grouped behind the "Set" text control (§5.1).
+  const actions = await setActions(page);
+  for (const name of [strings.addFilter, strings.shareLink, strings.saveSet]) {
+    await expect(actions.getByRole('button', { name, exact: true })).toBeVisible();
+  }
+  await expect(actions.getByRole('checkbox', { name: strings.completeOnly })).toBeVisible();
+  // The search field: in the bar, or at the top of the Menu below 900 px.
+  await expect(await searchField(page)).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(bar.getByRole('dialog', { name: strings.setMenuLabel })).toBeHidden();
+  const menu = page.getByRole('button', { name: strings.menuToggle, exact: true });
+  if (await menu.isVisible()) await expect(menu).toHaveAttribute('aria-expanded', 'false');
 
   const kpn = species('KPN');
   await panel(page, strings.panelSpecies)
@@ -873,10 +886,116 @@ test('G6 set bar: large numeral, phrase, chips, add filter, Share link, Save set
       ),
     })
     .click();
-  const chips = bar.getByRole('list', { name: strings.activeFiltersLabel });
-  await expect(chips.getByRole('listitem')).toHaveCount(1);
-  await expect(chipRemove(chips, kpn.canonical_name)).toBeVisible();
   await expect(count).toHaveText(formatCount(kpn.genome_count));
+  await expectBarChip(page, kpn.canonical_name);
+  expect(await barChipLabels(page)).toEqual([kpn.canonical_name]);
+});
+
+test('G6 the set bar is 56 px high with 0, 1 and 6 filters; "+N more" lists the hidden chips', async ({
+  page,
+}, testInfo) => {
+  // Requirements §5.1: the bar keeps its height at every width; the chips
+  // that do not fit on its line are counted by "+N more", which opens the
+  // full list, in the store's order.
+  const width = widthOf(testInfo);
+  const six: GenomeFilters = {
+    species_code: ['KPN', 'SEN'],
+    source_type: ['clinical'],
+    country: ['CL'],
+    year: { min: 2015, max: 2022 },
+    presence_amr: ['blaKPC-2'],
+  };
+  const sixLabels = [
+    species('KPN').canonical_name,
+    species('SEN').canonical_name,
+    `${strings.chipPrefixSourceType} ${strings.sourceTypeClinical}`,
+    `${strings.chipPrefixCountry} CL`,
+    strings.chipYearRange(2015, 2022),
+    'blaKPC-2',
+  ];
+  const sets: [string, GenomeFilters][] = [
+    ['no filter', {}],
+    ['one filter', { species_code: ['KPN'] }],
+    ['six filters', six],
+  ];
+  const bar = setBar(page);
+  for (const [name, filters] of sets) {
+    await page.goto(`/${encodeFilters(filters)}`);
+    await settledSetCount(page);
+    await page.evaluate(() => document.fonts.ready.then(() => undefined));
+    const box = await bar.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      return {
+        height: rect.height,
+        overflow: element.scrollWidth - element.clientWidth,
+        page: document.documentElement.scrollWidth - window.innerWidth,
+      };
+    });
+    expect(`${String(box.height)}px`, `${name} at ${String(width)} px`).toBe(
+      tokens.layout.set_bar_height,
+    );
+    expect(box.overflow, `${name}: the bar does not scroll sideways`).toBeLessThanOrEqual(0);
+    expect(box.page, `${name}: the page does not scroll sideways`).toBeLessThanOrEqual(0);
+    await expect(setCount(page)).toBeVisible();
+    await expect(bar.getByText(/^genomes? in the current set$/)).toBeVisible();
+    if (width < 1200) {
+      await expect(
+        bar.getByRole('button', { name: strings.drawerToggle, exact: true }),
+      ).toBeVisible();
+      await expect(
+        bar.getByRole('button', { name: strings.setMenuToggle, exact: true }),
+      ).toBeVisible();
+    }
+  }
+
+  // Six filters do not fit on one line at any of the three widths.
+  const more = moreFilters(page);
+  await expect(more).toBeVisible();
+  const hidden = Number(/^\+(\d+) more$/.exec(await more.innerText())?.[1]);
+  expect(hidden).toBeGreaterThan(0);
+  const line = bar.getByRole('list', { name: strings.activeFiltersLabel });
+  const shown = 6 - hidden;
+  await expect(line.getByRole('listitem')).toHaveCount(shown);
+  await more.click();
+  await expect(more).toHaveAttribute('aria-expanded', 'true');
+  const listed = allChips(page);
+  await expect(listed.getByRole('listitem')).toHaveCount(6);
+  const removeNames = (scope: typeof listed) =>
+    scope
+      .getByRole('button', { name: new RegExp(`^${escapeRegExp(strings.removeFilter(''))}`) })
+      .evaluateAll((buttons) => buttons.map((button) => button.getAttribute('aria-label') ?? ''));
+  expect(await removeNames(listed)).toEqual(sixLabels.map((label) => strings.removeFilter(label)));
+  expect(await removeNames(line)).toEqual(
+    sixLabels.slice(0, shown).map((label) => strings.removeFilter(label)),
+  );
+  const popover = await bar
+    .getByRole('dialog', { name: strings.allFiltersLabel })
+    .evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      return { left: rect.left, right: rect.right };
+    });
+  expect(popover.left).toBeGreaterThanOrEqual(0);
+  expect(popover.right).toBeLessThanOrEqual(width);
+  await page.keyboard.press('Escape');
+  await expect(listed).toBeHidden();
+  await expect(more).toBeFocused();
+
+  // A hidden chip is removed from the popover; the count follows.
+  await more.click();
+  await chipRemove(listed, 'blaKPC-2').click();
+  await expect.poll(() => urlFilters(page)).toEqual({ ...six, presence_amr: undefined });
+  await closeAllChips(page);
+  expect(await barChipLabels(page)).toEqual(sixLabels.slice(0, 5));
+
+  // The empty set keeps the bar and its actions.
+  await page.goto(`/${encodeFilters({ species_code: ['SMA'], st: ['258'] })}`);
+  await expect(mainArea(page).getByText(strings.emptySetStatement)).toBeVisible({
+    timeout: 30_000,
+  });
+  const height = await bar.evaluate((element) => element.getBoundingClientRect().height);
+  expect(`${String(height)}px`).toBe(tokens.layout.set_bar_height);
+  const actions = await setActions(page);
+  await expect(actions.getByRole('button', { name: strings.saveSet, exact: true })).toBeEnabled();
 });
 
 test('disabled navigation items are reached by Tab and show their tooltip on focus', async ({
@@ -968,18 +1087,18 @@ test('G9 reload reproduces the set; route changes keep the query', async ({ page
   const kpn = species('KPN');
   await page.goto('/');
   await collectionReady(page);
-  const rail = await openFacets(page);
-  await facetOption(rail, kpn.canonical_name).check();
-  await expect(chipRemove(setBar(page), kpn.canonical_name)).toBeVisible();
-  await facetOption(rail, strings.sourceTypeClinical).check();
-  await expect(
-    chipRemove(setBar(page), `${strings.chipPrefixSourceType} ${strings.sourceTypeClinical}`),
-  ).toBeVisible();
+  const clinical = `${strings.chipPrefixSourceType} ${strings.sourceTypeClinical}`;
+  await facetOption(await openFacets(page), kpn.canonical_name).check();
+  await expectBarChip(page, kpn.canonical_name);
+  // Opening "+N more" (narrow widths) closes the drawer; it opens again.
+  await facetOption(await openFacets(page), strings.sourceTypeClinical).check();
+  await expectBarChip(page, clinical);
   expect(urlFilters(page)).toEqual({ source_type: ['clinical'], species_code: ['KPN'] });
   const count = await settledSetCount(page);
   await expect(counters(page).getByRole('definition').first()).toHaveText(formatCount(count));
-  const chips = setBar(page).getByRole('list', { name: strings.activeFiltersLabel });
-  const chipTexts = await chips.getByRole('listitem').allTextContents();
+  const chipTexts = await barChipLabels(page);
+  expect(chipTexts).toEqual([kpn.canonical_name, clinical]);
+  const chips = { labels: () => barChipLabels(page) };
   const search = new URL(page.url()).search;
   const shown = await counters(page).getByRole('definition').allInnerTexts();
 
@@ -987,18 +1106,18 @@ test('G9 reload reproduces the set; route changes keep the query', async ({ page
   await collectionReady(page);
   expect(new URL(page.url()).search).toBe(search);
   expect(await settledSetCount(page)).toBe(count);
-  await expect(chips.getByRole('listitem')).toHaveText(chipTexts);
+  await expect.poll(chips.labels).toEqual(chipTexts);
   await expect(counters(page).getByRole('definition')).toHaveText(shown);
 
   await openMenu(page);
   await navigation(page).getByRole('link', { name: strings.pageGenes, exact: true }).click();
   await expect(page).toHaveURL((url) => url.pathname === '/genes' && url.search === search);
   expect(await settledSetCount(page)).toBe(count);
-  await expect(chips.getByRole('listitem')).toHaveText(chipTexts);
+  await expect.poll(chips.labels).toEqual(chipTexts);
 
   await page.reload();
   expect(await settledSetCount(page)).toBe(count);
-  await expect(chips.getByRole('listitem')).toHaveText(chipTexts);
+  await expect.poll(chips.labels).toEqual(chipTexts);
 
   await openMenu(page);
   await navigation(page).getByRole('link', { name: strings.pageCollection, exact: true }).click();
@@ -1006,11 +1125,6 @@ test('G9 reload reproduces the set; route changes keep the query', async ({ page
   await collectionReady(page);
   await expect(counters(page).getByRole('definition')).toHaveText(shown);
 });
-
-/** The search field of the set bar. */
-function searchField(page: Page): Locator {
-  return setBar(page).getByRole('combobox');
-}
 
 function resultGroup(page: Page, kindLabel: string): Locator {
   return page
@@ -1027,19 +1141,21 @@ test('G10 global search resolves each kind, groups results, opens an exact genom
   const genomeId = (
     await table.locator('tbody tr').first().locator('a').first().innerText()
   ).trim();
-  const search = searchField(page);
+  // Below 900 px the field sits at the top of the Menu, opened again after
+  // each navigation.
+  const search = () => searchField(page);
 
   // A single exact genome identifier opens the genome page directly.
-  await search.fill(genomeId);
+  await (await search()).fill(genomeId);
   await expect(
     resultGroup(page, strings.searchKindGenome).getByRole('option', { name: new RegExp(genomeId) }),
   ).toBeVisible({ timeout: 20_000 });
-  await search.press('Enter');
+  await (await search()).press('Enter');
   await expect(page).toHaveURL((url) => url.pathname === `/genomes/${genomeId}`);
 
   // Results are grouped by kind, in the order of requirements §5.8.
   await page.goto('/');
-  await search.fill('dna');
+  await (await search()).fill('dna');
   const listbox = page.getByRole('listbox', { name: strings.searchResultsLabel });
   await expect(listbox.getByRole('group').first()).toBeVisible({ timeout: 20_000 });
   const names = await listbox.getByRole('group').evaluateAll((groups) =>
@@ -1057,7 +1173,7 @@ test('G10 global search resolves each kind, groups results, opens an exact genom
   ];
   for (const [query, kind, option, path] of cases) {
     await page.goto('/');
-    await search.fill(query);
+    await (await search()).fill(query);
     const result = resultGroup(page, kind).getByRole('option', { name: option }).first();
     await expect(result).toBeVisible({ timeout: 20_000 });
     await result.click();
@@ -1067,7 +1183,7 @@ test('G10 global search resolves each kind, groups results, opens an exact genom
   // Every kind matches by substring: "KPC" finds the elements KPC-2 and
   // blaKPC-2, the prefix match first (open point 5a).
   await page.goto('/');
-  await search.fill('KPC');
+  await (await search()).fill('KPC');
   const elements = resultGroup(page, strings.searchKindElement);
   await expect(elements.getByRole('option').first()).toBeVisible({ timeout: 20_000 });
   const terms = await elements
@@ -1078,7 +1194,7 @@ test('G10 global search resolves each kind, groups results, opens an exact genom
 
   // A sequence type result filters the collection by species and ST.
   await page.goto('/');
-  await search.fill('ST258');
+  await (await search()).fill('ST258');
   const kpn = species('KPN');
   const st = resultGroup(page, strings.searchKindSt).getByRole('option', {
     name: new RegExp(`^ST258\\s*${escapeRegExp(kpn.canonical_name)}`),
@@ -1088,8 +1204,8 @@ test('G10 global search resolves each kind, groups results, opens an exact genom
   await st.click();
   await expect(page).toHaveURL((url) => url.pathname === '/');
   expect(urlFilters(page)).toEqual({ species_code: ['KPN'], st: ['258'] });
-  await expect(chipRemove(setBar(page), kpn.canonical_name)).toBeVisible();
-  await expect(chipRemove(setBar(page), strings.chipSt('258'))).toBeVisible();
+  await expectBarChip(page, kpn.canonical_name);
+  await expectBarChip(page, strings.chipSt('258'));
   await expect(setCount(page)).toHaveText(expectedCount);
 });
 
@@ -1157,15 +1273,15 @@ test('G11 species, genome identifiers, STs and gene names are links', async ({ p
   const filters: GenomeFilters = { presence_amr: ['blaKPC-2'] };
   await page.goto(`/${encodeFilters(filters)}`);
   await settledSetCount(page);
-  const chip = setBar(page)
-    .getByRole('list', { name: strings.activeFiltersLabel })
-    .getByRole('link', { name: 'blaKPC-2', exact: true });
+  const chip = await inBarChips(page, (chips) =>
+    chips.getByRole('link', { name: 'blaKPC-2', exact: true }),
+  );
   await expect(chip).toHaveAttribute('href', `/genes/element/blaKPC-2${encodeFilters(filters)}`);
   await chip.click();
   await expect(page).toHaveURL((url) => url.pathname === '/genes/element/blaKPC-2');
   expect(urlFilters(page)).toEqual(filters);
 
-  await searchField(page).fill('dnaA');
+  await (await searchField(page)).fill('dnaA');
   const option = resultGroup(page, strings.searchKindGene).getByRole('option', { name: /^dnaA/ });
   await option.click({ timeout: 20_000 });
   await expect(page).toHaveURL((url) => url.pathname === '/genes/symbol/dnaA');
@@ -1192,9 +1308,9 @@ test('G11 species, genome identifiers, STs and gene names are links', async ({ p
   };
   await page.goto(`/${encodeFilters(mutationFilters)}`);
   await settledSetCount(page);
-  const mutationChip = setBar(page)
-    .getByRole('list', { name: strings.activeFiltersLabel })
-    .getByRole('link', { name: `${mutation.gene}_${mutation.variant}`, exact: true });
+  const mutationChip = await inBarChips(page, (chips) =>
+    chips.getByRole('link', { name: `${mutation.gene}_${mutation.variant}`, exact: true }),
+  );
   await expect(mutationChip).toHaveAttribute(
     'href',
     `/genes/symbol/${encodeURIComponent(mutation.gene)}${encodeFilters(mutationFilters)}`,
@@ -1381,7 +1497,7 @@ test('the compact Menu closes on Escape and on a pointer down outside, activatin
   await expect.poll(() => Object.keys(urlFilters(page))).toEqual(['species_code']);
 });
 
-test('one press on Filters, "+ add filter" or "expand" with the compact Menu open opens it', async ({
+test('one press on Filters, "Set" or "expand" with the compact Menu open opens it', async ({
   page,
 }, testInfo) => {
   // Requirements §5.10 and §9; the maintainer's exception for disclosure
@@ -1402,14 +1518,26 @@ test('one press on Filters, "+ add filter" or "expand" with the compact Menu ope
   await page.keyboard.press('Escape');
   await expect(facetRail(page)).toBeHidden();
 
-  const addFilter = setBar(page).getByRole('button', { name: strings.addFilter, exact: true });
+  // Below 900 px "+ add filter" is behind "Set" (requirements §5.1); one press
+  // on "Set" opens it, and one on "+ add filter" inside it opens the menu.
+  const set = setBar(page).getByRole('button', { name: strings.setMenuToggle, exact: true });
+  const setPanel = setBar(page).getByRole('dialog', { name: strings.setMenuLabel });
   await openMenu(page);
+  await set.click();
+  await expect(setPanel).toBeVisible();
+  await expect(set).toHaveAttribute('aria-expanded', 'true');
+  await expect(navigation(page)).toBeHidden();
+  await expect(menu).toHaveAttribute('aria-expanded', 'false');
+  const addFilter = setPanel.getByRole('button', { name: strings.addFilter, exact: true });
   await addFilter.click();
   await expect(page.getByRole('dialog', { name: strings.addFilterMenuLabel })).toBeVisible();
   await expect(addFilter).toHaveAttribute('aria-expanded', 'true');
-  await expect(navigation(page)).toBeHidden();
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog', { name: strings.addFilterMenuLabel })).toBeHidden();
+  await expect(setPanel).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(setPanel).toBeHidden();
+  await expect(set).toBeFocused();
 
   const species = panel(page, strings.panelSpecies);
   const expand = species.getByRole('button', {
@@ -1430,7 +1558,7 @@ test('the search field shows a visible focus (§9)', async ({ page }) => {
   // field takes the hairline ink outline of every focused control.
   await page.goto('/methods');
   await shellReady(page);
-  const field = setBar(page).getByRole('combobox');
+  let field = await searchField(page);
   const paint = () =>
     field.evaluate((input) => {
       const label = input.closest('label');
@@ -1451,6 +1579,8 @@ test('the search field shows a visible focus (§9)', async ({ page }) => {
     outline: `${tokens.shape.hairline} solid ${ink}`,
   });
   await page.keyboard.press('Escape');
+  // Below 900 px that Escape also closes the Menu that holds the field.
+  field = await searchField(page);
   await field.blur();
   expect(await paint(), 'after blur').toEqual({ underline: `1px ${ink}`, outline: 'none' });
 });
@@ -1505,14 +1635,12 @@ test('G14 a collection session requests nothing outside the origin but Google Fo
 
   const rail = await openFacets(page);
   await facetOption(rail, strings.sourceTypeClinical).check();
-  await expect(
-    chipRemove(setBar(page), `${strings.chipPrefixSourceType} ${strings.sourceTypeClinical}`),
-  ).toBeVisible();
+  await expectBarChip(page, `${strings.chipPrefixSourceType} ${strings.sourceTypeClinical}`);
   await settledSetCount(page);
 
-  await searchField(page).fill('blaKPC');
+  await (await searchField(page)).fill('blaKPC');
   await expect(page.getByRole('option').first()).toBeVisible({ timeout: 20_000 });
-  await searchField(page).press('Escape');
+  await (await searchField(page)).press('Escape');
 
   await page.goto('/');
   await collectionReady(page);

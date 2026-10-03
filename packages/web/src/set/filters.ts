@@ -280,12 +280,20 @@ function encodeList(values: readonly string[]): string {
 }
 
 /**
+ * View parameters that belong to one set: a change of set drops them
+ * (requirements §5.3, "a change of set resets `page`"; src/tableView.ts).
+ */
+const SET_SCOPED_PARAMS: ReadonlySet<string> = new Set(['page']);
+
+/**
  * The query string for a filter object, with "?" or "" when empty. The set
  * parameters come first, as q, ids, set; every other parameter of `current`
- * follows unchanged and in its order.
+ * follows unchanged and in its order, except that `page` is dropped when the
+ * set differs from the one `current` carries.
  */
 export function encodeFilters(filters: GenomeFilters, current = ''): string {
   const canonical = canonicalFilters(filters);
+  const setChanged = filtersKey(canonical) !== filtersKey(decodeFilters(current));
   const parts: string[] = [];
   const inQ: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(canonical)) {
@@ -296,7 +304,9 @@ export function encodeFilters(filters: GenomeFilters, current = ''): string {
   if (canonical.set !== undefined) parts.push(`set=${encodeList(canonical.set)}`);
   const owned = new Set<string>(SET_PARAMS);
   for (const param of rawParams(current)) {
-    if (!owned.has(param.name)) parts.push(param.text);
+    if (owned.has(param.name)) continue;
+    if (setChanged && SET_SCOPED_PARAMS.has(param.name)) continue;
+    parts.push(param.text);
   }
   return parts.length === 0 ? '' : `?${parts.join('&')}`;
 }

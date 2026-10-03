@@ -8,7 +8,10 @@
 // Genome and gene targets keep the current set; a sequence type target is a
 // filter and replaces it. The field shows its focus (§9) through the
 // underline-field utility of index.css: a 2 px ink underline and the hairline
-// ink outline of every focused control.
+// ink outline of every focused control. It sits in the set bar, where it may
+// narrow to keep the bar on one line, or below the compact breakpoint at the
+// top of the navigation menu (`placement="menu"`, requirements §5.1), since
+// the 390 px bar has no room for it.
 import { useId, useMemo, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { useManifest } from '../data/manifest';
@@ -53,7 +56,12 @@ type IndexState =
   | { status: 'ready'; index: SearchIndex }
   | { status: 'error' };
 
-export function GlobalSearch() {
+const placementClass = {
+  bar: { root: 'relative min-w-36 shrink', field: 'w-70 max-w-full max-drawer:w-52' },
+  menu: { root: 'relative w-full', field: 'w-full' },
+} as const;
+
+export function GlobalSearch({ placement = 'bar' }: { placement?: 'bar' | 'menu' }) {
   const manifest = useManifest();
   const getEngine = useSetEngine();
   const { search, navigate } = useRouter();
@@ -141,8 +149,10 @@ export function GlobalSearch() {
     groups.slice(0, i).reduce((total, group) => total + group.matches.length, 0),
   );
   return (
-    <div className="relative">
-      <label className="flex h-7.5 w-70 items-center gap-2 px-0.5 underline-field max-drawer:w-52">
+    <div className={placementClass[placement].root}>
+      <label
+        className={`flex h-7.5 items-center gap-2 px-0.5 underline-field ${placementClass[placement].field}`}
+      >
         <span className="sr-only">{strings.searchLabel}</span>
         <input
           type="text"

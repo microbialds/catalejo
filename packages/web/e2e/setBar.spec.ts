@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { expect, test } from '@playwright/test';
 import { encodeFilters } from '../src/set/filters';
 import { strings } from '../src/strings';
+import { expectBarChip, setActions } from './support/page';
 
 const ALLOWED_HOSTS = new Set(['fonts.googleapis.com', 'fonts.gstatic.com']);
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -31,9 +32,9 @@ test('set bar with the synthetic release', async ({ page, baseURL }) => {
   await expect(bar.getByText(String(kpn?.genome_count), { exact: true })).toBeVisible({
     timeout: 20_000,
   });
-  await expect(bar.getByText('Klebsiella pneumoniae', { exact: true })).toBeVisible();
+  await expectBarChip(page, 'Klebsiella pneumoniae');
 
-  await bar.getByRole('button', { name: strings.addFilter }).click();
+  await (await setActions(page)).getByRole('button', { name: strings.addFilter }).click();
   await page.getByRole('button', { name: strings.filterFieldSt, exact: true }).click();
   await expect(page.getByRole('dialog').getByText('ST258', { exact: true })).toBeVisible();
   await page.keyboard.press('Escape');

@@ -45,7 +45,13 @@ interface Call {
 
 const text = (value: string) => new TextEncoder().encode(value);
 
-function fakeBucket(objects: Record<string, Stored>) {
+/**
+ * What the fake answers for a range that starts at or past the end of the
+ * object, which R2 does not document: a thrown error or null.
+ */
+type PastEnd = 'throw' | 'null';
+
+function fakeBucket(objects: Record<string, Stored>, pastEnd: PastEnd = 'throw') {
   const calls: Call[] = [];
   const meta = (key: string, stored: Stored): R2Object => ({
     key,
@@ -55,8 +61,9 @@ function fakeBucket(objects: Record<string, Stored>) {
       ? {}
       : { httpMetadata: { contentType: stored.contentType } }),
   });
-  // R2 returns the metadata without a body when onlyIf fails, refuses (throws
-  // for) a range that starts past the end, and clamps a length past the end.
+  // R2 returns the metadata without a body when onlyIf fails and clamps a
+  // length past the end; a range that starts past the end throws or returns
+  // null, as pastEnd says.
   const get = (key: string, options?: R2GetOptions): Promise<R2ObjectBody | R2Object | null> => {
     calls.push(options === undefined ? { method: 'get', key } : { method: 'get', key, options });
     const stored = objects[key];
@@ -74,7 +81,9 @@ function fakeBucket(objects: Record<string, Stored>) {
       } else {
         const offset = range.offset ?? 0;
         if (offset >= size) {
-          return Promise.reject(new Error('get: The requested range is not satisfiable (10039)'));
+          return pastEnd === 'null'
+            ? Promise.resolve(null)
+            : Promise.reject(new Error('get: The requested range is not satisfiable (10039)'));
         }
         bytes = bytes.slice(offset, range.length === undefined ? size : offset + range.length);
       }
@@ -142,10 +151,11 @@ interface Options {
   env?: Partial<Env>;
   objects?: Record<string, Stored>;
   bucket?: R2Bucket | null;
+  pastEnd?: PastEnd;
 }
 
 function context(segments: string[] | undefined, options: Options = {}) {
-  const fake = fakeBucket(options.objects ?? baseObjects());
+  const fake = fakeBucket(options.objects ?? baseObjects(), options.pastEnd);
   const next = vi.fn(() => Promise.resolve(new Response('from next', { status: 299 })));
   const url = `https://catalejo-main.pages.dev/data/${(segments ?? []).join('/')}`;
   const env: Env = { ...options.env };
@@ -748,6 +758,220 @@ describe('functions/data/[[path]] one R2 operation per read', () => {
     });
     expect(response.status).toBe(416);
     expect(calls.map((call) => call.method)).toEqual(['get', 'head']);
+  });
+});
+
+describe.each<PastEnd>(['throw', 'null'])(
+  'functions/data/[[path]] with a bucket whose get() past the end does %s',
+  (pastEnd) => {
+    const genomeKey = 'releases/synth/tables/genome.parquet';
+
+    /** The bucket calls of one request once the pointer is cached. */
+    async function operations(segments: string[], headers: Record<string, string> = {}) {
+      const fake = fakeBucket(baseObjects(), pastEnd);
+      await handle(context(['manifest.json'], { bucket: fake.bucket }).ctx);
+      fake.calls.length = 0;
+      const response = await handle(context(segments, { headers, bucket: fake.bucket }).ctx);
+      const body = await bytesOf(response);
+      return { response, body, calls: [...fake.calls] };
+    }
+
+    it.each([['bytes=9999-'], ['bytes=9999-10000'], [`bytes=${String(parquetBytes.byteLength)}-`]])(
+      'answers %s with 416 and the size after one get() and one head()',
+      async (range) => {
+        const { response, body, calls } = await operations(scoped('tables', 'genome.parquet'), {
+          Range: range,
+        });
+        expect(response.status).toBe(416);
+        expect(response.headers.get('Content-Range')).toBe(
+          `bytes */${String(parquetBytes.byteLength)}`,
+        );
+        expect(response.headers.get('Content-Length')).toBe('0');
+        expect(response.headers.get('Accept-Ranges')).toBe('bytes');
+        expect(response.headers.get('ETag')).toBe('"genome1"');
+        expect(response.headers.get('Cache-Control')).toBe(IMMUTABLE);
+        expect(body).toEqual(new Uint8Array(0));
+        expect(calls.map((call) => [call.method, call.key])).toEqual([
+          ['get', genomeKey],
+          ['head', genomeKey],
+        ]);
+      },
+    );
+
+    it('answers 416 for a range on an empty object', async () => {
+      const { response } = await operations(scoped('empty.parquet'), { Range: 'bytes=0-' });
+      expect(response.status).toBe(416);
+      expect(response.headers.get('Content-Range')).toBe('bytes */0');
+    });
+
+    it('answers 304 before 416 when the ETag matches', async () => {
+      const { response } = await operations(scoped('tables', 'genome.parquet'), {
+        Range: 'bytes=9999-',
+        'If-None-Match': 'W/"genome1"',
+      });
+      expect(response.status).toBe(304);
+    });
+
+    it('answers 404 for a missing key read with a range', async () => {
+      const key = 'releases/synth/tables/missing.parquet';
+      const { response, calls } = await operations(scoped('tables', 'missing.parquet'), {
+        Range: 'bytes=0-3',
+      });
+      expect(response.status).toBe(404);
+      expect(response.headers.get('Content-Range')).toBeNull();
+      expect(response.headers.get('Cache-Control')).toBe('no-store');
+      expect(calls.map((call) => [call.method, call.key])).toEqual([
+        ['get', key],
+        ['head', key],
+      ]);
+    });
+
+    it('answers 404 for a missing key read whole with a single get()', async () => {
+      const { response, calls } = await operations(scoped('tables', 'missing.parquet'));
+      expect(response.status).toBe(404);
+      expect(calls.map((call) => call.method)).toEqual(['get']);
+    });
+
+    it.each([['bytes=0-3'], ['bytes=4-'], ['bytes=-4'], ['bytes=10-9999']])(
+      'reads the satisfiable range %s with a single get()',
+      async (range) => {
+        const { response, calls } = await operations(scoped('tables', 'genome.parquet'), {
+          Range: range,
+        });
+        expect(response.status).toBe(206);
+        expect(calls.map((call) => call.method)).toEqual(['get']);
+      },
+    );
+  },
+);
+
+describe('functions/data/[[path]] a pointer that moved within the TTL', () => {
+  const oldPointer = 'releases/current.json';
+  /** A bucket on release synth with a newer release 2026-10 already uploaded. */
+  function moving() {
+    const objects: Record<string, Stored> = {
+      ...baseObjects(),
+      'releases/2026-10/manifest.json': { bytes: text('{}'), etag: 'new-manifest' },
+      'releases/2026-10/tables/genome.parquet': { bytes: parquetBytes, etag: 'genome10' },
+      'releases/2026-10/amr-network/tables/genome.parquet': {
+        bytes: parquetBytes,
+        etag: 'genome10g',
+      },
+    };
+    const fake = fakeBucket(objects);
+    const pointerReads = (key = oldPointer) => fake.calls.filter((call) => call.key === key).length;
+    const request = (segments: string[], env: Partial<Env> = {}) =>
+      handle(context(segments, { bucket: fake.bucket, env }).ctx);
+    return { objects, fake, pointerReads, request };
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-01T12:00:00Z'));
+  });
+
+  it('reads the pointer again and serves the new release it names', async () => {
+    const { objects, fake, pointerReads, request } = moving();
+    expect((await request(['manifest.json'])).status).toBe(200);
+    expect(pointerReads()).toBe(1);
+    objects[oldPointer] = pointer('2026-10');
+    vi.setSystemTime(Date.now() + POINTER_TTL_MS / 2);
+
+    fake.calls.length = 0;
+    const response = await request(['r', '2026-10', 'tables', 'genome.parquet']);
+    expect(response.status).toBe(200);
+    expect(response.headers.get(STALE_HEADER)).toBeNull();
+    expect(response.headers.get('ETag')).toBe('"genome10"');
+    expect(await bytesOf(response)).toEqual(parquetBytes);
+    expect(fake.calls.map((call) => call.key)).toEqual([
+      oldPointer,
+      'releases/2026-10/tables/genome.parquet',
+    ]);
+
+    // The cache now holds the new release: no further pointer read, and the
+    // manifest comes from it.
+    fake.calls.length = 0;
+    expect((await request(['r', '2026-10', 'tables', 'genome.parquet'])).status).toBe(200);
+    const manifest = await request(['manifest.json']);
+    expect(manifest.headers.get('ETag')).toBe('"new-manifest"');
+    expect(pointerReads()).toBe(0);
+  });
+
+  it('answers the stale 404 when the fresh pointer still names another release', async () => {
+    const { objects, fake, pointerReads, request } = moving();
+    await request(['manifest.json']);
+    objects[oldPointer] = pointer('2026-10');
+    fake.calls.length = 0;
+
+    const response = await request(['r', '2026-08', 'tables', 'genome.parquet']);
+    expect(response.status).toBe(404);
+    expect(response.headers.get(STALE_HEADER)).toBe(STALE_VALUE);
+    expect(fake.calls.map((call) => call.key)).toEqual([oldPointer]);
+
+    // The fresh read updated the cache, so the old release is now stale and
+    // the new one is served without reading the pointer.
+    fake.calls.length = 0;
+    expect((await request(scoped('tables', 'genome.parquet'))).headers.get(STALE_HEADER)).toBe(
+      STALE_VALUE,
+    );
+    expect(pointerReads()).toBe(1);
+    fake.calls.length = 0;
+    expect((await request(['r', '2026-10', 'tables', 'genome.parquet'])).status).toBe(200);
+    expect(pointerReads()).toBe(0);
+  });
+
+  it('answers the stale 404 after one pointer read when the pointer has not moved', async () => {
+    const { fake, request } = moving();
+    await request(['manifest.json']);
+    fake.calls.length = 0;
+    const response = await request(['r', '2026-10', 'tables', 'genome.parquet']);
+    expect(response.status).toBe(404);
+    expect(response.headers.get(STALE_HEADER)).toBe(STALE_VALUE);
+    expect(fake.calls.map((call) => call.key)).toEqual([oldPointer]);
+  });
+
+  it('reads no pointer for a request for the cached release', async () => {
+    const { objects, fake, pointerReads, request } = moving();
+    await request(['manifest.json']);
+    objects[oldPointer] = pointer('2026-10');
+    fake.calls.length = 0;
+    const response = await request(scoped('tables', 'genome.parquet'));
+    expect(response.status).toBe(200);
+    expect(pointerReads()).toBe(0);
+    expect(fake.calls.map((call) => call.key)).toEqual(['releases/synth/tables/genome.parquet']);
+  });
+
+  it('reads the pointer once for a mismatch on a cold cache', async () => {
+    const { fake, pointerReads, request } = moving();
+    const response = await request(['r', '2026-08', 'tables', 'genome.parquet']);
+    expect(response.headers.get(STALE_HEADER)).toBe(STALE_VALUE);
+    expect(pointerReads()).toBe(1);
+    expect(fake.calls).toHaveLength(1);
+  });
+
+  it('reads the group pointer again for a group instance', async () => {
+    const groupPointer = 'releases/amr-network/current.json';
+    const { objects, fake, pointerReads, request } = moving();
+    const env = group('amr-network');
+    await request(['manifest.json'], env);
+    objects[groupPointer] = pointer('2026-10');
+    fake.calls.length = 0;
+    const response = await request(['r', '2026-10', 'tables', 'genome.parquet'], env);
+    expect(response.status).toBe(200);
+    expect(fake.calls.map((call) => call.key)).toEqual([
+      groupPointer,
+      'releases/2026-10/amr-network/tables/genome.parquet',
+    ]);
+    expect(pointerReads()).toBe(0);
+  });
+
+  it('answers 503 when the pointer read again is gone', async () => {
+    const { objects, request } = moving();
+    await request(['manifest.json']);
+    delete objects['releases/current.json'];
+    const response = await request(['r', '2026-10', 'tables', 'genome.parquet']);
+    expect(response.status).toBe(503);
+    expect(response.headers.get(STALE_HEADER)).toBeNull();
   });
 });
 

@@ -46,7 +46,9 @@ export interface R2Bucket {
   /**
    * With onlyIf, an object whose precondition fails is returned without a
    * body (an R2Object), so the caller tells the two apart with "body" in it.
-   * An unsatisfiable range makes the call throw.
+   * A length past the end is clamped and a suffix longer than the object
+   * reads the whole object. What a range starting at or past the end does is
+   * not documented: the call may throw or return null.
    */
   get(
     key: string,

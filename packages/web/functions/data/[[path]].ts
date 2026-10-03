@@ -25,15 +25,27 @@
 // group's prefix. The main instance serves the full collection, whose prefix
 // contains the group prefixes (contract §6). The parsed pointer is kept in
 // module scope for POINTER_TTL_MS, so a new pointer is seen within that time.
+// Isolates refresh their pointers at different times, so a reader whose
+// manifest came from an isolate that already sees a new pointer may reach one
+// that still holds the old pointer. A request for /data/r/<release_id>/ whose
+// release differs from the cached one therefore reads the pointer once more,
+// bypassing and then updating the cache (unless this request has just read
+// it); the file is served when the fresh pointer names its release, and only
+// otherwise is the release stale. A request for the cached release reads no
+// pointer.
 //
 // DuckDB-WASM reads Parquet files in parts, so the Function answers HEAD and
 // a single byte range (206 with Content-Range, 416 when the range cannot be
 // satisfied), with Content-Length and Accept-Ranges, as the development
 // server does. A GET costs one R2 operation: the Range header becomes an R2
 // range and If-None-Match an onlyIf precondition of the same get() call, and
-// the object's size, returned with the part, gives the Content-Range. Only a
-// range R2 refuses (one that starts past the end) costs a head() to answer
-// 416 with the size. HEAD costs one head().
+// the object's size, returned with the part, gives the Content-Range. R2
+// supports suffix ranges and clamps a length past the end, but does not
+// document a range that starts at or past the end of the object: get() may
+// throw or return null. Either answer costs one head(), which gives 416 with
+// Content-Range: bytes */<size> when the object exists and 404 when it does
+// not; a missing key read with a range therefore costs a get() and a head().
+// HEAD costs one head().
 //
 // public/_routes.json sends /data/* to Functions. In development and in
 // `vite preview` the Vite plugin in vite/releaseData.ts serves releases/synth
@@ -181,46 +193,71 @@ function matches(ifNoneMatch: string | null, etag: string): boolean {
   return ifNoneMatch.split(',').some((tag) => tag.trim() === '*' || strip(tag) === strip(etag));
 }
 
-type Instance = { releaseId: string; prefix: string } | { error: string };
+/** The instance's release and prefix; fresh when the pointer was read from the bucket. */
+type Instance = { releaseId: string; prefix: string; fresh: boolean } | { error: string };
+
+/** The instance's pointer file key, or an error for an invalid CATALEJO_GROUP. */
+function pointerKeyFor(group: string): string | { error: string } {
+  if (group !== '' && !SAFE_ID.test(group)) {
+    return { error: 'The CATALEJO_GROUP variable is not a valid group identifier.' };
+  }
+  return group === '' ? 'releases/current.json' : `releases/${group}/current.json`;
+}
+
+/**
+ * Reads and parses a pointer file with one get(), and caches its release on
+ * success. A failed read leaves no cache entry, so the next request reads the
+ * pointer again.
+ */
+async function readPointer(
+  bucket: R2Bucket,
+  pointerKey: string,
+): Promise<string | { error: string }> {
+  pointerCache.delete(pointerKey);
+  const object = await bucket.get(pointerKey);
+  if (object === null) return { error: 'No current release is published for this instance.' };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await new Response(object.body).text());
+  } catch {
+    return { error: 'The current release pointer is not valid JSON.' };
+  }
+  const id =
+    typeof parsed === 'object' && parsed !== null && 'release_id' in parsed
+      ? parsed.release_id
+      : undefined;
+  if (typeof id !== 'string' || !SAFE_ID.test(id)) {
+    return { error: 'The current release pointer does not name a valid release.' };
+  }
+  pointerCache.set(pointerKey, { releaseId: id, expires: Date.now() + POINTER_TTL_MS });
+  return id;
+}
 
 /**
  * The current release of this instance and the key prefix it serves,
  * releases/<release_id>/ or releases/<release_id>/<group_id>/, from its
- * pointer file. Only an unset or
- * empty CATALEJO_GROUP selects the main instance; any other value must be a
- * valid group identifier, so a misconfigured group instance fails closed and
- * never serves the full collection.
+ * pointer file. Only an unset or empty CATALEJO_GROUP selects the main
+ * instance; any other value must be a valid group identifier, so a
+ * misconfigured group instance fails closed and never serves the full
+ * collection. With bypassCache, the cached pointer is ignored and replaced
+ * by the one in the bucket.
  */
-async function instance(env: Env, bucket: R2Bucket): Promise<Instance> {
+async function instance(env: Env, bucket: R2Bucket, bypassCache = false): Promise<Instance> {
   const group = env.CATALEJO_GROUP ?? '';
-  if (group !== '' && !SAFE_ID.test(group)) {
-    return { error: 'The CATALEJO_GROUP variable is not a valid group identifier.' };
-  }
-  const pointerKey = group === '' ? 'releases/current.json' : `releases/${group}/current.json`;
-  const now = Date.now();
-  let cached = pointerCache.get(pointerKey);
-  if (cached === undefined || cached.expires <= now) {
-    pointerCache.delete(pointerKey);
-    const object = await bucket.get(pointerKey);
-    if (object === null) return { error: 'No current release is published for this instance.' };
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(await new Response(object.body).text());
-    } catch {
-      return { error: 'The current release pointer is not valid JSON.' };
-    }
-    const id =
-      typeof parsed === 'object' && parsed !== null && 'release_id' in parsed
-        ? parsed.release_id
-        : undefined;
-    if (typeof id !== 'string' || !SAFE_ID.test(id)) {
-      return { error: 'The current release pointer does not name a valid release.' };
-    }
-    cached = { releaseId: id, expires: now + POINTER_TTL_MS };
-    pointerCache.set(pointerKey, cached);
+  const pointerKey = pointerKeyFor(group);
+  if (typeof pointerKey !== 'string') return pointerKey;
+  const cached = pointerCache.get(pointerKey);
+  let releaseId: string;
+  const useCache = !bypassCache && cached !== undefined && cached.expires > Date.now();
+  if (useCache) {
+    releaseId = cached.releaseId;
+  } else {
+    const read = await readPointer(bucket, pointerKey);
+    if (typeof read !== 'string') return read;
+    releaseId = read;
   }
   const groupPart = group === '' ? '' : `${group}/`;
-  return { releaseId: cached.releaseId, prefix: `releases/${cached.releaseId}/${groupPart}` };
+  return { releaseId, prefix: `releases/${releaseId}/${groupPart}`, fresh: !useCache };
 }
 
 function headersFor(key: string, object: R2Object, cacheControl: string): Headers {
@@ -363,7 +400,13 @@ async function get(
     if (range === undefined) throw error;
     return refusedRange(bucket, key, request, cacheControl);
   }
-  if (object === null) return plain(404, 'Not found.', 'GET');
+  if (object === null) {
+    // R2 does not document a range that starts at or past the end: the get()
+    // may throw (above) or return null, as for a missing key. A head() tells
+    // the two apart.
+    if (range === undefined) return plain(404, 'Not found.', 'GET');
+    return refusedRange(bucket, key, request, cacheControl);
+  }
   const headers = headersFor(key, object, cacheControl);
   if (!('body' in object)) return notModified(headers);
   if (matches(ifNoneMatch, object.httpEtag)) {
@@ -414,8 +457,14 @@ async function serve(context: Context): Promise<Response> {
       method,
     );
   }
-  const resolved = await instance(env, bucket);
+  let resolved = await instance(env, bucket);
   if ('error' in resolved) return plain(503, resolved.error, method);
+  if (named.kind === 'scoped' && named.releaseId !== resolved.releaseId && !resolved.fresh) {
+    // The cached pointer may be older than the one the reader's manifest came
+    // from; read the pointer once more before calling the release stale.
+    resolved = await instance(env, bucket, true);
+    if ('error' in resolved) return plain(503, resolved.error, method);
+  }
 
   let key: string;
   let cacheControl: string;

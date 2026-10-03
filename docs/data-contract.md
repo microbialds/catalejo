@@ -1,6 +1,6 @@
 # Data contract
 
-Version 0.8, 2026-09-30. Status: draft for review.
+Version 0.10, 2026-10-02. Status: draft for review.
 
 This document is the interface between the ingestion package (`packages/ingest`, Python) and the web application (`packages/web`, TypeScript). Both are built against it. Anything the web application reads is defined here; anything the ingestion package writes is defined here. A change to this document is a schema change and bumps `schema_version`.
 
@@ -499,10 +499,12 @@ Small Parquet files that every collection-page view reads instead of aggregating
 | `summaries/counts_by_source.parquet` | species × source type × country |
 | `summaries/counts_by_platform.parquet` | species × platform × assembly status |
 | `summaries/amr_class_by_species.parquet` | species × drug class, count and fraction of genomes with at least one hit |
+| `summaries/amr_class_by_genome.parquet` | genome × drug class, one row per genome and class with at least one hit |
 | `summaries/qc.parquet` | genome_id, completeness, contamination, flag (one row per genome; small) |
 | `presence/<species_code>.parquet` | genome_id × cluster_id, wide, boolean columns, one file per species |
 | `presence_amr.parquet` | genome_id × element_name, wide, boolean, across all species |
 | `presence_mob.parquet` | genome_id × mob_cluster_id, wide, boolean |
+| `presence_replicon.parquet` | genome_id × replicon type, wide, boolean |
 | `summaries/search_index.parquet` | one row per searchable term: `term`, `kind` (`genome_id`, `accession`, `gene`, `element`, `cluster`, `product`, `st`), `target` (route), `species_code`, `count`; feeds the global search box |
 | `summaries/rarefaction/<species_code>.parquet` | genomes sampled × core and pan cluster counts (mean and interval over permutations), precomputed at release build for the pangenome page |
 
@@ -512,17 +514,18 @@ Columns of the summary files. Counts are INTEGER, and each file is sorted by its
 
 | Path | Columns |
 |---|---|
-| `summaries/counts_by_species.parquet` | `species_code`, `canonical_name`, `color`, `genome_count`, `complete_count` (genomes with `assembly_status` complete), `st_count` (distinct STs), `amr_hit_count` (sum of `genome.amr_gene_count`), `plasmid_contig_count` |
+| `summaries/counts_by_species.parquet` | `species_code`, `canonical_name`, `color`, `genome_count`, `complete_count` (genomes with `assembly_status` complete), `st_count` (distinct STs), `amr_hit_count` (sum of `genome.amr_gene_count`), `plasmid_contig_count`, `plasmid_genome_count` (genomes with `plasmid_contig_count` above zero), `prophage_genome_count` (genomes with `prophage_region_count` above zero) |
 | `summaries/counts_by_species_year.parquet` | `species_code`, `year` (INTEGER, null when the genome has no isolation date), `genome_count` |
 | `summaries/counts_by_species_st.parquet` | `species_code`, `mlst_scheme`, `st`, `genome_count` |
 | `summaries/counts_by_source.parquet` | `species_code`, `source_type`, `country`, `genome_count` |
 | `summaries/counts_by_platform.parquet` | `species_code`, `platform`, `assembly_status`, `genome_count` |
 | `summaries/amr_class_by_species.parquet` | `species_code`, `drug_class`, `genome_count` (genomes of the species with at least one hit in the class), `fraction` (DOUBLE, `genome_count` over the species' genomes), `hit_count` |
+| `summaries/amr_class_by_genome.parquet` | `genome_id`, `species_code`, `drug_class`, `hit_count` |
 | `summaries/qc.parquet` | `genome_id`, `species_code`, `completeness`, `contamination`, `flag` |
-| `presence_amr.parquet`, `presence_mob.parquet` | `genome_id`, `species_code`, then one BOOLEAN column per `element_name` or `mob_cluster_id`, sorted by name |
+| `presence_amr.parquet`, `presence_mob.parquet`, `presence_replicon.parquet` | `genome_id`, `species_code`, then one BOOLEAN column per `element_name`, `mob_cluster_id` or replicon type, sorted by name |
 | `summaries/search_index.parquet` | `term`, `kind`, `target`, `species_code`, `count` |
 
-`drug_class` in `amr_class_by_species` is the key of a drug class in `config/palette.yaml`, reached through the palette's match lists (a tool class such as `LINCOSAMIDE/MACROLIDE` is split on `/`), and `other` when no list matches. The resistance hits counted there, in `amr_hit_count` and in `presence_amr` are those of `genome.amr_gene_count`. `flag` in `qc` is `pass` when completeness is at least `qc.completeness_min` and contamination at most `qc.contamination_max` in `config/platform.yaml`, `fail` otherwise, and `missing` for a genome without CheckM2 values.
+`drug_class` in `amr_class_by_species` and `amr_class_by_genome` is the key of a drug class in `config/palette.yaml`, reached through the palette's match lists (a tool class such as `LINCOSAMIDE/MACROLIDE` is split on `/`), and `other` when no list matches. The resistance hits counted there, in `amr_hit_count` and in `presence_amr` are those of `genome.amr_gene_count`. The replicon types of `presence_replicon` are the values of `contig.replicon_types` over all contigs of the genome. The species-grain summaries serve the whole release, while the genome-grain files (`qc`, `amr_class_by_genome` and the presence files), together with `tables/genome.parquet`, let the application count any genome set in the browser without reading the per-species tables. `flag` in `qc` is `pass` when completeness is at least `qc.completeness_min` and contamination at most `qc.contamination_max` in `config/platform.yaml`, `fail` otherwise, and `missing` for a genome without CheckM2 values.
 
 The search index has one row per term and species, and `count` is the number of genomes of that species carrying the term. Targets are routes of the requirements document (§5.3), with path segments and query values percent-encoded.
 
@@ -568,7 +571,7 @@ The compressed files are written with gzip without a timestamp or a file name, s
   "platform_name": "Catalejo",
   "pipeline": {"name": "gene2dis/mgap", "versions": ["2.0.0"]},
   "genome_count": 4812,
-  "species": [{"species_code": "KPN", "canonical_name": "Klebsiella pneumoniae", "genome_count": 1638, "has_pangenome": true, "tree_ids": ["KPN-core-2026-09"]}],
+  "species": [{"species_code": "KPN", "canonical_name": "Klebsiella pneumoniae", "genome_count": 1638, "has_pangenome": true, "tree_ids": ["KPN-core-2026-09"], "annotation_versions": {"amrfinderplus": ["2025-12-03.1"], "bakta": ["6.0"]}}],
   "tool_versions": [{"tool": "bakta", "versions": ["1.11.0"], "database_versions": ["5.1"]}],
   "embedding_models": [{"model": "bacformer", "model_version": "1.0", "dim": 1024, "genome_count": 4812}],
   "curated_sets": [{"set_id": "carbapenemase-2024", "name": "Carbapenemase carriers 2024", "genome_count": 612}],
@@ -580,6 +583,8 @@ The compressed files are written with gzip without a timestamp or a file name, s
 ```
 
 `pipeline` names the workflow that produced the genomes and the distinct versions recorded for them in `tool_version` (tool `mgap`), for the release footer and the Methods page; `versions` is empty when no run recorded one.
+
+`species[].annotation_versions` holds, under the keys `bakta` and `amrfinderplus`, the distinct `database_version` values that `tool_version` records for the genomes of that species, sorted, with an empty list for a tool that did not run. The application reads it for the annotation version warning (requirements §5.6), so that the check never scans `tool_version`.
 
 The application reads only the manifest at startup and opens tables on demand.
 
@@ -624,10 +629,36 @@ Fallback templates cover genomes with no plasmid, no resistance determinants, no
 A user-defined set is exported as JSON.
 
 ```json
-{"format": "genome-set", "format_version": 1, "release_id": "2026-09", "name": "my set", "filters": {"species_code": ["KPN"], "st": ["ST258"], "presence_amr": ["blaKPC-2"]}, "genome_ids": ["SCL0421", "SCL0433"]}
+{"format": "genome-set", "format_version": 1, "release_id": "2026-09", "name": "my set", "filters": {"presence_amr": ["blaKPC-2"], "species_code": ["KPN"], "st": ["258"]}, "genome_ids": ["SCL0421", "SCL0433"]}
 ```
 
 Both `filters` and `genome_ids` are present. On load in a later release the application applies `filters` and reports how many of `genome_ids` are still present, so the user can see what changed.
+
+`filters` is the filter object of the requirements (§5.2), the same object the URL carries (requirements §5.3). It has one key per filter field, and a key is absent when its field is unused. Values within a key are alternatives and keys combine, so a genome belongs to the set when it satisfies every key present.
+
+| Key | Field | Value |
+|---|---|---|
+| `species_code` | species | array of `species_code` |
+| `st` | sequence type | array of `genome.st` as the genome table writes it (`258`, `ST258-1LV`) |
+| `source_type` | source type | array |
+| `country` | country | array |
+| `year` | year | object with `min` and `max`, either optional, inclusive, compared with the year of `isolation_date`; a genome without a date fails it |
+| `platform` | platform | array |
+| `assembly_status` | assembly status | array |
+| `completeness_min` | completeness | number, percent; `checkm2_completeness` at least this |
+| `contamination_max` | contamination | number, percent; `checkm2_contamination` at most this |
+| `presence_amr` | resistance determinant by element name | array of columns of `presence_amr.parquet` |
+| `drug_class` | resistance determinant by drug class | array of drug class keys of `config/palette.yaml`, as `amr_class_by_genome` writes them |
+| `mutation` | point mutation | array of `<gene>_<variant>` from `mutation` |
+| `replicon` | plasmid replicon | array of columns of `presence_replicon.parquet` |
+| `plasmid_contig` | plasmid contig present | `true`; `plasmid_contig_count` above zero |
+| `presence_mob` | MOB cluster | array of columns of `presence_mob.parquet` |
+| `prophage` | prophage present | `true`; `prophage_region_count` above zero |
+| `cluster` | pangenome cluster | array of `cluster_id`, columns of `presence/<species_code>.parquet` |
+| `set` | curated set membership | array of `set_id` |
+| `genome_id` | explicit genome identifiers | array of `genome_id` |
+
+The rows follow the order of the "add filter" menu. In the URL the `set` and `genome_id` keys travel as the `set=` and `ids=` parameters and the others as the `q=` object (requirements §5.3). The canonical form, used in URLs and exported files, writes keys in sorted order and arrays sorted, without repeats, and leaves out empty arrays, so one set has one URL.
 
 ---
 

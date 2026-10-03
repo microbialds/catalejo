@@ -220,13 +220,13 @@ describe('functions/assets/[[path]]', () => {
 });
 
 describe('public/_routes.json', () => {
-  it('sends only the engine and extension paths to Functions', () => {
+  it('sends only the engine, extension and release paths to Functions', () => {
     const routes = JSON.parse(
       readFileSync(path.join(webRoot, 'public', '_routes.json'), 'utf8'),
     ) as unknown;
     expect(routes).toEqual({
       version: 1,
-      include: ['/assets/duckdb-wasm/*', '/assets/duckdb-extensions/*'],
+      include: ['/assets/duckdb-wasm/*', '/assets/duckdb-extensions/*', '/data/*'],
       exclude: [],
     });
   });

@@ -1,5 +1,18 @@
-/* Global styles (requirements §7). Every value is a token from
-   ./generated/tokens.css; no color literals here. */
+/* Global styles (requirements §5.4, §7). Every value is a token from
+   ./generated/tokens.css; no color literals here.
+
+   Links follow two tiers (requirements §5.4; checklist G3). A link is ink and
+   underlined at rest in running text (the base rule below). Links inside
+   tables, chips, pills, counters and the facet rail carry the link-quiet
+   utility: no underline at rest, the underline on hover and on keyboard
+   focus. link-running underlines a link-like control (a text button) at
+   rest, for the controls whose tier src/linkTier.ts sets.
+
+   Focus (requirements §9, visible focus). Every focusable element shows the
+   hairline ink outline of :focus-visible. An underlined field (the global
+   search) draws its input without an outline and carries underline-field on
+   its label: while the input has the focus, the underline thickens to 2 px
+   and the label takes the same outline as every other control. */
 @import 'tailwindcss';
 @import './generated/tokens.css';
 
@@ -14,6 +27,9 @@
 
   a {
     color: var(--color-accent);
+    text-decoration-line: underline;
+    text-decoration-thickness: var(--shape-hairline);
+    text-underline-offset: 2px;
   }
 
   a:hover {
@@ -21,6 +37,41 @@
   }
 
   :focus-visible {
+    outline: var(--shape-hairline) solid var(--color-ink);
+    outline-offset: 2px;
+  }
+}
+
+@utility link-quiet {
+  text-decoration-line: none;
+  text-decoration-thickness: var(--shape-hairline);
+  text-underline-offset: 2px;
+
+  &:hover,
+  &:focus-visible {
+    text-decoration-line: underline;
+  }
+
+  &:disabled {
+    text-decoration-line: none;
+  }
+}
+
+@utility link-running {
+  text-decoration-line: underline;
+  text-decoration-thickness: var(--shape-hairline);
+  text-underline-offset: 2px;
+
+  &:disabled {
+    text-decoration-line: none;
+  }
+}
+
+@utility underline-field {
+  border-bottom: var(--shape-hairline) solid var(--color-ink);
+
+  &:focus-within {
+    border-bottom-width: 2px;
     outline: var(--shape-hairline) solid var(--color-ink);
     outline-offset: 2px;
   }

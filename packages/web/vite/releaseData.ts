@@ -1,12 +1,22 @@
 // Development and preview server for release files under /data/.
 //
-// The application reads manifest.json and opens Parquet files through the
-// same-origin /data/ path (data contract §6, requirements §10). In production
-// a Pages Function forwards range requests to R2; locally this plugin serves a
-// release directory with the same behavior DuckDB-WASM relies on: HEAD, byte
-// ranges (206 with Content-Range, 416 when unsatisfiable), Content-Length and
-// Accept-Ranges. The directory is CATALEJO_RELEASE_DIR, or releases/synth at
-// the repository root. A missing directory answers 404 and never stops the
+// The application reads the manifest at /data/manifest.json and every other
+// release file at /data/r/<release_id>/<path> (data contract §6,
+// requirements §10). In production a Pages Function forwards range requests
+// to R2 for the release named in the pointer; locally this plugin serves one
+// release directory with the same paths and the same behavior DuckDB-WASM
+// relies on: HEAD, byte ranges (206 with Content-Range, 416 when
+// unsatisfiable), Content-Length and Accept-Ranges. The current release is the
+// release_id of the directory's manifest.json, read again whenever the file
+// changes. As in production, the manifest is sent with Cache-Control:
+// no-cache, a file of the current release as immutable, a path naming another
+// release answers 404 with X-Catalejo-Release: stale, and any other /data/
+// path answers 404.
+//
+// Because the scoped files are immutable, a browser keeps them under the same
+// URL; after regenerating the release under the same release_id, reload
+// without the cache. The directory is CATALEJO_RELEASE_DIR, or releases/synth
+// at the repository root. A missing directory answers 404 and never stops the
 // server.
 import { createReadStream, promises as fs } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -14,6 +24,17 @@ import path from 'node:path';
 import type { Plugin } from 'vite';
 
 export const DATA_PREFIX = '/data/';
+
+/** The first segment of the release-scoped paths, /data/r/<release_id>/<path>. */
+export const RELEASE_SCOPE = 'r';
+
+export const NO_CACHE = 'no-cache';
+export const IMMUTABLE = 'public, max-age=31536000, immutable';
+export const STALE_HEADER = 'X-Catalejo-Release';
+export const STALE_VALUE = 'stale';
+
+/** The identifier pattern of data contract §3.1, as in the Function. */
+const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
 const CONTENT_TYPES: Record<string, string> = {
   '.json': 'application/json; charset=utf-8',
@@ -83,11 +104,49 @@ function finish(res: ServerResponse, status: number, headers: Record<string, str
 
 type Next = (error?: unknown) => void;
 
+interface CachedId {
+  mtimeMs: number;
+  size: number;
+  releaseId: string | undefined;
+}
+
+/**
+ * The release_id of the manifest in `root`, read again when the file's
+ * modification time or size changes; undefined when it is missing or
+ * unreadable.
+ */
+function currentReleaseReader() {
+  let cached: (CachedId & { file: string }) | undefined;
+  return async (root: string): Promise<string | undefined> => {
+    const file = path.join(root, 'manifest.json');
+    let stat;
+    try {
+      stat = await fs.stat(file);
+    } catch {
+      cached = undefined;
+      return undefined;
+    }
+    if (cached?.file === file && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+      return cached.releaseId;
+    }
+    let releaseId: string | undefined;
+    try {
+      const parsed = JSON.parse(await fs.readFile(file, 'utf8')) as { release_id?: unknown };
+      releaseId = typeof parsed.release_id === 'string' ? parsed.release_id : undefined;
+    } catch {
+      releaseId = undefined;
+    }
+    cached = { file, mtimeMs: stat.mtimeMs, size: stat.size, releaseId };
+    return releaseId;
+  };
+}
+
 /**
  * A Connect middleware that answers every request under /data/ from
  * `releaseDir` and passes everything else to `next`.
  */
 export function createReleaseHandler(releaseDir: string) {
+  const currentRelease = currentReleaseReader();
   return function releaseHandler(req: IncomingMessage, res: ServerResponse, next: Next): void {
     const url = req.url ?? '';
     const pathname = url.split(/[?#]/, 1)[0] ?? '';
@@ -95,14 +154,17 @@ export function createReleaseHandler(releaseDir: string) {
       next();
       return;
     }
-    serve(releaseDir, pathname.slice(DATA_PREFIX.length), req, res).catch((error: unknown) => {
-      next(error);
-    });
+    serve(releaseDir, currentRelease, pathname.slice(DATA_PREFIX.length), req, res).catch(
+      (error: unknown) => {
+        next(error);
+      },
+    );
   };
 }
 
 async function serve(
   releaseDir: string,
+  currentRelease: (root: string) => Promise<string | undefined>,
   encoded: string,
   req: IncomingMessage,
   res: ServerResponse,
@@ -111,14 +173,14 @@ async function serve(
     finish(res, 405, { Allow: 'GET, HEAD' });
     return;
   }
-  let relative: string;
+  let decoded: string;
   try {
-    relative = decodeURIComponent(encoded);
+    decoded = decodeURIComponent(encoded);
   } catch {
     finish(res, 400);
     return;
   }
-  if (relative.includes('\0') || relative.includes('\\')) {
+  if (decoded.includes('\0') || decoded.includes('\\')) {
     finish(res, 400);
     return;
   }
@@ -128,6 +190,30 @@ async function serve(
   } catch {
     finish(res, 404);
     return;
+  }
+  // /data/manifest.json, or /data/r/<release_id>/<path> for the current
+  // release; every other path is not found.
+  let relative: string;
+  let cacheControl: string;
+  if (decoded === 'manifest.json') {
+    relative = decoded;
+    cacheControl = NO_CACHE;
+  } else {
+    const [scope, releaseId, ...rest] = decoded.split('/');
+    if (scope !== RELEASE_SCOPE || releaseId === undefined || rest.length === 0) {
+      finish(res, 404);
+      return;
+    }
+    if (!SAFE_ID.test(releaseId)) {
+      finish(res, 400);
+      return;
+    }
+    if (releaseId !== (await currentRelease(root))) {
+      finish(res, 404, { [STALE_HEADER]: STALE_VALUE, 'Cache-Control': 'no-store' });
+      return;
+    }
+    relative = rest.join('/');
+    cacheControl = IMMUTABLE;
   }
   const requested = path.resolve(root, relative);
   if (requested === root) {
@@ -157,7 +243,7 @@ async function serve(
   const common = {
     'Accept-Ranges': 'bytes',
     'Content-Type': contentTypeFor(file),
-    'Cache-Control': 'no-cache',
+    'Cache-Control': cacheControl,
   };
   const range = parseRange(req.headers.range, size);
   if (range === 'unsatisfiable') {

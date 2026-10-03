@@ -7,8 +7,8 @@ Derived from `docs/requirements.md`. Each item has an identifier, the requiremen
 | Id | Ref | Check |
 |---|---|---|
 | G1 | §3 | No rendered page contains the word "cohort"; the embedding page and its links use "Embeddings" and "embedding map", never "atlas" |
-| G2 | §3, §7 | Species names are italic in the serif face wherever they appear; genome identifiers, coordinates, counts in tables and gene names are monospace; gene and allele names are italic |
-| G3 | §5.4, §7 | No color on the page is outside `config/palette.yaml` and the chrome tokens; the only saturated chrome color is the accent on links and the active navigation item |
+| G2 | §3, §7 | Species names are italic wherever they appear; genome identifiers, coordinates, counts in tables, counters and gene names are monospace; gene and allele names are italic |
+| G3 | §5.4, §7 | No color on the page is outside `config/palette.yaml` and the chrome tokens; the chrome is achromatic; links in running text are underlined at rest, and links in tables, chips, pills, the facet rail, navigation, footer, panel titles and controls are underlined on hover and focus |
 | G4 | §7 | Square corners, hairline borders, no shadows, no gradients, no icon-only navigation, no dark sidebar |
 | G5 | §5.1 | The shell shows the wordmark and tagline, the two navigation groups in the stated order, the release footer with the Methods link, and the active page marked by the accent rule |
 | G6 | §5.1 | The set bar shows the count as a large numeral, "genomes in the current set", filter chips, "add filter", "Share link" and "Save set" |
@@ -25,13 +25,13 @@ Derived from `docs/requirements.md`. Each item has an identifier, the requiremen
 
 | Id | Ref | Check |
 |---|---|---|
-| C1 | §6.1 | The five counters equal the summary counts for the current set |
+| C1 | §6.1 | The five counters equal the summary counts for the whole release, and the counts computed over the genome-grain files for a filtered set |
 | C2 | §6.1 | Clicking a species bar, a heatmap cell, a facet value and a year each adds the corresponding filter chip |
 | C3 | §6.1 | Brushing the QC scatter adds completeness and contamination filters |
 | C4 | §6.1 | Facet counts update within 300 ms of a filter change on the synthetic release |
 | C5 | §6.1 | The table sorts, pages by 50, selects rows, and "Use as set" on a selection yields the selected identifiers |
 | C6 | §6.1 | Each panel expands full-width and shows the export menu |
-| C7 | §6.1 | With more than eight species, the smallest are grouped as "Other" in charts but not in tables or chips |
+| C7 | §5.4, §6.1 | Species without a registry color, and colored species beyond the eighth, are grouped as "Other" in charts but not in tables, facets or chips |
 | C8 | §6.1 | A species with no ST scheme shows the ST panel statement instead of bars |
 
 ## S. Genome sets (milestone 3)
@@ -49,7 +49,7 @@ Derived from `docs/requirements.md`. Each item has an identifier, the requiremen
 
 | Id | Ref | Check |
 |---|---|---|
-| N1 | §6.3 | The header shows the italic serif species name, the ST chip, the species source note, the summary sentence with linked determinants, typing chips per `config/typing_display.yaml`, and the six counters |
+| N1 | §6.3 | The header shows the italic species name, the ST chip, the species source note, the summary sentence with linked determinants, typing chips per `config/typing_display.yaml`, and the six counters |
 | N2 | §6.3, §7.4 | The summary sentence matches the template for the genome's facts; every gene in it links to the Genes page; a genome with no determinants and no plasmid uses the fallback template |
 | N3 | §6.3 | Selecting a feature in the table highlights it on the map and scrolls the table; selecting on the map does the same in reverse; the neighborhood strip fills |
 | N4 | §6.3 | Contig selection redraws the map and filters the table; track toggles hide and show tracks |

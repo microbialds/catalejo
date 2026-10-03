@@ -1,0 +1,255 @@
+// Requirements §5.8 and data contract §6.2: the global search joins index rows
+// of the same kind, term and target, keeps sequence types per species,
+// matches by substring for every kind without regard to case, ranks within a
+// kind exact matches, then prefix matches, then other substrings, each by
+// genome count, groups results by kind in a fixed order with counts, and
+// completes well within 200 ms on a loaded index of 50,000 rows. Requirements
+// §5.3 and §5.9: a result opens its target with the view parameters of the
+// current URL; a sequence type replaces the set and resets `page` only.
+import { describe, expect, it } from 'vitest';
+import { decodeFilters } from '../src/set/filters';
+import { decodeTableView } from '../src/tableView';
+import {
+  buildSearchIndex,
+  exactGenomeMatch,
+  matchSearch,
+  matchTier,
+  readSearchRows,
+  searchKinds,
+  searchTargetHref,
+} from '../src/data/searchIndex';
+import type { SearchKind, SearchRow } from '../src/data/searchIndex';
+
+function row(kind: SearchKind, term: string, target: string, species: string, count = 1) {
+  return { kind, term, target, species_code: species, count } satisfies SearchRow;
+}
+
+const rows: SearchRow[] = [
+  row('genome_id', 'KPN0001', '/genomes/KPN0001', 'KPN'),
+  row('genome_id', 'KPN0010', '/genomes/KPN0010', 'KPN'),
+  row('genome_id', 'kpn0100', '/genomes/kpn0100', 'KPN'),
+  row('accession', 'SAMN0001', '/genomes/KPN0001', 'KPN'),
+  row('gene', 'gyrA', '/genes/symbol/gyrA', 'KPN', 28),
+  row('gene', 'gyrA', '/genes/symbol/gyrA', 'ECO', 8),
+  row('gene', 'gyrB', '/genes/symbol/gyrB', 'ECO', 8),
+  row('element', 'blaKPC-2', '/genes/element/blaKPC-2', 'KPN', 8),
+  row('product', 'DNA gyrase subunit A', '/genes?search=DNA%20gyrase%20subunit%20A', 'KPN', 28),
+  row('product', 'DNA gyrase subunit A', '/genes?search=DNA%20gyrase%20subunit%20A', 'ECO', 8),
+  row(
+    'st',
+    'ST11',
+    '/?q=%7B%22species_code%22%3A%5B%22KPN%22%5D%2C%22st%22%3A%5B%2211%22%5D%7D',
+    'KPN',
+    4,
+  ),
+  row(
+    'st',
+    'ST11',
+    '/?q=%7B%22species_code%22%3A%5B%22SEN%22%5D%2C%22st%22%3A%5B%2211%22%5D%7D',
+    'SEN',
+    4,
+  ),
+];
+
+describe('search index', () => {
+  const index = buildSearchIndex(rows);
+
+  it('joins rows of one kind, term and target and sums their counts', () => {
+    const [group] = matchSearch(index, 'gyrA');
+    expect(group?.kind).toBe('gene');
+    expect(group?.matches[0]?.entry).toMatchObject({
+      term: 'gyrA',
+      count: 36,
+      speciesCodes: ['ECO', 'KPN'],
+    });
+  });
+
+  it('keeps sequence types of different species apart', () => {
+    const st = matchSearch(index, 'st11').find((group) => group.kind === 'st');
+    expect(st?.total).toBe(2);
+    expect(st?.matches.map((match) => match.entry.speciesCodes)).toEqual([['KPN'], ['SEN']]);
+  });
+
+  it('matches without regard to case, exact first', () => {
+    const [genomes] = matchSearch(index, 'kpn00');
+    expect(genomes?.kind).toBe('genome_id');
+    expect(genomes?.matches.map((match) => match.entry.term)).toEqual(['KPN0001', 'KPN0010']);
+    const exact = matchSearch(index, 'KPN0010')[0]?.matches[0];
+    expect(exact).toMatchObject({ tier: 'exact', entry: { term: 'KPN0010' } });
+  });
+
+  it('matches every kind by substring (open point 5a)', () => {
+    const groups = matchSearch(index, 'gyrase');
+    expect(groups.map((group) => group.kind)).toEqual(['product']);
+    expect(groups[0]?.matches[0]?.entry.count).toBe(36);
+    // "yrA" lies inside the gene symbol gyrA and the product name.
+    expect(matchSearch(index, 'yrA').map((group) => group.kind)).toEqual(['gene', 'product']);
+    // "0010" lies inside a genome identifier and an accession.
+    const inside = matchSearch(index, '0010');
+    expect(inside.map((group) => group.kind)).toEqual(['genome_id']);
+    expect(inside[0]?.matches.map((match) => match.entry.term)).toEqual(['KPN0010']);
+    expect(matchSearch(index, 'amn0').map((group) => group.kind)).toEqual(['accession']);
+    expect(matchSearch(index, 'T11').map((group) => group.kind)).toEqual(['st']);
+  });
+
+  it('finds both blaKPC-2 and KPC-2 elements for "KPC"', () => {
+    const kpc = buildSearchIndex([
+      row('element', 'blaKPC-2', '/genes/element/blaKPC-2', 'KPN', 8),
+      row('element', 'KPC-2', '/genes/element/KPC-2', 'KPN', 3),
+      row('element', 'blaOXA-48', '/genes/element/blaOXA-48', 'KPN', 5),
+      row('gene', 'blaKPC', '/genes/symbol/blaKPC', 'KPN', 8),
+    ]);
+    const groups = matchSearch(kpc, 'KPC');
+    expect(groups.map((group) => group.kind)).toEqual(['gene', 'element']);
+    const elements = groups.find((group) => group.kind === 'element');
+    expect(elements?.total).toBe(2);
+    expect(elements?.matches.map((match) => [match.entry.term, match.tier])).toEqual([
+      ['KPC-2', 'prefix'],
+      ['blaKPC-2', 'substring'],
+    ]);
+  });
+
+  it('ranks exact, then prefix, then substring matches, each by genome count', () => {
+    const ranked = buildSearchIndex([
+      row('gene', 'xsul', '/genes/symbol/xsul', 'KPN', 90),
+      row('gene', 'sul2', '/genes/symbol/sul2', 'KPN', 10),
+      row('gene', 'sul1', '/genes/symbol/sul1', 'KPN', 40),
+      row('gene', 'asul', '/genes/symbol/asul', 'KPN', 20),
+      row('gene', 'sul', '/genes/symbol/sul', 'KPN', 1),
+    ]);
+    const [genes] = matchSearch(ranked, 'SUL');
+    expect(genes?.matches.map((match) => [match.entry.term, match.tier])).toEqual([
+      ['sul', 'exact'],
+      ['sul1', 'prefix'],
+      ['sul2', 'prefix'],
+      ['xsul', 'substring'],
+      ['asul', 'substring'],
+    ]);
+    expect(matchTier('kpc-2', 'kpc-2')).toBe('exact');
+    expect(matchTier('kpc-2', 'kpc')).toBe('prefix');
+    expect(matchTier('blakpc-2', 'kpc')).toBe('substring');
+    expect(matchTier('blaoxa-48', 'kpc')).toBeUndefined();
+  });
+
+  it('groups in the fixed order of kinds with counts before the cap', () => {
+    const many = buildSearchIndex([
+      ...Array.from({ length: 12 }, (_, i) =>
+        row('genome_id', `G${String(i).padStart(3, '0')}`, `/genomes/G${String(i)}`, 'KPN'),
+      ),
+      row('gene', 'gA', '/genes/symbol/gA', 'KPN'),
+      row('product', 'protein G', '/genes?search=protein%20G', 'KPN'),
+    ]);
+    const groups = matchSearch(many, 'g', 5);
+    expect(groups.map((group) => group.kind)).toEqual(['genome_id', 'gene', 'product']);
+    expect(groups[0]?.total).toBe(12);
+    expect(groups[0]?.matches).toHaveLength(5);
+    expect(searchKinds).toEqual([
+      'genome_id',
+      'accession',
+      'gene',
+      'element',
+      'cluster',
+      'product',
+      'st',
+    ]);
+  });
+
+  it('finds a single exact genome identifier', () => {
+    expect(exactGenomeMatch(index, ' kpn0001 ')?.target).toBe('/genomes/KPN0001');
+    expect(exactGenomeMatch(index, 'KPN000')).toBeUndefined();
+  });
+
+  it('returns nothing for an empty query', () => {
+    expect(matchSearch(index, '   ')).toEqual([]);
+  });
+
+  it('reads rows of known kinds only', () => {
+    expect(
+      readSearchRows([
+        { term: 'x', kind: 'gene', target: '/genes/symbol/x', species_code: 'KPN', count: 2 },
+        { term: 'y', kind: 'other', target: '/', species_code: 'KPN', count: 1 },
+      ]),
+    ).toEqual([row('gene', 'x', '/genes/symbol/x', 'KPN', 2)]);
+  });
+});
+
+describe('search target href (requirements §5.3, §5.9)', () => {
+  const st11 = '/?q=%7B%22species_code%22%3A%5B%22KPN%22%5D%2C%22st%22%3A%5B%2211%22%5D%7D';
+  const st11Q = 'q=%7B%22species_code%22%3A%5B%22KPN%22%5D%2C%22st%22%3A%5B%2211%22%5D%7D';
+  const current =
+    '?q=%7B%22species_code%22%3A%5B%22ECO%22%5D%7D&ids=ECO0001,ECO0002&sort=n50:desc&page=3' +
+    '&cols=genome_id,species_code,n50&tab=x';
+
+  it('replaces the set of an ST target, drops page and keeps sort, cols and the rest', () => {
+    const href = searchTargetHref(st11, current);
+    expect(href).toBe(`/?${st11Q}&sort=n50:desc&cols=genome_id,species_code,n50&tab=x`);
+    const search = href.slice(href.indexOf('?'));
+    expect(decodeFilters(search)).toEqual({ species_code: ['KPN'], st: ['11'] });
+    const view = decodeTableView(search);
+    expect(view.sort).toEqual({ id: 'n50', desc: true });
+    expect(view.pageIndex).toBe(0);
+    expect(view.columns).toEqual(['genome_id', 'species_code', 'n50']);
+  });
+
+  it('keeps page when the ST target names the current set, since the set does not change', () => {
+    expect(searchTargetHref(st11, `?${st11Q}&page=2&sort=n50:asc`)).toBe(
+      `/?${st11Q}&page=2&sort=n50:asc`,
+    );
+  });
+
+  it('replaces a curated set and explicit list with the ST target set', () => {
+    expect(searchTargetHref(st11, '?set=outbreak-2024&ids=KPN0001&cols=genome_id,n50')).toBe(
+      `/?${st11Q}&cols=genome_id,n50`,
+    );
+  });
+
+  it('opens an ST target alone from the whole release without view parameters', () => {
+    expect(searchTargetHref(st11, '')).toBe(`/?${st11Q}`);
+    expect(searchTargetHref(st11, '?page=4')).toBe(`/?${st11Q}`);
+  });
+
+  it('keeps the whole current query, page included, for genome and gene targets', () => {
+    expect(searchTargetHref('/genomes/KPN0001', current)).toBe(`/genomes/KPN0001${current}`);
+    expect(searchTargetHref('/genes/symbol/gyrA', current)).toBe(`/genes/symbol/gyrA${current}`);
+    expect(searchTargetHref('/genomes/KPN0001', '')).toBe('/genomes/KPN0001');
+  });
+
+  it('lets the non-set parameters of a target parameters replace those of the same name', () => {
+    expect(searchTargetHref('/genes?search=DNA%20gyrase', '?sort=n50:asc&search=old&page=2')).toBe(
+      '/genes?sort=n50:asc&page=2&search=DNA%20gyrase',
+    );
+  });
+});
+
+describe('search timing (requirements §5.8)', () => {
+  it('matches within 200 ms on a 50,000-row index', () => {
+    const species = ['KPN', 'ECO', 'SEN', 'SAU', 'PAE'];
+    const words = ['protein', 'transporter', 'kinase', 'regulator', 'subunit', 'putative'];
+    const synthetic: SearchRow[] = [];
+    for (let i = 0; i < 50_000; i += 1) {
+      const code = species[i % species.length] ?? 'KPN';
+      const kind = searchKinds[i % searchKinds.length] ?? 'gene';
+      const term =
+        kind === 'product'
+          ? `${words[i % words.length] ?? ''} ${words[(i * 7) % words.length] ?? ''} ${String(i)}`
+          : `${code}${String(i).padStart(6, '0')}`;
+      synthetic.push(row(kind, term, `/genomes/${term}`, code, (i % 50) + 1));
+    }
+    const built = performance.now();
+    const index = buildSearchIndex(synthetic);
+    const buildTime = performance.now() - built;
+    const queries = ['k', 'KPN0001', 'kinase', 'sub', 'ECO04999', 'zzz', 'protein transporter'];
+    // One call before timing, so the bound measures matching on a loaded
+    // index (§5.8) and not the first compilation of the matcher, which the
+    // parallel test workers can delay well past the requirement's 200 ms.
+    matchSearch(index, queries[0] ?? '');
+    for (const query of queries) {
+      const start = performance.now();
+      matchSearch(index, query);
+      exactGenomeMatch(index, query);
+      const elapsed = performance.now() - start;
+      expect(elapsed, query).toBeLessThan(200);
+    }
+    expect(buildTime).toBeLessThan(1000);
+  });
+});

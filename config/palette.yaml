@@ -118,6 +118,22 @@ neighborhood_categories:
   plasmid_replication_transfer: "#5D3A9B"
   other: "#b5b3aa"
 
+# Sequential scale for heatmaps (requirements §5.4, §6.1, §6.2), light to
+# dark. A cell takes the step for its value and is drawn as is, never at
+# reduced opacity. The steps repeat the chrome grays, so the scale adds no
+# hue that could be read as a species. Cell text is chrome.ink on the first
+# four steps and chrome.on_ink on the last three (7.1:1 for ink on #a3a9b0,
+# 6.2:1 for white on #5c6168).
+sequential:
+  heatmap:
+    - "#eceef1"  # chrome.bar_track
+    - "#d3d7dc"  # chrome.border
+    - "#c3c8ce"  # chrome.border_strong
+    - "#a3a9b0"  # chrome.text_faint
+    - "#5c6168"  # chrome.text_secondary
+    - "#3a3e45"  # chrome.nav_ink
+    - "#1b1d21"  # chrome.ink
+
 # The embedding map (requirements §5.4, §6.7). Dark background and a lifted
 # variant of the species sequence, index for index, so the mapping from
 # species to hue is preserved.
@@ -140,22 +156,23 @@ embedding_map:
   text_secondary: "#d9d6cc"
   text_muted: "#8f8d85"
 
-# Interface chrome (requirements §7). No saturated color except the accent.
+# Interface chrome (requirements §7). Achromatic; the accent is ink, so that
+# data colors are the only saturated colors on a page.
 chrome:
-  paper: "#f6f5f1"
-  panel: "#ffffff"
-  sidebar: "#eeede7"
-  border: "#dcdad3"
-  border_strong: "#d9d7cf"
-  rule_light: "#ecebe5"
-  control_border: "#c9c7bf"
-  bar_track: "#f1f0eb"
-  ink: "#1c1c1a"
-  ink_soft: "#2a2926"
-  nav_ink: "#3d3c37"
-  text_secondary: "#6b6a64"
-  text_label: "#8c8a82"
-  text_faint: "#b5b3aa"
-  accent: "#8a2f22"
-  accent_hover: "#6e2419"
+  paper: "#e4e6e9"          # page chassis
+  panel: "#ffffff"          # panels, tables and charts
+  sidebar: "#f2f3f5"        # navigation column
+  border: "#d3d7dc"         # hairlines inside panels
+  border_strong: "#c3c8ce"  # panel edges against the chassis
+  rule_light: "#e9ebee"     # table row rules
+  control_border: "#737a83" # button, chip and field borders, 3:1 or better
+  bar_track: "#eceef1"
+  ink: "#1b1d21"
+  ink_soft: "#2a2d33"
+  nav_ink: "#3a3e45"
+  text_secondary: "#5c6168" # 5.0:1 on paper, 6.2:1 on panel
+  text_label: "#5f656d"
+  text_faint: "#a3a9b0"     # decorative only, never for text a reader needs
+  accent: "#1b1d21"         # links (underlined) and the active navigation rule
+  accent_hover: "#5c6168"
   on_ink: "#ffffff"

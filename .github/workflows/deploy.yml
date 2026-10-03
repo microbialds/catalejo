@@ -25,6 +25,11 @@ jobs:
       # 3. pnpm --dir packages/web build. The build contains no DuckDB-WASM engine
       #    files: they exceed the Pages limit of 25 MiB per file and are served
       #    from the bucket through functions/assets/[[path]].ts.
+      # 3a-3b. Milestone 1b added packages/web/scripts/upload-assets.mjs
+      #    (pnpm --dir packages/web run upload-assets), which uploads both sets
+      #    below with rclone in the same layout; milestone 5 chooses between it
+      #    (with an rclone remote configured from the R2 secrets) and the
+      #    wrangler commands sketched here.
       # 3a. Upload the DuckDB-WASM engine files and workers for the pinned package
       #    version (config/versions.yaml duckdb_wasm_npm) to the bucket, before
       #    deploying, so the new build never points at missing files. Objects
@@ -51,4 +56,8 @@ jobs:
       # 5. Fail the deployment if the manifest's schema_version is outside the
       #    application's supported schema_version range.
       # 6. Deploy packages/web/dist to each Pages project with wrangler
-      #    (CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID from repository secrets).
+      #    (CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID from repository secrets),
+      #    run with packages/web as the working directory
+      #    (npx wrangler pages deploy dist --project-name <project>), because
+      #    wrangler deploys the Functions from functions/ in its working
+      #    directory.

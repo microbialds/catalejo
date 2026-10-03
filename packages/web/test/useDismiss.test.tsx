@@ -1,0 +1,271 @@
+// @vitest-environment jsdom
+// The shared popover dismissal (requirements §9, keyboard reachable controls;
+// §6.1, column selection): Escape closes and returns the focus to the
+// trigger, a pointer down outside closes and leaves the focus alone, a
+// pointer down inside keeps the popover open, an Escape another handler
+// consumed is ignored, and the click that ends a dismissing press activates
+// nothing (critic round 3, observation 4) unless it toggles another popover,
+// in which case this one closes when the press ends.
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { useRef, useState } from 'react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { useDismiss } from '../src/components/useDismiss';
+
+function Popover({ onClose, onOutside }: { onClose?: () => void; onOutside?: () => void }) {
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  useDismiss(open, {
+    root,
+    trigger,
+    onClose: () => {
+      onClose?.();
+      setOpen(false);
+    },
+  });
+  return (
+    <div>
+      <div ref={root}>
+        <button
+          ref={trigger}
+          type="button"
+          aria-expanded={open}
+          onClick={() => {
+            setOpen(!open);
+          }}
+        >
+          trigger
+        </button>
+        {open && (
+          <fieldset aria-label="popover">
+            <input type="checkbox" aria-label="inside" />
+            <input
+              type="text"
+              aria-label="consumer"
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') event.preventDefault();
+              }}
+            />
+          </fieldset>
+        )}
+      </div>
+      <button type="button" onClick={onOutside}>
+        outside
+      </button>
+    </div>
+  );
+}
+
+/** A drawer whose trigger lies outside its root, as the facet drawer's does. */
+function Detached({ label }: { label: string }) {
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  useDismiss(open, {
+    root,
+    trigger,
+    inside: [trigger],
+    onClose: () => {
+      setOpen(false);
+    },
+  });
+  return (
+    <div>
+      <button
+        ref={trigger}
+        type="button"
+        aria-expanded={open}
+        onClick={() => {
+          setOpen(!open);
+        }}
+      >
+        {`${label} trigger`}
+      </button>
+      <div ref={root}>{open && <fieldset aria-label={label} />}</div>
+    </div>
+  );
+}
+
+const trigger = () => screen.getByRole('button', { name: 'trigger' });
+const popover = () => screen.queryByRole('group', { name: 'popover' });
+
+function open() {
+  fireEvent.click(trigger());
+  expect(popover()).not.toBeNull();
+}
+
+afterEach(() => {
+  cleanup();
+  // A test that ends on a press without its click: the next press begins.
+  fireEvent.pointerDown(window);
+});
+
+describe('useDismiss', () => {
+  it('closes on Escape from inside the popover and returns the focus to the trigger', () => {
+    render(<Popover />);
+    open();
+    const inside = screen.getByRole('checkbox', { name: 'inside' });
+    inside.focus();
+    expect(document.activeElement).toBe(inside);
+    fireEvent.keyDown(inside, { key: 'Escape' });
+    expect(popover()).toBeNull();
+    expect(trigger().getAttribute('aria-expanded')).toBe('false');
+    expect(document.activeElement).toBe(trigger());
+  });
+
+  it('closes on Escape when the focus is on the page body', () => {
+    render(<Popover />);
+    open();
+    act(() => {
+      (document.activeElement as HTMLElement | null)?.blur();
+    });
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    expect(popover()).toBeNull();
+    expect(document.activeElement).toBe(trigger());
+  });
+
+  it('closes on a pointer down outside and leaves the focus where it is', () => {
+    render(<Popover />);
+    open();
+    const outside = screen.getByRole('button', { name: 'outside' });
+    outside.focus();
+    fireEvent.pointerDown(outside);
+    expect(popover()).toBeNull();
+    expect(document.activeElement).toBe(outside);
+  });
+
+  it('stays open on a pointer down inside the popover or on the trigger', () => {
+    render(<Popover />);
+    open();
+    fireEvent.pointerDown(screen.getByRole('checkbox', { name: 'inside' }));
+    expect(popover()).not.toBeNull();
+    fireEvent.pointerDown(trigger());
+    expect(popover()).not.toBeNull();
+  });
+
+  it('ignores an Escape another handler consumed, and other keys', () => {
+    const onClose = vi.fn();
+    render(<Popover onClose={onClose} />);
+    open();
+    const consumer = screen.getByRole('textbox', { name: 'consumer' });
+    fireEvent.keyDown(consumer, { key: 'Escape' });
+    fireEvent.keyDown(consumer, { key: 'Enter' });
+    expect(popover()).not.toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('listens only while open', () => {
+    const onClose = vi.fn();
+    render(<Popover onClose={onClose} />);
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    fireEvent.pointerDown(document.body);
+    expect(onClose).not.toHaveBeenCalled();
+    open();
+    fireEvent.click(trigger());
+    expect(popover()).toBeNull();
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('keeps a popover open on a pointer down on an inside element outside its root', () => {
+    render(<Detached label="drawer" />);
+    const detachedTrigger = screen.getByRole('button', { name: 'drawer trigger' });
+    fireEvent.click(detachedTrigger);
+    expect(screen.queryByRole('group', { name: 'drawer' })).not.toBeNull();
+    fireEvent.pointerDown(detachedTrigger);
+    expect(screen.queryByRole('group', { name: 'drawer' })).not.toBeNull();
+    fireEvent.click(detachedTrigger);
+    expect(screen.queryByRole('group', { name: 'drawer' })).toBeNull();
+    fireEvent.click(detachedTrigger);
+    fireEvent.pointerDown(document.body);
+    expect(screen.queryByRole('group', { name: 'drawer' })).toBeNull();
+  });
+
+  it('closes the popover opened last on Escape, then the one below it', () => {
+    render(
+      <>
+        <Detached label="drawer" />
+        <Popover />
+      </>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'drawer trigger' }));
+    open();
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    expect(popover()).toBeNull();
+    expect(screen.queryByRole('group', { name: 'drawer' })).not.toBeNull();
+    expect(document.activeElement).toBe(trigger());
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    expect(screen.queryByRole('group', { name: 'drawer' })).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'drawer trigger' }));
+  });
+
+  it('swallows the click of the press that dismissed, and only that one', () => {
+    const onOutside = vi.fn();
+    render(<Popover onOutside={onOutside} />);
+    open();
+    const outside = screen.getByRole('button', { name: 'outside' });
+    fireEvent.pointerDown(outside);
+    expect(popover()).toBeNull();
+    fireEvent.pointerUp(outside);
+    fireEvent.click(outside);
+    expect(onOutside).not.toHaveBeenCalled();
+    // The next press is a press like any other.
+    fireEvent.pointerDown(outside);
+    fireEvent.pointerUp(outside);
+    fireEvent.click(outside);
+    expect(onOutside).toHaveBeenCalledTimes(1);
+  });
+
+  it('drops the swallow when the dismissing press ends without a click', async () => {
+    const onOutside = vi.fn();
+    render(<Popover onOutside={onOutside} />);
+    open();
+    const outside = screen.getByRole('button', { name: 'outside' });
+    fireEvent.pointerDown(outside);
+    fireEvent.pointerUp(document.body);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    // A click that no press of this test began (keyboard activation, say).
+    fireEvent.click(outside);
+    expect(onOutside).toHaveBeenCalledTimes(1);
+  });
+
+  it('lets a press on another popover toggle close this one and open that one', () => {
+    render(
+      <>
+        <Detached label="drawer" />
+        <Popover />
+      </>,
+    );
+    open();
+    const drawerTrigger = screen.getByRole('button', { name: 'drawer trigger' });
+    // The popover stays until the press ends, so that nothing moves under
+    // the pointer (the in-flow compact Menu, critic round 3 re-check).
+    fireEvent.pointerDown(drawerTrigger);
+    expect(popover()).not.toBeNull();
+    fireEvent.pointerUp(drawerTrigger);
+    fireEvent.click(drawerTrigger);
+    expect(popover()).toBeNull();
+    expect(screen.queryByRole('group', { name: 'drawer' })).not.toBeNull();
+  });
+
+  it('closes on a press on another popover toggle that ends without a click', async () => {
+    render(
+      <>
+        <Detached label="drawer" />
+        <Popover />
+      </>,
+    );
+    open();
+    const drawerTrigger = screen.getByRole('button', { name: 'drawer trigger' });
+    fireEvent.pointerDown(drawerTrigger);
+    fireEvent.pointerUp(document.body);
+    expect(popover()).not.toBeNull();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(popover()).toBeNull();
+    expect(screen.queryByRole('group', { name: 'drawer' })).toBeNull();
+  });
+});

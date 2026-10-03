@@ -20,12 +20,14 @@
     "pretest": "pnpm run generate && pnpm run extensions",
     "test": "vitest run",
     "e2e": "playwright test",
+    "upload-assets": "node scripts/upload-assets.mjs",
     "lint": "eslint . && prettier --check .",
     "pretypecheck": "pnpm run generate",
     "typecheck": "tsc -b"
   },
   "dependencies": {
     "@duckdb/duckdb-wasm": "1.32.0",
+    "@tanstack/react-table": "9.2.4",
     "apache-arrow": "17.0.0",
     "cgview": "1.8.2",
     "react": "19.3.0",

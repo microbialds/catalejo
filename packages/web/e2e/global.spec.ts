@@ -1381,6 +1381,50 @@ test('the compact Menu closes on Escape and on a pointer down outside, activatin
   await expect.poll(() => Object.keys(urlFilters(page))).toEqual(['species_code']);
 });
 
+test('one press on Filters, "+ add filter" or "expand" with the compact Menu open opens it', async ({
+  page,
+}, testInfo) => {
+  // Requirements §5.10 and §9; the maintainer's exception for disclosure
+  // controls (components/useDismiss.ts) at 390 px, where the open Menu lies in
+  // the page flow above the set bar (critic round 3 re-check, observation 4).
+  test.skip(widthOf(testInfo) !== 390, 'the Menu exists below 900 px');
+  await page.goto('/');
+  await collectionReady(page);
+  const menu = page.getByRole('button', { name: strings.menuToggle, exact: true });
+
+  const filters = setBar(page).getByRole('button', { name: strings.drawerToggle, exact: true });
+  await openMenu(page);
+  await filters.click();
+  await expect(facetRail(page)).toBeVisible();
+  await expect(filters).toHaveAttribute('aria-expanded', 'true');
+  await expect(navigation(page)).toBeHidden();
+  await expect(menu).toHaveAttribute('aria-expanded', 'false');
+  await page.keyboard.press('Escape');
+  await expect(facetRail(page)).toBeHidden();
+
+  const addFilter = setBar(page).getByRole('button', { name: strings.addFilter, exact: true });
+  await openMenu(page);
+  await addFilter.click();
+  await expect(page.getByRole('dialog', { name: strings.addFilterMenuLabel })).toBeVisible();
+  await expect(addFilter).toHaveAttribute('aria-expanded', 'true');
+  await expect(navigation(page)).toBeHidden();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog', { name: strings.addFilterMenuLabel })).toBeHidden();
+
+  const species = panel(page, strings.panelSpecies);
+  const expand = species.getByRole('button', {
+    name: strings.panelExpandName(strings.panelSpecies),
+  });
+  await openMenu(page);
+  await expand.click();
+  await expect(
+    species.getByRole('button', { name: strings.panelCollapseName(strings.panelSpecies) }),
+  ).toHaveAttribute('aria-expanded', 'true');
+  await expect(species.getByRole('group', { name: strings.exportMenuLabel })).toBeVisible();
+  await expect(navigation(page)).toBeHidden();
+  expect(new URL(page.url()).search).toBe('');
+});
+
 test('the search field shows a visible focus (§9)', async ({ page }) => {
   // Critic round 3, observation 3: the underline thickens to 2 px ink and the
   // field takes the hairline ink outline of every focused control.

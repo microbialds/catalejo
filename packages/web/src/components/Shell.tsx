@@ -9,7 +9,9 @@
 // scrolls. Below 900 px (breakpoint_compact) the grid stacks and the column
 // becomes a top bar with the wordmark and a "Menu" text button that opens the
 // navigation and footer; the menu closes when the path changes, on Escape
-// (the focus returns to "Menu") and on a pointer down outside the top bar
+// (the focus returns to "Menu"), on a pointer down outside the top bar, and
+// at the end of a press on another disclosure control such as "Filters", so
+// that the press lands on that control before the menu leaves the page flow
 // (components/useDismiss.ts, §9), and when the viewport widens to 900 px,
 // where the column shows the navigation without it. Below 1200 px
 // (breakpoint_drawer) a page's facet rail becomes a drawer through

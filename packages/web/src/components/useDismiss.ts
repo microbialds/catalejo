@@ -12,8 +12,13 @@
 // follows (a drag, a release elsewhere), and at the latest when the next
 // press begins. One exception: a press on another disclosure control (an
 // element with aria-expanded, such as "Menu", "Filters", "Columns", "+ add
-// filter" or a panel's "expand") closes this popover and still toggles that
-// one, so that moving between popovers takes one click.
+// filter" or a panel's "expand") still toggles that one, so that moving
+// between popovers takes one click, and closes this popover when the press
+// ends (on its click, or right after the pointer up or cancel when no click
+// follows) instead of on the pointer down. The deferral keeps the layout
+// still for the length of the press: the compact Menu lies in the page flow,
+// and closing it on the pointer down would move "Filters" or "+ add filter"
+// from under the pointer before the click.
 // The root usually contains the trigger, so a press on the trigger itself is
 // left to the trigger's own toggle; a trigger that lies elsewhere (the set
 // bar's "Filters" button for the facet drawer) is passed in `inside`, with
@@ -42,6 +47,36 @@ const openStack: object[] = [];
 /** Whether a press on this target toggles another popover (aria-expanded). */
 function isDisclosure(target: EventTarget | null): boolean {
   return target instanceof Element && target.closest('[aria-expanded]') !== null;
+}
+
+/**
+ * Closes a popover when the current press ends: on its click, or right after
+ * the pointer up or cancel when no click follows, and at the latest when the
+ * next press begins. Each popover arms its own, so that several close on the
+ * same press.
+ */
+function closeAfterPress(onClose: () => void): void {
+  let done = false;
+  const finish = () => {
+    if (done) return;
+    done = true;
+    window.removeEventListener('click', finish, true);
+    window.removeEventListener('pointerup', later, true);
+    window.removeEventListener('pointercancel', later, true);
+    window.removeEventListener('pointerdown', finish, true);
+    onClose();
+  };
+  // The click of a press is dispatched in the same task as its pointer up,
+  // so a timer set on pointer up runs after it.
+  const later = () => {
+    window.setTimeout(finish, 0);
+  };
+  window.addEventListener('click', finish, true);
+  window.addEventListener('pointerup', later, true);
+  window.addEventListener('pointercancel', later, true);
+  // Added while the pressing pointer down is past the window's capture
+  // phase, so it answers only the next press.
+  window.addEventListener('pointerdown', finish, true);
 }
 
 /** Drops the armed swallow, when one is armed. */
@@ -104,8 +139,14 @@ export function useDismiss(
       (others.current ?? []).some((ref) => ref.current?.contains(target) === true);
     const onPointer = (event: PointerEvent) => {
       if (root.current === null || contains(event.target as Node)) return;
+      if (isDisclosure(event.target)) {
+        closeAfterPress(() => {
+          close.current();
+        });
+        return;
+      }
       close.current();
-      if (!isDisclosure(event.target)) swallowNextClick(event.target as Node);
+      swallowNextClick(event.target as Node);
     };
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented) return;

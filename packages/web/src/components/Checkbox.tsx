@@ -18,7 +18,11 @@
 import type { ComponentPropsWithRef } from 'react';
 
 export interface CheckboxProps extends Omit<ComponentPropsWithRef<'input'>, 'type'> {
-  /** The mixed state; drawn as a bar and exposed as aria-checked="mixed". */
+  /**
+   * The mixed state; drawn as a bar. It sets the input's native
+   * `indeterminate` property (no aria-checked attribute), which browsers
+   * expose to assistive technology as the mixed state.
+   */
   indeterminate?: boolean;
 }
 

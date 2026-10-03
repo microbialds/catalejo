@@ -4,7 +4,8 @@
 // trigger, a pointer down outside closes and leaves the focus alone, a
 // pointer down inside keeps the popover open, an Escape another handler
 // consumed is ignored, and the click that ends a dismissing press activates
-// nothing (critic round 3, observation 4) unless it toggles another popover.
+// nothing (critic round 3, observation 4) unless it toggles another popover,
+// in which case this one closes when the press ends.
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { useRef, useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -239,9 +240,32 @@ describe('useDismiss', () => {
     );
     open();
     const drawerTrigger = screen.getByRole('button', { name: 'drawer trigger' });
+    // The popover stays until the press ends, so that nothing moves under
+    // the pointer (the in-flow compact Menu, critic round 3 re-check).
     fireEvent.pointerDown(drawerTrigger);
-    expect(popover()).toBeNull();
+    expect(popover()).not.toBeNull();
+    fireEvent.pointerUp(drawerTrigger);
     fireEvent.click(drawerTrigger);
+    expect(popover()).toBeNull();
     expect(screen.queryByRole('group', { name: 'drawer' })).not.toBeNull();
+  });
+
+  it('closes on a press on another popover toggle that ends without a click', async () => {
+    render(
+      <>
+        <Detached label="drawer" />
+        <Popover />
+      </>,
+    );
+    open();
+    const drawerTrigger = screen.getByRole('button', { name: 'drawer trigger' });
+    fireEvent.pointerDown(drawerTrigger);
+    fireEvent.pointerUp(document.body);
+    expect(popover()).not.toBeNull();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(popover()).toBeNull();
+    expect(screen.queryByRole('group', { name: 'drawer' })).toBeNull();
   });
 });

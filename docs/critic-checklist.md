@@ -31,7 +31,7 @@ Derived from `docs/requirements.md`. Each item has an identifier, the requiremen
 | C4 | §6.1 | Facet counts update within 300 ms of a filter change on the synthetic release |
 | C5 | §6.1 | The table sorts, pages by 50, selects rows, and "Use as set" on a selection yields the selected identifiers |
 | C6 | §6.1 | Each panel expands full-width and shows the export menu |
-| C7 | §6.1 | With more than eight species, the smallest are grouped as "Other" in charts but not in tables or chips |
+| C7 | §5.4, §6.1 | Species without a registry color, and colored species beyond the eighth, are grouped as "Other" in charts but not in tables, facets or chips |
 | C8 | §6.1 | A species with no ST scheme shows the ST panel statement instead of bars |
 
 ## S. Genome sets (milestone 3)

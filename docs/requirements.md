@@ -1,6 +1,6 @@
 # Requirements
 
-Catalejo Genómico. Version 0.7, 2026-10-02. Status: draft for review.
+Catalejo Genómico. Version 0.8, 2026-10-03. Status: draft for review.
 
 This document states what the platform does, page by page, and the constraints it is built under. It is the companion of `docs/data-contract.md`, which defines the data the platform reads; where the two disagree, the contract wins and this document is corrected. The critic checklist (`docs/critic-checklist.md`) is derived from the acceptance items at the end of each page section, and the build plan takes its milestones from §14.
 
@@ -62,7 +62,7 @@ No instance stores user data. There are no accounts, profiles, saved objects or 
 
 Every page shares the shell shown on the final canvas boards. A 200 px left column holds the wordmark (Catalejo, with the tagline "microbial genome collection"), the navigation in two groups, Explore (Collection, Genome sets, Genomes, Genes) and Analyze (Phylogeny, Pangenome, Embeddings, Sequence search), and a footer with the release identifier (a link to the Releases page), the genome count, the pipeline name and version from the manifest (contract §6.4), and a link to the Methods page. The active page is marked by a 3 px left rule in ink and bold text.
 
-A 56 px bar spans the top of every page and shows the current genome set (the count as a large numeral, the phrase "genomes in the current set", the active filters as chips, an "add filter" link), a search field, and the actions "Share link" and "Save set".
+A 56 px bar spans the top of every page and shows the current genome set (the count as a large numeral, the phrase "genomes in the current set", the active filters as chips, an "add filter" link), a search field, and the actions "Share link" and "Save set". When the filter chips do not fit on one line, the bar shows those that fit and a "+N more" control that opens the full list. Below 1200 px the actions (add filter, complete genomes only, Share link and Save set) are grouped behind one "Set" control, and below 900 px the search field moves to the top of the navigation menu, so the bar keeps its height at every width.
 
 Navigation items whose data is absent from the release (per the manifest) are shown disabled with a tooltip stating that the release does not include that product.
 
@@ -97,13 +97,13 @@ Routes are stable and are part of what users cite. Query parameters encode the s
 | `/methods` | Methods |
 | `/releases` | Current release and release notes |
 
-Set state is carried in the query string as `q=` with a compact JSON encoding of the filter object from the contract §7.5, plus `ids=` for explicit lists and `set=` for a curated set. A missing query means the whole release. Route changes preserve the query. Any URL that names a genome absent from the release resolves to the tombstone page if a tombstone exists, else to a not-found page that offers a search.
+Set state is carried in the query string as `q=` with a compact JSON encoding of the filter object from the contract §7.5, plus `ids=` for explicit lists and `set=` for a curated set. A missing query means the whole release. View parameters may follow the set parameters, `sort=`, `page=` and `cols=` for the genome table, and a change of set resets `page`. Route changes preserve the query. Any URL that names a genome absent from the release resolves to the tombstone page if a tombstone exists, else to a not-found page that offers a search.
 
 ### 5.4 Color vocabulary
 
 All colors come from `config/palette.yaml`, read by the Python exports and the TypeScript components.
 
-- Species colors are assigned once in `species_registry.color` from an Okabe-Ito based sequence of eight, with "Other" in gray, and never change between releases. When more than eight species are present, the collection page groups the smallest into "Other" for charts and keeps individual colors in tables and chips.
+- Species colors are assigned once in `species_registry.color` from an Okabe-Ito based sequence of eight, with "Other" in gray, and never change between releases. Charts draw individually only the species that have a registry color, up to eight, ranked by genome count in the set; every other species is grouped as "Other", so the Other gray always means a group. Tables, chips and facets keep every species individual, with its registry color or the Other gray.
 - Drug classes have a fixed palette of fourteen distinguishable colors on white, listed in the palette file, with a stated order.
 - Contig types are fixed. Chromosome dark gray, plasmid purple, prophage lavender, unclassified light gray, none of which appears in the species sequence. The AMR track and determinant highlight is vermillion; virulence is reddish purple; GC skew is bluish green.
 - The embedding map uses a dark background and a lifted variant of the species palette, also listed in the palette file, so the mapping from species to hue is preserved.
@@ -145,9 +145,9 @@ Layout. Facet rail (232 px) on the left with species, source, mobile elements, A
 
 Data. The species-grain summaries (`summaries/counts_by_*` and `amr_class_by_species`) for every chart and counter when the set is the whole release, which is also the first render. For any other set, the same counts aggregated in the browser over the genome-grain files (`genome.parquet`, `summaries/qc.parquet`, `summaries/amr_class_by_genome.parquet`, the presence files, `mutation.parquet` and `genome_set_member.parquet`), never over the per-species tables. `genome.parquet` for the table, paged.
 
-Controls and interactions. Clicking a facet value adds that value as an alternative within its field. Clicking a bar, a heatmap cell or a year adds the corresponding filter and narrows the set to the clicked element, replacing the values already chosen in the fields it names. The QC scatter supports brushing, which adds a completeness and contamination filter. The table supports sorting, column selection, paging by 50, and row selection, with "Use as set" for the selection. Each panel has an expand control that opens it full-width with the export menu.
+Controls and interactions. Clicking a facet value adds that value as an alternative within its field. Clicking a bar, a heatmap cell or a year adds the corresponding filter and narrows the set to the clicked element, replacing the values already chosen in the fields it names. The QC scatter supports brushing, which adds a completeness and contamination filter. The table supports sorting, column selection, paging by 50, and row selection, with "Use as set" for the selection. A Typing column shows the typing chip keys of `config/typing_display.yaml`, without the sequence type and the scores, and completeness and contamination appear as integer percents with the exact value on hover. Each panel has an expand control that opens it full-width with the export menu.
 
-States. Empty set as §5.2. Fewer than eight species collapses "Other". A species with no ST scheme shows the ST panel with a statement instead of bars.
+States. Empty set as §5.2. When every species in the set is drawn individually, no "Other" appears. A species with no ST scheme shows the ST panel with a statement instead of bars.
 
 Acceptance.
 - Counters equal the counts in the summaries for the whole release, and the same counts computed over the genome-grain files for any other set.

@@ -31,15 +31,24 @@ jobs:
 
       # 1. Set up uv and install packages/ingest (uv sync --locked).
       # 2. Run the ingest test suite (uv run pytest) before touching data.
-      # 3. Obtain the master catalog catalog/<release_id>.duckdb as a workflow
-      #    artifact or a mounted path, per the procedure in dev/backup.md.
+      # 3. Obtain the master catalog catalog/<release_id>.duckdb together with
+      #    its per-genome file directory catalog/<release_id>.files/, which
+      #    release build refuses to run without (contract §5). The catalog
+      #    lives on the lab server and its backups; milestone 5 defines how
+      #    the workflow obtains both (a workflow artifact or a mounted path).
       # 4. catalejo release check --catalog catalog/<release_id>.duckdb
       #    (fails the workflow on any contract §9 failure).
-      # 5. catalejo release build --catalog ... --out releases/<release_id>/
-      #    [--group <group_id>] (deterministic; manifest.json at the root).
-      # 6. catalejo release publish --dir releases/<release_id>/ --bucket <R2 bucket>
+      # 5. catalejo release build --catalog catalog/<release_id>.duckdb
+      #    --out releases/<release_id>/ [--group <group_id>] (deterministic;
+      #    manifest.json at the root).
+      # 6. catalejo release check --catalog catalog/<release_id>.duckdb
+      #    --release releases/<release_id>/ (verifies the manifest checksums
+      #    of the built release and of its group releases).
+      # 7. catalejo release publish --dir releases/<release_id>/ --bucket catalejo-releases
       #    [--group <group_id>], credentials from repository secrets
       #    (R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, CLOUDFLARE_ACCOUNT_ID).
-      # 7. Update the pointer file releases/current.json for the group.
-      # 8. Post the release notes (NOTES.md) as the workflow summary
+      # 8. Update the pointer file, releases/current.json for the full release
+      #    or releases/<group_id>/current.json for a group, to the content
+      #    {"release_id":"<release_id>"}.
+      # 9. Post the release notes (NOTES.md) as the workflow summary
       #    ($GITHUB_STEP_SUMMARY).

@@ -4,19 +4,88 @@ How to create the Catalejo repository, install the toolchain, configure Claude C
 
 ## 1. Prerequisites
 
-| Tool | Version | Install |
+### Run locally
+
+These tools are enough to build the synthetic release, run the application and run the tests.
+
+| Tool | Version | Source of the version |
 |---|---|---|
 | git | 2.40 or later | system package |
+| uv | current | https://docs.astral.sh/uv/, which installs Python 3.13 itself |
+| Node | 24 | `.node-version` at the repository root |
+| pnpm | 10.10.0 | the `packageManager` field of `packages/web/package.json` |
+| Playwright Chromium | the build of `@playwright/test` in `packages/web` | installed after the web dependencies |
+
+Python 3.13 is installed by uv on the first `uv sync`, so no system Python is needed. On macOS with Homebrew, the following installs uv and fnm, the Node version manager that reads `.node-version`, then Node 24, and enables pnpm through corepack, which ships with Node.
+
+```
+brew install uv fnm
+fnm install 24
+corepack enable pnpm
+```
+
+On Linux, uv comes from its installer script.
+
+```
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+Node 24 comes from fnm as above, or from nvm with the following command, after which `corepack enable pnpm` is run as on macOS.
+
+```
+nvm install 24
+```
+
+So that fnm switches to Node 24 whenever a terminal enters the repository, add the following line to `~/.zshrc` and open a new terminal.
+
+```
+eval "$(fnm env --use-on-cd --shell zsh)"
+```
+
+The Chromium build that the end-to-end tests use is installed once the web dependencies are (§5), from the repository root.
+
+```
+pnpm --dir packages/web exec playwright install chromium
+```
+
+On Linux the same command takes `--with-deps`, which also installs the system libraries Chromium needs.
+
+```
+pnpm --dir packages/web exec playwright install --with-deps chromium
+```
+
+The first run needs network access, since uv downloads Python 3.13 and the Python packages, pnpm downloads the npm packages, and the first `dev`, `test` or `preview` of the web package fetches the pinned DuckDB extensions from extensions.duckdb.org. The dependencies, the synthetic data and the release take about 1 GB of disk, and the Playwright browser about 0.5 GB more.
+
+### Maintainers and Claude Code
+
+These tools are needed only to open pull requests, run Claude Code sessions, upload files to the bucket and deploy.
+
+| Tool | Version | Install |
+|---|---|---|
 | GitHub CLI (`gh`) | current | https://cli.github.com |
-| uv | current | https://docs.astral.sh/uv/ (manages Python 3.13 itself) |
-| Node | 24 LTS | fnm or nvm; `fnm install 24` |
-| pnpm | current | `corepack enable pnpm` after Node is installed |
 | Claude Code | current | https://docs.claude.com/en/docs/claude-code/overview |
-| Playwright browsers | current | installed by `pnpm --dir packages/web exec playwright install chromium` after milestone 1 |
+| Playwright MCP server | current | added to Claude Code as in §4 |
+| rclone | current | Homebrew, as below |
+| wrangler | 4 | not installed, run as `npx wrangler@4` |
 
-Python 3.13 is installed by uv on first `uv sync`; no system Python is required.
+```
+brew install gh rclone
+```
 
-## 2. Create the repository (maintainer)
+rclone carries the uploads of `pnpm --dir packages/web run upload-assets` to the R2 bucket, and wrangler, which npx fetches on each use, deploys to Cloudflare Pages.
+
+## 2. Clone the repository
+
+Everyone except the maintainer who created the repository starts from a clone. Every command in this document runs from the repository root.
+
+```
+git clone https://github.com/microbialds/catalejo.git
+cd catalejo
+```
+
+## 3. Create the repository (maintainer)
+
+The maintainer did this once, when the repository was created, and it is kept here as a record.
 
 ```
 mkdir catalejo && cd catalejo
@@ -46,12 +115,12 @@ git commit -m "Bootstrap repository with specification, Claude Code configuratio
 gh repo create [ORGANIZATION]/catalejo --public --source . --push
 ```
 
-On GitHub, protect `main` (Settings, Branches, add rule for `main`): require a pull request before merging, require status checks to pass once CI exists, and do not allow force pushes. Do not install the Claude GitHub App or the Claude Code GitHub Action on this repository.
+On GitHub, protect `main` (Settings, Branches, add rule for `main`) so that merging requires a pull request and passing status checks once CI exists, and force pushes are not allowed. Do not install the Claude GitHub App or the Claude Code GitHub Action on this repository.
 
 The repository is public. Actions minutes are unlimited on public repositories; secrets are not available to workflows triggered from forks.
 
 
-## 3. Claude Code configuration
+## 4. Claude Code configuration
 
 The repository ships `.claude/settings.json` (shared permissions and hooks) and `.claude/agents/` (subagents). Personal overrides go in `.claude/settings.local.json`, which is ignored.
 
@@ -71,7 +140,7 @@ Advisor. Claude Code can consult a second, stronger model at decision points (be
 
 Flagged requests. Fable 5.1 and Opus 5.5 run safety classifiers that flag biology content, and a repository about resistance determinants can trigger them, sometimes on the first request of a session. By default Claude Code then switches the session to Opus 5 without asking. To be asked instead, run `/config` and turn off "Switch models when a message is flagged" (this writes `switchModelsOnFlag: false` to your user settings). Record the model that served each session in the development log.
 
-Both settings belong in `~/.claude/settings.json`, your user file, so that model and billing choices stay personal:
+Both settings belong in `~/.claude/settings.json`, your user file, so that model and billing choices stay personal, as follows.
 
 ```json
 {
@@ -91,9 +160,9 @@ Verify with `claude mcp list` that `playwright` is listed, and that the tool nam
 
 Co-author trailer. `.claude/settings.json` sets `includeCoAuthoredBy` to `false`. If the key is rejected by your Claude Code version, look up the current name of the setting that disables the co-author trailer and use that.
 
-## 4. Toolchain check
+## 5. Toolchain check
 
-After milestone 0 has created the packages, the following commands must all succeed from the repository root.
+The following commands must all succeed from the repository root.
 
 ```
 uv sync --project packages/ingest
@@ -102,7 +171,31 @@ pnpm --dir packages/web install
 pnpm --dir packages/web typecheck
 ```
 
-## 5. Running a session
+## 6. Local data
+
+The synthetic data and its catalog live under `data/`, with the catalog in `data/catalog/`, and the releases under `releases/`, both ignored by git. The following sequence builds the synthetic release that the application, the end-to-end tests and the critic read, and starts the development server on it. Its `catalejo` lines are copied from the "Synthetic release" step of `.github/workflows/ci.yml`, so a local build follows the same steps as CI.
+
+```
+uv sync --project packages/ingest
+catalejo() { uv run --project packages/ingest catalejo "$@"; }
+catalejo synth --species 10 --genomes 100 --out data/synth
+catalejo metadata init --mgap data/synth/results --existing data/synth/metadata.csv --out data/synth/metadata.csv
+catalejo ingest --mgap data/synth/results --metadata data/synth/metadata.csv --catalog data/catalog/synth.duckdb
+catalejo tombstones ingest --file data/synth/tombstones.csv --catalog data/catalog/synth.duckdb
+catalejo groups ingest --groups data/synth/groups.csv --members data/synth/genome_groups.csv --catalog data/catalog/synth.duckdb
+catalejo sets ingest --file data/synth/sets.csv --catalog data/catalog/synth.duckdb
+catalejo release check --catalog data/catalog/synth.duckdb --metadata data/synth/metadata.csv --mgap data/synth/results
+catalejo release build --catalog data/catalog/synth.duckdb --out releases/synth
+catalejo release check --catalog data/catalog/synth.duckdb --release releases/synth
+pnpm --dir packages/web install
+pnpm --dir packages/web dev
+```
+
+The line that starts with `catalejo()` defines a shell function in zsh or bash, so that `catalejo` runs the command through uv for as long as the terminal stays open. The application is then at http://localhost:5173. Release files are cached by the browser as immutable, so after rebuilding the release under the same identifier, reload the page without the cache (Cmd+Shift+R on macOS, Ctrl+Shift+R elsewhere). [packages/ingest/README.md](../packages/ingest/README.md) describes what each command does.
+
+The maintainer also keeps a small real mgap results directory at `data/mgap-example/`, a few genomes covering the tools in the contract, with one run that includes MOB-suite and one that does not, and a nanopore run at `data/ont_example/`. They are the reference from which the parsers and the synthetic generator take the file layout, they stay on the maintainer's machine, and the tests that read them are skipped when they are absent, so nobody else needs them.
+
+## 7. Running a session
 
 1. Open a terminal in the repository and start Claude Code with the model.
 2. Press Shift+Tab until plan mode is active.
@@ -113,22 +206,6 @@ pnpm --dir packages/web typecheck
 
 Do not carry a session across milestones. The documents are the memory of the project; the conversation is not.
 
-## 6. Local data
-
-Before milestone 0, place a small real mgap results directory (a few genomes covering the tools in the contract, including one run with MOB-suite and one without) at `data/mgap-example/`. It is ignored by git and is the reference from which the parsers and the synthetic generator take the file layout.
-
-Synthetic data and local releases live under `data/`, `catalog/` and `releases/`, all ignored by git. To produce the synthetic release used by tests and by the critic:
-
-```
-uv run --project packages/ingest catalejo synth --species 10 --genomes 100 --out data/synth
-uv run --project packages/ingest catalejo metadata init --mgap data/synth --out data/synth-metadata.csv
-uv run --project packages/ingest catalejo ingest --mgap data/synth --metadata data/synth-metadata.csv --catalog catalog/synth.duckdb
-uv run --project packages/ingest catalejo release build --catalog catalog/synth.duckdb --out releases/synth
-pnpm --dir packages/web dev
-```
-
-The exact flags are defined by the command's help once milestone 1 is complete; the sequence above is the intended shape.
-
-## 7. Deployment
+## 8. Deployment
 
 Hosting and deployment are described in `docs/requirements.md` §10 and §11. The account-level procedure (Cloudflare account, Pages project, R2 bucket, Access policy, secrets) is an internal document held by the maintaining group.

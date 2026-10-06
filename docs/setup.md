@@ -208,4 +208,4 @@ Do not carry a session across milestones. The documents are the memory of the pr
 
 ## 8. Deployment
 
-Hosting and deployment are described in `docs/requirements.md` §10 and §11. The account-level procedure (Cloudflare account, Pages project, R2 bucket, Access policy, secrets) is an internal document held by the maintaining group.
+Hosting and deployment are described in `docs/requirements.md` §10 and §11. The procedure, from the one-time setup of the Cloudflare account to publishing releases and adding group instances, is [docs/deployment.md](deployment.md), read from top to bottom.

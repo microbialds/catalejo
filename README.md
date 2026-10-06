@@ -20,7 +20,7 @@ Tiers add pages and data without changing the shell, the existing tables or the 
 
 ## Documents
 
-The data contract in [docs/data-contract.md](docs/data-contract.md) defines every table, file and format the platform reads and writes, and the requirements in [docs/requirements.md](docs/requirements.md) define every page, its behavior and its acceptance items. When the code and these two documents disagree, the documents win. [docs/setup.md](docs/setup.md) describes the toolchain and how a development session runs.
+The data contract in [docs/data-contract.md](docs/data-contract.md) defines every table, file and format the platform reads and writes, and the requirements in [docs/requirements.md](docs/requirements.md) define every page, its behavior and its acceptance items. When the code and these two documents disagree, the documents win. [docs/setup.md](docs/setup.md) describes the toolchain and how a development session runs, and [docs/deployment.md](docs/deployment.md) describes how to run an instance on Cloudflare, from the one-time setup to publishing releases.
 
 ## Repository layout
 

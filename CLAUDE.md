@@ -30,7 +30,7 @@ packages/ingest/     Python 3.13, uv, the `catalejo` command (parsers, catalog, 
 packages/web/        TypeScript, Node 24, pnpm, Vite, React; the static application
 config/              platform.yaml, palette.yaml, design-tokens.yaml, typing_display.yaml,
                      summary_templates.yaml, export-presets.yaml, versions.yaml
-docs/                data-contract.md, requirements.md, critic-checklist.md, setup.md, onboarding.md
+docs/                data-contract.md, requirements.md, critic-checklist.md, setup.md, deployment.md, onboarding.md
 tests/fixtures/      shared fixtures (the Parquet cross-read file); package tests live inside each package
 .github/workflows/   ci.yml, release.yml, deploy.yml
 dev/                 ignored by git; build plan, prompts, internal documents (present only on the maintainer's machine)

@@ -25,10 +25,18 @@ jobs:
       # 3. pnpm --dir packages/web build. The build contains no DuckDB-WASM engine
       #    files: they exceed the Pages limit of 25 MiB per file and are served
       #    from the bucket through functions/assets/[[path]].ts.
+      # 3a-3b. Milestone 1b added packages/web/scripts/upload-assets.mjs
+      #    (pnpm --dir packages/web run upload-assets), which uploads both sets
+      #    below with rclone in the same layout; milestone 5 chooses between it
+      #    and the wrangler commands sketched here. Running upload-assets with
+      #    an rclone remote built from the R2 secrets (for example through
+      #    RCLONE_CONFIG_R2_* environment variables) keeps the bucket layout
+      #    in one place, the script, for local and workflow uploads alike.
       # 3a. Upload the DuckDB-WASM engine files and workers for the pinned package
       #    version (config/versions.yaml duckdb_wasm_npm) to the bucket, before
       #    deploying, so the new build never points at missing files. Objects
-      #    under one version never change, so an existing key is left as is.
+      #    under one version never change, so re-uploading the same version is
+      #    harmless.
       #      V=$(node -p "require('./packages/web/node_modules/@duckdb/duckdb-wasm/package.json').version")
       #      for f in duckdb-mvp.wasm duckdb-eh.wasm duckdb-browser-mvp.worker.js duckdb-browser-eh.worker.js; do
       #        npx wrangler r2 object put "$R2_BUCKET/assets/duckdb-wasm/$V/$f" \
@@ -51,4 +59,8 @@ jobs:
       # 5. Fail the deployment if the manifest's schema_version is outside the
       #    application's supported schema_version range.
       # 6. Deploy packages/web/dist to each Pages project with wrangler
-      #    (CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID from repository secrets).
+      #    (CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID from repository secrets),
+      #    run with packages/web as the working directory
+      #    (npx wrangler pages deploy dist --project-name <project>), because
+      #    wrangler deploys the Functions from functions/ in its working
+      #    directory.

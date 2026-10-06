@@ -30,7 +30,7 @@ packages/ingest/     Python 3.13, uv, the `catalejo` command (parsers, catalog, 
 packages/web/        TypeScript, Node 24, pnpm, Vite, React; the static application
 config/              platform.yaml, palette.yaml, design-tokens.yaml, typing_display.yaml,
                      summary_templates.yaml, export-presets.yaml, versions.yaml
-docs/                data-contract.md, requirements.md, critic-checklist.md, setup.md, onboarding.md
+docs/                data-contract.md, requirements.md, critic-checklist.md, setup.md, deployment.md, onboarding.md
 tests/fixtures/      shared fixtures (the Parquet cross-read file); package tests live inside each package
 .github/workflows/   ci.yml, release.yml, deploy.yml
 dev/                 ignored by git; build plan, prompts, internal documents (present only on the maintainer's machine)
@@ -49,8 +49,25 @@ pnpm --dir packages/web install                         install web dependencies
 pnpm --dir packages/web dev                             development server, serves releases/synth at /data/ by default
 pnpm --dir packages/web test                            component tests
 pnpm --dir packages/web e2e                             Playwright tests against the synthetic release
+pnpm --dir packages/web exec playwright install chromium   Chromium for the e2e tests (add --with-deps on Linux)
+pnpm --dir packages/web build                           production build into packages/web/dist, then check-dist
 pnpm --dir packages/web lint && pnpm --dir packages/web typecheck
 uv run --project packages/ingest ruff check . && uv run --project packages/ingest pyright
+```
+
+The synthetic release (`releases/synth`), built from the repository root exactly as `.github/workflows/ci.yml` does in its "Synthetic release" step:
+
+```
+catalejo() { uv run --project packages/ingest catalejo "$@"; }
+catalejo synth --species 10 --genomes 100 --out data/synth
+catalejo metadata init --mgap data/synth/results --existing data/synth/metadata.csv --out data/synth/metadata.csv
+catalejo ingest --mgap data/synth/results --metadata data/synth/metadata.csv --catalog data/catalog/synth.duckdb
+catalejo tombstones ingest --file data/synth/tombstones.csv --catalog data/catalog/synth.duckdb
+catalejo groups ingest --groups data/synth/groups.csv --members data/synth/genome_groups.csv --catalog data/catalog/synth.duckdb
+catalejo sets ingest --file data/synth/sets.csv --catalog data/catalog/synth.duckdb
+catalejo release check --catalog data/catalog/synth.duckdb --metadata data/synth/metadata.csv --mgap data/synth/results
+catalejo release build --catalog data/catalog/synth.duckdb --out releases/synth
+catalejo release check --catalog data/catalog/synth.duckdb --release releases/synth
 ```
 
 Run the relevant tests after every change. A hook runs the linter after edits; treat its failures as your own. Type checks run with the tests.
@@ -61,7 +78,7 @@ Python 3.13, Node 24, DuckDB Python and `@duckdb/duckdb-wasm` on the same minor 
 
 ## Design
 
-The interface follows the design tokens in `config/design-tokens.yaml` and the rules in `docs/requirements.md` §7. Every user-visible string lives in `packages/web/src/strings.ts`; components contain no literal interface text. Every color comes from `config/palette.yaml`. Species names are italic in the serif face; gene and allele names are italic monospace. No icon-only navigation, rounded cards, shadows, gradients, blue accent or dark sidebar.
+The interface follows the design tokens in `config/design-tokens.yaml` and the rules in `docs/requirements.md` §7. Every user-visible string lives in `packages/web/src/strings.ts`; components contain no literal interface text. Every color comes from `config/palette.yaml`. Species names are italic; identifiers, counts and counters are monospace; gene and allele names are italic monospace. The chrome is achromatic and the accent is ink. No icon-only navigation, rounded cards, shadows, gradients, serif face, uppercase labels, colored accent or dark sidebar.
 
 ## Git
 

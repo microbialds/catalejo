@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { palette } from '../src/generated/palette';
+import { chipLabel } from '../src/set/fields';
 import { strings } from '../src/strings';
 import { sourceFiles, webRoot } from './files';
 import { findLiteralText } from './guards/literalText';
@@ -77,5 +78,46 @@ describe('strings module', () => {
     expect(strings.wordmark).toBe('Catalejo');
     expect(strings.tagline).toBe('microbial genome collection');
     expect(strings.setBarPhrase).toBe('genomes in the current set');
+  });
+});
+
+describe('counts of genomes', () => {
+  it('uses the singular for one genome and the plural otherwise', () => {
+    expect(strings.facetOptionName('Animal', '1', 1)).toBe('Animal, 1 genome in the set');
+    expect(strings.facetOptionName('Animal', '2', 2)).toBe('Animal, 2 genomes in the set');
+    expect(strings.facetOptionName('Animal', '0', 0)).toBe('Animal, 0 genomes in the set');
+    expect(strings.speciesBarName('Serratia marcescens', '1', 1)).toBe(
+      'Serratia marcescens, 1 genome',
+    );
+    expect(strings.stBarName('ST258', '1', 1)).toBe('ST258, 1 genome');
+    expect(strings.stOtherName('1', 1, '1')).toBe('Other sequence types (1), 1 genome');
+    expect(strings.yearSegmentName('Klebsiella pneumoniae', 2019, '1', 1)).toBe(
+      'Klebsiella pneumoniae, 2019: 1 genome',
+    );
+    expect(strings.yearColumnName(2019, '1', 1)).toBe('2019: 1 genome');
+    expect(strings.yearColumnName(2019, '9', 9)).toBe('2019: 9 genomes');
+    expect(strings.chipGenomeIds('1', 1, 'KPN0001')).toBe('1 genome (KPN0001)');
+    expect(strings.chipGenomeIds('2', 2, 'KPN0001, KPN0002')).toBe('2 genomes (KPN0001, KPN0002)');
+    expect(strings.useAsSetConfirm('1', 1)).toBe('The current set becomes these 1 genome.');
+    expect(strings.setBarPhraseOne).toBe('genome in the current set');
+    expect(strings.counterGenomesOne).toBe('genome in current set');
+  });
+
+  it('reads a pending count as plural', () => {
+    expect(strings.facetOptionName('Animal', strings.valuePending, undefined)).toBe(
+      `Animal, ${strings.valuePending} genomes in the set`,
+    );
+  });
+});
+
+describe('year chip', () => {
+  it('names a single year once and a range by its bounds', () => {
+    expect(chipLabel({ key: 'year', value: { min: 2019, max: 2019 } }, undefined).text).toBe(
+      'year 2019',
+    );
+    expect(chipLabel({ key: 'year', value: { min: 2018, max: 2020 } }, undefined).text).toBe(
+      'year 2018–2020',
+    );
+    expect(chipLabel({ key: 'year', value: { min: 2018 } }, undefined).text).toBe('year ≥ 2018');
   });
 });

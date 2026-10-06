@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import shutil
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
+from pydantic import ValidationError
 
 from ingest import config
 
@@ -60,6 +63,76 @@ def test_unresolvable_palette_reference_fails(tmp_path: Path, repo_root: Path) -
     path.write_text(yaml.safe_dump(data), encoding="utf-8")
     with pytest.raises(config.ConfigError):
         config.load_design_tokens(tmp_path)
+
+
+def _config_copy(tmp_path: Path, repo_root: Path) -> Path:
+    for name in config.CONFIG_FILES:
+        shutil.copy(repo_root / "config" / name, tmp_path / name)
+    return tmp_path
+
+
+def _mutate(directory: Path, name: str, change: Callable[[dict[str, Any]], None]) -> None:
+    path = directory / name
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    change(data)
+    path.write_text(yaml.safe_dump(data), encoding="utf-8")
+
+
+def test_typography_declares_b612_families_and_two_weights() -> None:
+    typography = config.load_design_tokens().typography
+    assert set(typography.families) == {"sans", "mono"}
+    assert "'B612'" in typography.families["sans"]
+    assert "'B612 Mono'" in typography.families["mono"]
+    assert set(typography.weights.values()) == {400, 700}
+    assert typography.letter_spacing["tagline"] == "0"
+
+
+def test_serif_family_fails(tmp_path: Path, repo_root: Path) -> None:
+    directory = _config_copy(tmp_path, repo_root)
+    _mutate(
+        directory,
+        config.DESIGN_TOKENS_FILE,
+        lambda d: d["typography"]["families"].update(serif="'Source Serif 4', serif"),
+    )
+    with pytest.raises(ValidationError, match="sans and mono"):
+        config.load_design_tokens(directory)
+
+
+def test_weight_other_than_400_or_700_fails(tmp_path: Path, repo_root: Path) -> None:
+    directory = _config_copy(tmp_path, repo_root)
+    _mutate(
+        directory,
+        config.DESIGN_TOKENS_FILE,
+        lambda d: d["typography"]["weights"].update(semibold=600),
+    )
+    with pytest.raises(ValidationError, match="400 or 700"):
+        config.load_design_tokens(directory)
+
+
+def test_sequential_heatmap_has_seven_steps() -> None:
+    palette = config.load_palette()
+    heatmap = palette.sequential.heatmap
+    assert len(heatmap) == 7
+    assert heatmap[0] == palette.chrome["bar_track"]
+    assert heatmap[-1] == palette.chrome["ink"]
+
+
+def test_sequential_heatmap_rejects_a_bad_color(tmp_path: Path, repo_root: Path) -> None:
+    directory = _config_copy(tmp_path, repo_root)
+    _mutate(
+        directory,
+        config.PALETTE_FILE,
+        lambda d: d["sequential"]["heatmap"].__setitem__(0, "grey"),
+    )
+    with pytest.raises(ValidationError, match="hex color"):
+        config.load_palette(directory)
+
+
+def test_sequential_heatmap_rejects_a_missing_step(tmp_path: Path, repo_root: Path) -> None:
+    directory = _config_copy(tmp_path, repo_root)
+    _mutate(directory, config.PALETTE_FILE, lambda d: d["sequential"]["heatmap"].pop())
+    with pytest.raises(ValidationError):
+        config.load_palette(directory)
 
 
 def test_config_dir_override(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

@@ -4,7 +4,10 @@ Fields as §6.4: ``schema_version`` 0.1.0 (before the first release the
 schema version is not bumped, §2), ``release_id``, ``group_id``, ``created``,
 ``platform_name``, ``pipeline`` (the distinct versions of tool ``mgap`` in
 ``tool_version``), ``genome_count``, ``species`` (``has_pangenome`` false and
-``tree_ids`` empty until milestone 4a), ``tool_versions`` (every tool but
+``tree_ids`` empty until milestone 4a; ``annotation_versions``, contract 0.9
+§6.4, maps ``bakta`` and ``amrfinderplus`` to the distinct non-null
+``tool_version.database_version`` values of the species' genomes, sorted,
+an empty list for a tool that did not run), ``tool_versions`` (every tool but
 ``mgap``, distinct versions and database versions), ``embedding_models``
 (empty until milestone 6), ``curated_sets``, ``files`` (every file of the
 release but the manifest, the marker and group subdirectories, sorted by path,
@@ -22,12 +25,14 @@ from typing import Any
 
 import duckdb
 
+from ingest import mgap_layout as L
 from ingest.release.output import MARKER
 
 SCHEMA_VERSION = "0.1.0"
 PIPELINE_NAME = "gene2dis/mgap"
 PIPELINE_TOOL = "mgap"
 MANIFEST = "manifest.json"
+ANNOTATION_TOOLS = (L.AMRFINDERPLUS.tool, L.BAKTA.tool)
 
 
 def file_entries(root: Path, skip_dirs: set[str]) -> list[dict[str, Any]]:
@@ -53,6 +58,22 @@ def _distinct(values: list[Any]) -> list[str]:
     return sorted({str(v) for v in values if v is not None})
 
 
+def annotation_versions(con: duckdb.DuckDBPyConnection) -> dict[str, dict[str, list[str]]]:
+    """Per species, the annotation database versions of its genomes (contract §6.4)."""
+    tools = ", ".join(f"'{t}'" for t in ANNOTATION_TOOLS)
+    found: dict[str, dict[str, list[Any]]] = {}
+    for code, tool, database in con.execute(
+        f"""SELECT g.species_code, t.tool, t.database_version FROM tool_version t
+        JOIN genome g USING (genome_id) WHERE t.tool IN ({tools})"""
+    ).fetchall():
+        found.setdefault(code, {}).setdefault(tool, []).append(database)
+    codes = [r[0] for r in con.execute("SELECT DISTINCT species_code FROM genome").fetchall()]
+    return {
+        code: {tool: _distinct(found.get(code, {}).get(tool, [])) for tool in ANNOTATION_TOOLS}
+        for code in codes
+    }
+
+
 def manifest(
     con: duckdb.DuckDBPyConnection,
     root: Path,
@@ -74,6 +95,7 @@ def manifest(
         versions, databases = tools.setdefault(tool, ([], []))
         versions.append(version)
         databases.append(database)
+    versions = annotation_versions(con)
     species: list[dict[str, Any]] = [
         {
             "species_code": code,
@@ -81,6 +103,7 @@ def manifest(
             "genome_count": n,
             "has_pangenome": False,
             "tree_ids": [],
+            "annotation_versions": versions[code],
         }
         for code, name, n in con.execute(
             """SELECT g.species_code, s.canonical_name, count(*) FROM genome g

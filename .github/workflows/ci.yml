@@ -124,7 +124,7 @@ jobs:
       - name: Generated palette and tokens are current
         # pretest regenerates src/generated from config/; a difference means the
         # committed modules are stale against palette.yaml or design-tokens.yaml.
-        run: git diff --exit-code -- packages/web/src/generated/
+        run: git diff --exit-code -- packages/web/src/generated/ packages/web/public/favicon.svg
 
       - name: End-to-end tests
         run: pnpm --dir packages/web e2e

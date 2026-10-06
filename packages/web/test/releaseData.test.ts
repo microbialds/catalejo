@@ -1,5 +1,7 @@
 // The /data/ release server used by `vite` and `vite preview` (data contract
-// §6; requirements §10). DuckDB-WASM needs HEAD and byte ranges.
+// §6; requirements §10). DuckDB-WASM needs HEAD and byte ranges. The manifest
+// is at /data/manifest.json and every other file at
+// /data/r/<release_id>/<path> for the release the manifest names.
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -9,9 +11,11 @@ import { createServer, preview, type PreviewServer, type ViteDevServer } from 'v
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   createReleaseHandler,
+  IMMUTABLE,
   parseRange,
   releaseData,
   resolveReleaseDir,
+  STALE_HEADER,
 } from '../vite/releaseData';
 
 interface Answer {
@@ -139,7 +143,7 @@ describe('release handler', () => {
   });
 
   it('answers HEAD with the length and no body', async () => {
-    const answer = await request(port, 'HEAD', '/data/tables/genome.parquet');
+    const answer = await request(port, 'HEAD', '/data/r/synth/tables/genome.parquet');
     expect(answer.status).toBe(200);
     expect(answer.headers['content-type']).toBe('application/vnd.apache.parquet');
     expect(answer.headers['content-length']).toBe('256');
@@ -147,7 +151,7 @@ describe('release handler', () => {
   });
 
   it('answers a byte range with 206 and Content-Range', async () => {
-    const answer = await request(port, 'GET', '/data/tables/genome.parquet', {
+    const answer = await request(port, 'GET', '/data/r/synth/tables/genome.parquet', {
       Range: 'bytes=10-19',
     });
     expect(answer.status).toBe(206);
@@ -157,17 +161,21 @@ describe('release handler', () => {
   });
 
   it('answers suffix and open ranges', async () => {
-    const suffix = await request(port, 'GET', '/data/tables/genome.parquet', { Range: 'bytes=-4' });
+    const suffix = await request(port, 'GET', '/data/r/synth/tables/genome.parquet', {
+      Range: 'bytes=-4',
+    });
     expect(suffix.status).toBe(206);
     expect(suffix.headers['content-range']).toBe('bytes 252-255/256');
     expect([...suffix.body]).toEqual([252, 253, 254, 255]);
-    const open = await request(port, 'GET', '/data/tables/genome.parquet', { Range: 'bytes=254-' });
+    const open = await request(port, 'GET', '/data/r/synth/tables/genome.parquet', {
+      Range: 'bytes=254-',
+    });
     expect(open.headers['content-range']).toBe('bytes 254-255/256');
     expect([...open.body]).toEqual([254, 255]);
   });
 
   it('answers HEAD with a range as 206 without a body', async () => {
-    const answer = await request(port, 'HEAD', '/data/tables/genome.parquet', {
+    const answer = await request(port, 'HEAD', '/data/r/synth/tables/genome.parquet', {
       Range: 'bytes=0-3',
     });
     expect(answer.status).toBe(206);
@@ -177,14 +185,16 @@ describe('release handler', () => {
 
   it('answers 416 for an unsatisfiable or malformed range', async () => {
     for (const range of ['bytes=256-', 'bytes=abc']) {
-      const answer = await request(port, 'GET', '/data/tables/genome.parquet', { Range: range });
+      const answer = await request(port, 'GET', '/data/r/synth/tables/genome.parquet', {
+        Range: range,
+      });
       expect(answer.status).toBe(416);
       expect(answer.headers['content-range']).toBe('bytes */256');
     }
   });
 
   it('sends the whole file for several ranges', async () => {
-    const answer = await request(port, 'GET', '/data/tables/genome.parquet', {
+    const answer = await request(port, 'GET', '/data/r/synth/tables/genome.parquet', {
       Range: 'bytes=0-1,4-5',
     });
     expect(answer.status).toBe(200);
@@ -192,7 +202,7 @@ describe('release handler', () => {
   });
 
   it('serves gzip files as themselves, without Content-Encoding', async () => {
-    const answer = await request(port, 'GET', '/data/genomes/KPN/KPN0001/genome.fna.gz');
+    const answer = await request(port, 'GET', '/data/r/synth/genomes/KPN/KPN0001/genome.fna.gz');
     expect(answer.status).toBe(200);
     expect(answer.headers['content-type']).toBe('application/gzip');
     expect(answer.headers['content-encoding']).toBeUndefined();
@@ -200,7 +210,7 @@ describe('release handler', () => {
   });
 
   it('serves an empty file', async () => {
-    const answer = await request(port, 'GET', '/data/empty.json');
+    const answer = await request(port, 'GET', '/data/r/synth/empty.json');
     expect(answer.status).toBe(200);
     expect(answer.headers['content-length']).toBe('0');
   });
@@ -210,33 +220,107 @@ describe('release handler', () => {
     expect(answer.status).toBe(200);
   });
 
-  it.each(['/data/missing.json', '/data/tables', '/data/tables/', '/data/'])(
-    'answers 404 for %s',
+  it('sends the manifest with no-cache and the current release files as immutable', async () => {
+    const manifest = await request(port, 'GET', '/data/manifest.json');
+    expect(manifest.headers['cache-control']).toBe('no-cache');
+    expect(manifest.headers[STALE_HEADER.toLowerCase()]).toBeUndefined();
+    for (const method of ['GET', 'HEAD']) {
+      const file = await request(port, method, '/data/r/synth/tables/genome.parquet', {
+        Range: 'bytes=0-1',
+      });
+      expect(file.status).toBe(206);
+      expect(file.headers['cache-control']).toBe(IMMUTABLE);
+    }
+    const scopedManifest = await request(port, 'GET', '/data/r/synth/manifest.json');
+    expect(scopedManifest.status).toBe(200);
+    expect(scopedManifest.headers['cache-control']).toBe(IMMUTABLE);
+  });
+
+  it.each(['/data/r/2026-09/tables/genome.parquet', '/data/r/other/manifest.json'])(
+    'answers 404 with the stale header for another release, %s',
     async (requestPath) => {
-      const answer = await request(port, 'GET', requestPath);
-      expect(answer.status).toBe(404);
+      for (const method of ['GET', 'HEAD']) {
+        const answer = await request(port, method, requestPath);
+        expect(answer.status).toBe(404);
+        expect(answer.headers[STALE_HEADER.toLowerCase()]).toBe('stale');
+        expect(answer.headers['cache-control']).toBe('no-store');
+      }
     },
   );
 
   it.each([
+    '/data/missing.json',
+    '/data/tables/genome.parquet',
+    '/data/genomes/KPN/KPN0001/genome.fna.gz',
+    '/data/synth/tables/genome.parquet',
+    '/data/tables',
+    '/data/tables/',
+    '/data/',
+    '/data/r',
+    '/data/r/',
+    '/data/r/synth',
+    '/data/r/synth/missing.json',
+    '/data/r/synth/tables',
+    '/data/r/synth/tables/',
     '/data/../secret.txt',
-    '/data/%2e%2e/secret.txt',
-    '/data/..%2fsecret.txt',
-    '/data/tables/../../secret.txt',
     '/data/escape.txt',
+  ])('answers 404 without the stale header for %s', async (requestPath) => {
+    const answer = await request(port, 'GET', requestPath);
+    expect(answer.status).toBe(404);
+    expect(answer.headers[STALE_HEADER.toLowerCase()]).toBeUndefined();
+    expect(answer.body.toString()).not.toContain('outside');
+  });
+
+  it('follows a new release_id once the manifest changes', async () => {
+    const dir = path.join(tmp, 'moving');
+    mkdirSync(path.join(dir, 'tables'), { recursive: true });
+    writeFileSync(path.join(dir, 'tables', 'genome.parquet'), bytes);
+    writeFileSync(path.join(dir, 'manifest.json'), '{"release_id":"one"}');
+    const moving = http.createServer((req, res) => {
+      createReleaseHandler(dir)(req, res, () => {
+        res.statusCode = 418;
+        res.end();
+      });
+    });
+    const movingPort = await listen(moving);
+    expect((await request(movingPort, 'HEAD', '/data/r/one/tables/genome.parquet')).status).toBe(
+      200,
+    );
+    writeFileSync(path.join(dir, 'manifest.json'), '{"release_id":"second"}');
+    const old = await request(movingPort, 'HEAD', '/data/r/one/tables/genome.parquet');
+    expect(old.status).toBe(404);
+    expect(old.headers[STALE_HEADER.toLowerCase()]).toBe('stale');
+    expect((await request(movingPort, 'HEAD', '/data/r/second/tables/genome.parquet')).status).toBe(
+      200,
+    );
+    moving.close();
+  });
+
+  it.each([
+    '/data/r/synth/../secret.txt',
+    '/data/r/synth/%2e%2e/secret.txt',
+    '/data/r/synth/..%2fsecret.txt',
+    '/data/r/synth/tables/../../secret.txt',
+    '/data/r/synth/escape.txt',
   ])('rejects %s', async (requestPath) => {
     const answer = await request(port, 'GET', requestPath);
     expect(answer.status).toBe(403);
     expect(answer.body.toString()).not.toContain('outside');
   });
 
-  it.each(['/data/%E0%A4%A', '/data/a%00b', '/data/..%5csecret.txt'])(
-    'answers 400 for %s',
-    async (requestPath) => {
-      const answer = await request(port, 'GET', requestPath);
-      expect(answer.status).toBe(400);
-    },
-  );
+  it.each([
+    '/data/%E0%A4%A',
+    '/data/a%00b',
+    '/data/..%5csecret.txt',
+    '/data/r/synth/%E0%A4%A',
+    '/data/r/synth/a%00b',
+    '/data/r/synth/..%5csecret.txt',
+    '/data/r/..%2f..%2fsecret.txt/x',
+    '/data/r/./manifest.json',
+  ])('answers 400 for %s', async (requestPath) => {
+    const answer = await request(port, 'GET', requestPath);
+    expect(answer.status).toBe(400);
+  });
 
   it('answers 405 for other methods', async () => {
     const answer = await request(port, 'POST', '/data/manifest.json');
@@ -259,6 +343,7 @@ describe('release handler', () => {
     const missingPort = await listen(missing);
     expect((await request(missingPort, 'GET', '/data/manifest.json')).status).toBe(404);
     expect((await request(missingPort, 'HEAD', '/data/manifest.json')).status).toBe(404);
+    expect((await request(missingPort, 'GET', '/data/r/synth/manifest.json')).status).toBe(404);
     missing.close();
   });
 });
@@ -305,11 +390,17 @@ describe('plugin', () => {
     'serves /data/ ahead of the SPA fallback in %s',
     async (which) => {
       const port = ports()[which];
-      const range = await request(port, 'GET', '/data/tables/genome.parquet', {
+      const range = await request(port, 'GET', '/data/r/synth/tables/genome.parquet', {
         Range: 'bytes=0-1',
       });
       expect(range.status).toBe(206);
+      expect(range.headers['cache-control']).toBe(IMMUTABLE);
       expect([...range.body]).toEqual([0, 1]);
+      const stale = await request(port, 'GET', '/data/r/old/tables/genome.parquet', {
+        Accept: 'text/html',
+      });
+      expect(stale.status).toBe(404);
+      expect(stale.headers[STALE_HEADER.toLowerCase()]).toBe('stale');
       const missing = await request(port, 'GET', '/data/missing.json', { Accept: 'text/html' });
       expect(missing.status).toBe(404);
       expect(missing.body.toString()).not.toContain('root');
